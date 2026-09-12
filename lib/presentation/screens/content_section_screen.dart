@@ -205,7 +205,18 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     }
   }
 
+  /// Fluxo em 2 níveis: temporadas da série -> episódios da temporada.
   void _showEpisodesSheet(StreamItem series, List<StreamItem> episodes) {
+    final bySeason = <int, List<StreamItem>>{};
+    for (final ep in episodes) {
+      bySeason.putIfAbsent(ep.seasonNumber ?? 1, () => []).add(ep);
+    }
+    final seasons = bySeason.keys.toList()..sort();
+    for (final list in bySeason.values) {
+      list.sort((a, b) =>
+          (a.episodeNumber ?? 0).compareTo(b.episodeNumber ?? 0));
+    }
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.surface,
@@ -214,84 +225,157 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.7,
-          minChildSize: 0.5,
-          maxChildSize: 0.9,
-          expand: false,
-          builder: (_, scrollController) {
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.video_collection_rounded,
-                          color: AppColors.primary),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          series.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon:
-                            const Icon(Icons.close, color: Colors.white70),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1, color: AppColors.cardBorder),
-                Expanded(
-                  child: ListView.separated(
-                    controller: scrollController,
-                    itemCount: episodes.length,
-                    separatorBuilder: (context, index) => const Divider(
-                        height: 1, color: AppColors.cardBorder),
-                    itemBuilder: (context, idx) {
-                      final ep = episodes[idx];
-                      return ListTile(
-                        leading: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceLight,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            'E${ep.episodeNumber ?? idx + 1}',
-                            style: const TextStyle(
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
+        int? selectedSeason;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final atRoot = selectedSeason == null;
+            final seasonEps =
+                atRoot ? const <StreamItem>[] : bySeason[selectedSeason]!;
+            return DraggableScrollableSheet(
+              initialChildSize: 0.7,
+              minChildSize: 0.5,
+              maxChildSize: 0.9,
+              expand: false,
+              builder: (_, scrollController) {
+                return Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          if (!atRoot)
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back,
+                                  color: Colors.white70),
+                              onPressed: () => setSheetState(
+                                  () => selectedSeason = null),
+                            )
+                          else
+                            const Icon(Icons.video_collection_rounded,
+                                color: AppColors.primary),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              atRoot
+                                  ? series.name
+                                  : '${series.name} • T$selectedSeason',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                        ),
-                        title: Text(ep.name,
-                            style:
-                                const TextStyle(color: Colors.white)),
-                        subtitle: Text(ep.category,
-                            style: const TextStyle(
-                                color: AppColors.textMuted, fontSize: 12)),
-                        trailing: const Icon(Icons.play_circle_fill,
-                            color: AppColors.primary),
-                        onTap: () {
-                          Navigator.pop(context);
-                          _openPlayer(episodes, idx);
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
+                          IconButton(
+                            icon: const Icon(Icons.close,
+                                color: Colors.white70),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1, color: AppColors.cardBorder),
+                    Expanded(
+                      child: atRoot
+                          ? ListView.separated(
+                              controller: scrollController,
+                              itemCount: seasons.length,
+                              separatorBuilder: (context, index) =>
+                                  const Divider(
+                                      height: 1,
+                                      color: AppColors.cardBorder),
+                              itemBuilder: (context, idx) {
+                                final s = seasons[idx];
+                                final count = bySeason[s]!.length;
+                                return ListTile(
+                                  leading: Container(
+                                    padding:
+                                        const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.surfaceLight,
+                                      borderRadius:
+                                          BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      'T$s',
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                  title: Text('Temporada $s',
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600)),
+                                  subtitle: Text(
+                                      '$count episódio${count == 1 ? '' : 's'}',
+                                      style: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 12)),
+                                  trailing: const Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: Colors.white54),
+                                  onTap: () => setSheetState(
+                                      () => selectedSeason = s),
+                                );
+                              },
+                            )
+                          : ListView.separated(
+                              controller: scrollController,
+                              itemCount: seasonEps.length,
+                              separatorBuilder: (context, index) =>
+                                  const Divider(
+                                      height: 1,
+                                      color: AppColors.cardBorder),
+                              itemBuilder: (context, idx) {
+                                final ep = seasonEps[idx];
+                                return ListTile(
+                                  leading: Container(
+                                    padding:
+                                        const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.surfaceLight,
+                                      borderRadius:
+                                          BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      'E${ep.episodeNumber ?? idx + 1}',
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                  title: Text(ep.name,
+                                      style: const TextStyle(
+                                          color: Colors.white)),
+                                  subtitle: Text(
+                                      'Temporada $selectedSeason',
+                                      style: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 12)),
+                                  trailing: const Icon(
+                                      Icons.play_circle_fill,
+                                      color: AppColors.primary),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    _openPlayer(seasonEps, idx);
+                                  },
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                );
+              },
             );
           },
         );
@@ -1308,6 +1392,102 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
 
   // ----- VOD: grade de pôsteres (será refinada no próximo modelo) -----
 
+  /// Nível 1 das séries: listagem por nome (nº + logo + nome + favorito).
+  /// O toque abre as temporadas e depois os episódios.
+  Widget _buildSeriesList(List<StreamItem> items) {
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      itemCount: items.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return TvFocusable(
+          borderRadius: BorderRadius.circular(10),
+          onPressed: () => _openSeriesEpisodes(items, index),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.cardBorder),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 34,
+                  child: Text(
+                    '${index + 1}',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                if (item.logoUrl != null && item.logoUrl!.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.network(
+                      item.logoUrl!,
+                      width: 44,
+                      height: 44,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(Icons.movie_filter_rounded,
+                              color: Colors.white54),
+                    ),
+                  )
+                else
+                  const Icon(Icons.movie_filter_rounded,
+                      color: Colors.white54),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        item.category,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    item.isFavorite ? Icons.star : Icons.star_border,
+                    color: item.isFavorite
+                        ? AppColors.accentOrange
+                        : Colors.white54,
+                  ),
+                  onPressed: () =>
+                      widget.controller.toggleFavorite(item),
+                ),
+                const Icon(Icons.chevron_right_rounded,
+                    color: Colors.white54),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildVodScaffold() {
     return Scaffold(
       appBar: AppBar(
@@ -1433,7 +1613,9 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                             style: TextStyle(
                                 color: AppColors.textSecondary)),
                       )
-                    : GridView.builder(
+                    : _type == StreamType.series
+                        ? _buildSeriesList(items)
+                        : GridView.builder(
                         padding: const EdgeInsets.all(12),
                         gridDelegate:
                             SliverGridDelegateWithFixedCrossAxisCount(

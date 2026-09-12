@@ -68,18 +68,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
-        return Scaffold(
-          body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Settings',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 34)),
+        return CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.goBack):
+                _onBack,
+          },
+          child: FocusScope(
+            autofocus: true,
+            child: Scaffold(
+              body: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          TvFocusable(
+                            borderRadius:
+                                BorderRadius.circular(10),
+                            onPressed: _onBack,
+                            child: const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Icon(
+                                  Icons.arrow_back_rounded,
+                                  color: Colors.white,
+                                  size: 26),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text('Settings',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 34)),
+                        ],
+                      ),
                   const SizedBox(height: 16),
                   Expanded(
                     child: _isTv
@@ -103,9 +127,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
-        );
+        ),
+      ),
+    );
       },
     );
+  }
+
+  void _onBack() {
+    Navigator.of(context).maybePop();
   }
 
   Widget _buildMenu() {

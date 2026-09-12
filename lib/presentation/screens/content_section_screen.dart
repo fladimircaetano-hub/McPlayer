@@ -1475,6 +1475,161 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   // ----- VOD: grade de pôsteres (será refinada no próximo modelo) -----
 
   Widget _buildVodScaffold() {
+    final content = _isTv ? _buildVodTv() : _buildVodMobile();
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.goBack):
+            _onBack,
+      },
+      child: FocusScope(
+        autofocus: true,
+        child: Scaffold(
+          body: SafeArea(child: content),
+        ),
+      ),
+    );
+  }
+
+  /// VOD na TV como nas fotos: busca + categorias à esquerda,
+  /// título "All" + grade de pôsteres à direita.
+  Widget _buildVodTv() {
+    final cats = widget.controller.getCategories(_type);
+    final items = widget.controller.getFilteredItems(
+      _type,
+      selectedCategory: _selectedCategory,
+      onlyFavorites: _showOnlyFavorites,
+    );
+    final total = _type == StreamType.movie
+        ? widget.controller.totalMoviesCount
+        : widget.controller.totalSeriesCount;
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 340,
+            child: Column(
+              children: [
+                TextField(
+                  controller: _searchCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'Search',
+                    prefixIcon: Icon(Icons.search, size: 20),
+                  ),
+                  onChanged: _onSearchChanged,
+                ),
+                const SizedBox(height: 8),
+                _categoryRow(
+                  name: 'TODOS',
+                  count: total,
+                  selected: !_showOnlyFavorites &&
+                      (_selectedCategory == 'TODOS' ||
+                          _selectedCategory == null),
+                  autofocus: true,
+                  onFocus: (_) => _selectVodCategory('TODOS'),
+                  onTap: () {},
+                ),
+                _categoryRow(
+                  name: 'FAVORITOS ★',
+                  count: widget.controller.totalFavoritesCount,
+                  selected: _showOnlyFavorites,
+                  onFocus: (_) => setState(
+                      () => _showOnlyFavorites = true),
+                  onTap: () {},
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: cats.length,
+                    itemBuilder: (context, i) {
+                      final cat = cats[i];
+                      return _categoryRow(
+                        name: cat.name,
+                        count: cat.count,
+                        selected: !_showOnlyFavorites &&
+                            _selectedCategory == cat.name,
+                        onFocus: (_) =>
+                            _selectVodCategory(cat.name),
+                        onTap: () {},
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 4, vertical: 8),
+                  child: Text(
+                    _showOnlyFavorites
+                        ? 'Favoritos (${items.length})'
+                        : 'All',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 28),
+                  ),
+                ),
+                Expanded(child: _vodPosterGrid(items, 4)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _selectVodCategory(String name) {
+    if (_selectedCategory == name && !_showOnlyFavorites) return;
+    setState(() {
+      _selectedCategory = name;
+      _showOnlyFavorites = false;
+    });
+  }
+
+  /// Grade de pôsteres compartilhada (TV 4 colunas / mobile responsivo).
+  Widget _vodPosterGrid(List<StreamItem> items, int crossAxisCount) {
+    if (items.isEmpty) {
+      return const Center(
+        child: Text('Nenhum conteúdo encontrado',
+            style: TextStyle(color: AppColors.textSecondary)),
+      );
+    }
+    return GridView.builder(
+      padding: const EdgeInsets.all(12),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 12,
+        childAspectRatio: 0.65,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return StreamCard(
+          item: item,
+          isVod: true,
+          onTap: () {
+            if (_type == StreamType.series) {
+              _openSeriesEpisodes(items, index);
+            } else {
+              _openPlayer(items, index);
+            }
+          },
+          onToggleFavorite: () =>
+              widget.controller.toggleFavorite(item),
+        );
+      },
+    );
+  }
+
+  Widget _buildVodMobile() {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 8,
@@ -1593,39 +1748,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                 ),
               ),
               Expanded(
-                child: items.isEmpty
-                    ? const Center(
-                        child: Text('Nenhum conteúdo encontrado',
-                            style: TextStyle(
-                                color: AppColors.textSecondary)),
-                      )
-                    : GridView.builder(
-                        padding: const EdgeInsets.all(12),
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 0.65,
-                        ),
-                        itemCount: items.length,
-                        itemBuilder: (context, index) {
-                          final item = items[index];
-                          return StreamCard(
-                            item: item,
-                            isVod: true,
-                            onTap: () {
-                              if (_type == StreamType.series) {
-                                _openSeriesEpisodes(items, index);
-                              } else {
-                                _openPlayer(items, index);
-                              }
-                            },
-                            onToggleFavorite: () =>
-                                widget.controller.toggleFavorite(item),
-                          );
-                        },
-                      ),
+                child: _vodPosterGrid(items, crossAxisCount),
               ),
             ],
           );

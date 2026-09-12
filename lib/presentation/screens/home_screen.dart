@@ -60,27 +60,34 @@ class HomeScreen extends StatelessWidget {
         final isWide = size.width >= 900;
         final deviceId = controller.storageService.getDeviceId();
         final mac = controller.storageService.getDeviceMac();
+        final hidden =
+            controller.storageService.getHiddenSections();
+        final showCounts =
+            controller.storageService.getShowCounts();
 
         final buttons = [
-          _MenuEntry(
-            icon: Icons.live_tv_rounded,
-            label: 'TV ao vivo',
-            sub: '${controller.totalLiveCount}',
-            autofocus: true,
-            onTap: () => _openSection(context, StreamType.live),
-          ),
-          _MenuEntry(
-            icon: Icons.video_collection_rounded,
-            label: 'Filmes',
-            sub: '${controller.totalMoviesCount}',
-            onTap: () => _openSection(context, StreamType.movie),
-          ),
-          _MenuEntry(
-            icon: Icons.movie_filter_rounded,
-            label: 'Séries',
-            sub: '${controller.totalSeriesCount}',
-            onTap: () => _openSection(context, StreamType.series),
-          ),
+          if (!hidden.contains('live'))
+            _MenuEntry(
+              icon: Icons.live_tv_rounded,
+              label: 'TV ao vivo',
+              sub: showCounts ? '${controller.totalLiveCount}' : null,
+              autofocus: true,
+              onTap: () => _openSection(context, StreamType.live),
+            ),
+          if (!hidden.contains('movie'))
+            _MenuEntry(
+              icon: Icons.video_collection_rounded,
+              label: 'Filmes',
+              sub: showCounts ? '${controller.totalMoviesCount}' : null,
+              onTap: () => _openSection(context, StreamType.movie),
+            ),
+          if (!hidden.contains('series'))
+            _MenuEntry(
+              icon: Icons.movie_filter_rounded,
+              label: 'Séries',
+              sub: showCounts ? '${controller.totalSeriesCount}' : null,
+              onTap: () => _openSection(context, StreamType.series),
+            ),
           _MenuEntry(
             icon: Icons.library_music_rounded,
             label: 'Listas',

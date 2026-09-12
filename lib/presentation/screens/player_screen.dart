@@ -27,12 +27,14 @@ class PlayerScreen extends StatefulWidget {
   final StreamItem item;
   final List<StreamItem>? playlist;
   final int? initialIndex;
+  final bool keepScreenOn;
 
   const PlayerScreen({
     super.key,
     required this.item,
     this.playlist,
     this.initialIndex,
+    this.keepScreenOn = true,
   });
 
   @override
@@ -110,7 +112,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _open(_currentItem.streamUrl);
     }
 
-    WakelockPlus.enable();
+    if (widget.keepScreenOn) {
+      WakelockPlus.enable();
+    }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,

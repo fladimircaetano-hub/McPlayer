@@ -195,7 +195,8 @@ class IptvController extends ChangeNotifier {
       _updateStatus('Carregando canais, filmes e séries...');
       final results = await Future.wait(
         [
-          xtreamApi.getLiveStreams(account),
+          xtreamApi.getLiveStreams(account,
+              ext: storageService.getStreamFormat()),
           xtreamApi.getVodStreams(account),
           xtreamApi.getSeriesStreams(account),
         ],

@@ -12,6 +12,13 @@ class StorageService {
   static const String _keyRecentUrls = 'iptv_recent_urls';
   static const String _keyDeviceId = 'device_id';
   static const String _keyDeviceMac = 'device_mac_virtual';
+  static const String _keyStreamFormat = 'pref_stream_format';
+  static const String _keyPin = 'pref_pin';
+  static const String _keyHiddenSections = 'pref_hidden_sections';
+  static const String _keyShowCounts = 'pref_show_counts';
+  static const String _keyTmdb = 'pref_tmdb';
+  static const String _keyKeepScreenOn = 'pref_keep_screen_on';
+  static const String _keyLanguage = 'pref_language';
 
   final SharedPreferences _prefs;
 
@@ -125,5 +132,65 @@ class StorageService {
       unawaited(_prefs.setString(_keyDeviceMac, mac));
     }
     return mac;
+  }
+
+  // --- Preferências (Settings) ---
+
+  /// Formato de stream Xtream ao vivo: 'm3u8' ou 'mpegts'.
+  String getStreamFormat() =>
+      _prefs.getString(_keyStreamFormat) ?? 'm3u8';
+
+  Future<void> setStreamFormat(String v) async {
+    await _prefs.setString(
+        _keyStreamFormat, v == 'mpegts' ? 'mpegts' : 'm3u8');
+  }
+
+  String? getPin() => _prefs.getString(_keyPin);
+
+  Future<void> setPin(String pin) async {
+    await _prefs.setString(_keyPin, pin);
+  }
+
+  /// Seções ocultas no menu ('live', 'movie', 'series').
+  Set<String> getHiddenSections() {
+    return (_prefs.getStringList(_keyHiddenSections) ?? []).toSet();
+  }
+
+  Future<void> setSectionHidden(String key, bool hidden) async {
+    final s = getHiddenSections();
+    if (hidden) {
+      s.add(key);
+    } else {
+      s.remove(key);
+    }
+    await _prefs.setStringList(_keyHiddenSections, s.toList());
+  }
+
+  bool getShowCounts() => _prefs.getBool(_keyShowCounts) ?? true;
+
+  Future<void> setShowCounts(bool v) async {
+    await _prefs.setBool(_keyShowCounts, v);
+  }
+
+  bool getTmdbEnabled() => _prefs.getBool(_keyTmdb) ?? false;
+
+  Future<void> setTmdbEnabled(bool v) async {
+    await _prefs.setBool(_keyTmdb, v);
+  }
+
+  bool getKeepScreenOn() => _prefs.getBool(_keyKeepScreenOn) ?? true;
+
+  Future<void> setKeepScreenOn(bool v) async {
+    await _prefs.setBool(_keyKeepScreenOn, v);
+  }
+
+  String getLanguage() => _prefs.getString(_keyLanguage) ?? 'pt';
+
+  Future<void> setLanguage(String v) async {
+    await _prefs.setString(_keyLanguage, v == 'en' ? 'en' : 'pt');
+  }
+
+  Future<void> clearFavorites() async {
+    await _prefs.remove(_keyFavorites);
   }
 }

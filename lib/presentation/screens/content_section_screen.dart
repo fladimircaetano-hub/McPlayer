@@ -189,6 +189,8 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
           item: playlist[index],
           playlist: playlist,
           initialIndex: index,
+          keepScreenOn:
+              widget.controller.storageService.getKeepScreenOn(),
         ),
       ),
     );

@@ -154,8 +154,12 @@ class XtreamApi {
   }
 
   /// Busca todos os canais ao vivo e categorias.
+  /// [ext] vem da preferência (m3u8 ou m3u8/ts).
   /// Nunca lança: falha parcial retorna [] para não derrubar o login.
-  Future<List<StreamItem>> getLiveStreams(XtreamAccount account) async {
+  Future<List<StreamItem>> getLiveStreams(
+    XtreamAccount account, {
+    String ext = 'm3u8',
+  }) async {
     try {
       final endpoint = '${account.serverUrl}/player_api.php';
       final categoryMap =
@@ -190,8 +194,9 @@ class XtreamApi {
             (categoryId != null ? categoryMap[categoryId] : null) ??
             'Geral';
         
-        // URL da stream ao vivo HLS / TS
-        final streamUrl = '${account.serverUrl}/live/${account.username}/${account.password}/$streamId.m3u8';
+        // URL da stream ao vivo HLS (.m3u8) ou TS (.ts)
+        final suffix = ext == 'mpegts' ? 'ts' : 'm3u8';
+        final streamUrl = '${account.serverUrl}/live/${account.username}/${account.password}/$streamId.$suffix';
 
         items.add(
           StreamItem(

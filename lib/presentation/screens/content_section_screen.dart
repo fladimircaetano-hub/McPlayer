@@ -658,7 +658,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                   selected: _selectedCategory == 'TODOS',
                   autofocus: true,
                   onFocus: (_) => _selectCategory('TODOS'),
-                  onTap: () {},
+                  onTap: () => _selectCategory('TODOS'),
                 );
               }
               final cat = cats[i - 1];
@@ -667,7 +667,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                 count: cat.count,
                 selected: _selectedCategory == cat.name,
                 onFocus: (_) => _selectCategory(cat.name),
-                onTap: () {},
+                onTap: () => _selectCategory(cat.name),
               );
             },
           ),
@@ -702,7 +702,14 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                       item: item,
                       selected: selected,
                       onFocus: (_) => _selectChannel(i),
-                      onTap: () => _openPlayer(list, i),
+                      // 1º clique seleciona (preview); 2º abre o player.
+                      onTap: () {
+                        if (_selectedIndex == i) {
+                          _openPlayer(list, i);
+                        } else {
+                          _selectChannel(i);
+                        }
+                      },
                     );
                   },
                 ),
@@ -1494,17 +1501,26 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   /// título "All" + grade de pôsteres à direita.
   Widget _buildVodTv() {
     final cats = widget.controller.getCategories(_type);
-    final items = widget.controller.getFilteredItems(
+    var items = widget.controller.getFilteredItems(
       _type,
       selectedCategory: _selectedCategory,
       onlyFavorites: _showOnlyFavorites,
     );
+    if (_sortAZ) {
+      items = [...items]
+        ..sort((a, b) =>
+            a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    }
     final total = _type == StreamType.movie
         ? widget.controller.totalMoviesCount
         : widget.controller.totalSeriesCount;
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Row(
+    return Column(
+      children: [
+        _buildTvTopBar(),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
@@ -1528,15 +1544,14 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                           _selectedCategory == null),
                   autofocus: true,
                   onFocus: (_) => _selectVodCategory('TODOS'),
-                  onTap: () {},
+                  onTap: () => _selectVodCategory('TODOS'),
                 ),
                 _categoryRow(
                   name: 'FAVORITOS ★',
                   count: widget.controller.totalFavoritesCount,
                   selected: _showOnlyFavorites,
-                  onFocus: (_) => setState(
-                      () => _showOnlyFavorites = true),
-                  onTap: () {},
+                  onFocus: (_) => _showVodFavorites(),
+                  onTap: () => _showVodFavorites(),
                 ),
                 Expanded(
                   child: ListView.builder(
@@ -1550,7 +1565,8 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                             _selectedCategory == cat.name,
                         onFocus: (_) =>
                             _selectVodCategory(cat.name),
-                        onTap: () {},
+                        onTap: () =>
+                            _selectVodCategory(cat.name),
                       );
                     },
                   ),
@@ -1582,6 +1598,9 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
           ),
         ],
       ),
+        ),
+        ),
+      ],
     );
   }
 
@@ -1591,6 +1610,11 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       _selectedCategory = name;
       _showOnlyFavorites = false;
     });
+  }
+
+  void _showVodFavorites() {
+    if (_showOnlyFavorites) return;
+    setState(() => _showOnlyFavorites = true);
   }
 
   /// Grade de pôsteres compartilhada (TV 4 colunas / mobile responsivo).

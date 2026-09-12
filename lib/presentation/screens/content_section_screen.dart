@@ -194,9 +194,80 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     );
   }
 
-  void _openSeriesEpisodes(List<StreamItem> playlist, int index) async {
-    final series = playlist[index];
-    if (series.seriesId != null && widget.controller.currentAccount != null) {
+  /// Agrupa itens avulsos (ex.: "Nome S01 E01") por série.
+  /// Xtream entrega 1 item por série (com seriesId); M3U entrega 1 item
+  /// por episódio — aqui viram um grupo só na grade.
+  List<_SeriesGroup> _seriesGroups(List<StreamItem> items) {
+    final map = <String, _SeriesGroup>{};
+    for (final item in items) {
+      if (item.seriesId != null) {
+        map['xtream:${item.seriesId}'] = _SeriesGroup(
+          name: item.name,
+          logoUrl: item.logoUrl,
+          category: item.category,
+          seriesId: item.seriesId,
+          rep: item,
+          episodes: [item],
+        );
+        continue;
+      }
+      final key = _seriesKey(item.name);
+      final g = map[key];
+      if (g == null) {
+        map[key] = _SeriesGroup(
+          name: _seriesDisplayName(item.name),
+          logoUrl: item.logoUrl,
+          category: item.category,
+          seriesId: null,
+          rep: item,
+          episodes: [item],
+        );
+      } else {
+        g.episodes.add(item);
+        if ((g.logoUrl == null || g.logoUrl!.isEmpty) &&
+            item.logoUrl != null &&
+            item.logoUrl!.isNotEmpty) {
+          g.logoUrl = item.logoUrl;
+        }
+      }
+    }
+    return map.values.toList();
+  }
+
+  static final _seRegex = RegExp(r'[sS](\d{1,2})\s*[eE](\d{1,2})');
+  static final _tPrefixRegex =
+      RegExp(r'^[tT]\d+\s*:\s*[eE]\d+\s*[-–—]\s*');
+
+  String _seriesKey(String name) {
+    var k = name.replaceAll(_seRegex, '');
+    k = k.replaceAll(_tPrefixRegex, '');
+    k = k.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+    k = k.replaceAll(RegExp(r'\s*[-–—:|]\s*$'), '').trim();
+    if (k.isEmpty) k = name;
+    return k.toLowerCase();
+  }
+
+  String _seriesDisplayName(String name) {
+    var k = name.replaceAll(_seRegex, '');
+    k = k.replaceAll(_tPrefixRegex, '');
+    k = k.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+    k = k.replaceAll(RegExp(r'\s*[-–—:|]\s*$'), '').trim();
+    return k.isEmpty ? name : k;
+  }
+
+  /// Extrai (temporada, episódio) de nomes tipo "Nome S01 E01".
+  (int, int)? _parseSeasonEpisode(String name, int fallbackEp) {
+    final m = _seRegex.firstMatch(name);
+    if (m == null) return null;
+    final s = int.tryParse(m.group(1) ?? '') ?? 1;
+    final e = int.tryParse(m.group(2) ?? '') ?? fallbackEp;
+    return (s, e);
+  }
+
+  /// Toque numa série da grade: Xtream busca na API; M3U agrupa os
+  /// episódios da lista. Item único sem padrão de episódio toca direto.
+  Future<void> _openSeriesGroup(_SeriesGroup g) async {
+    if (g.seriesId != null && widget.controller.currentAccount != null) {
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -205,18 +276,35 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
         ),
       );
       final episodes =
-          await widget.controller.getSeriesEpisodes(series.seriesId!);
+          await widget.controller.getSeriesEpisodes(g.seriesId!);
       if (mounted) {
         Navigator.of(context).pop();
         if (episodes.isEmpty) {
-          _openPlayer(playlist, index);
+          _openPlayer(g.episodes, 0);
         } else {
-          _showEpisodesSheet(series, episodes);
+          _showEpisodesSheet(g.rep, episodes);
         }
       }
-    } else {
-      _openPlayer(playlist, index);
+      return;
     }
+    if (g.episodes.length == 1 &&
+        _parseSeasonEpisode(g.episodes.first.name, 1) == null) {
+      _openPlayer(g.episodes, 0);
+      return;
+    }
+    final eps = <StreamItem>[];
+    for (var i = 0; i < g.episodes.length; i++) {
+      final ep = g.episodes[i];
+      if (ep.seasonNumber != null) {
+        eps.add(ep);
+      } else {
+        final se = _parseSeasonEpisode(ep.name, i + 1);
+        eps.add(se == null
+            ? ep.copyWith(seasonNumber: 1, episodeNumber: i + 1)
+            : ep.copyWith(seasonNumber: se.$1, episodeNumber: se.$2));
+      }
+    }
+    _showEpisodesSheet(g.rep, eps);
   }
 
   /// Fluxo em 2 níveis: temporadas da série -> episódios da temporada.
@@ -1618,8 +1706,12 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   }
 
   /// Grade de pôsteres compartilhada (TV 4 colunas / mobile responsivo).
+  /// Em séries, cada cartão é uma série (episódios agrupados por nome).
   Widget _vodPosterGrid(List<StreamItem> items, int crossAxisCount) {
-    if (items.isEmpty) {
+    final isSeries = _type == StreamType.series;
+    final groups = isSeries ? _seriesGroups(items) : null;
+    final count = isSeries ? groups!.length : items.length;
+    if (count == 0) {
       return const Center(
         child: Text('Nenhum conteúdo encontrado',
             style: TextStyle(color: AppColors.textSecondary)),
@@ -1633,19 +1725,35 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
         mainAxisSpacing: 12,
         childAspectRatio: 0.65,
       ),
-      itemCount: items.length,
+      itemCount: count,
       itemBuilder: (context, index) {
+        if (isSeries) {
+          final g = groups![index];
+          final card = StreamItem(
+            id: 'group:${g.name}',
+            name: g.name,
+            streamUrl: g.rep.streamUrl,
+            logoUrl: g.logoUrl,
+            category: g.episodes.length == 1
+                ? g.category
+                : '${g.episodes.length} episódios',
+            streamType: StreamType.series,
+            seriesId: g.seriesId,
+            isFavorite: g.rep.isFavorite,
+          );
+          return StreamCard(
+            item: card,
+            isVod: true,
+            onTap: () => _openSeriesGroup(g),
+            onToggleFavorite: () =>
+                widget.controller.toggleFavorite(g.rep),
+          );
+        }
         final item = items[index];
         return StreamCard(
           item: item,
           isVod: true,
-          onTap: () {
-            if (_type == StreamType.series) {
-              _openSeriesEpisodes(items, index);
-            } else {
-              _openPlayer(items, index);
-            }
-          },
+          onTap: () => _openPlayer(items, index),
           onToggleFavorite: () =>
               widget.controller.toggleFavorite(item),
         );
@@ -1780,4 +1888,23 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       ),
     );
   }
+}
+
+/// Uma série na grade: 1 item Xtream ou N episódios M3U agrupados.
+class _SeriesGroup {
+  final String name;
+  String? logoUrl;
+  final String category;
+  final int? seriesId;
+  final StreamItem rep;
+  final List<StreamItem> episodes;
+
+  _SeriesGroup({
+    required this.name,
+    required this.logoUrl,
+    required this.category,
+    required this.seriesId,
+    required this.rep,
+    required this.episodes,
+  });
 }

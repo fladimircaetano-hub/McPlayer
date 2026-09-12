@@ -130,6 +130,21 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     return list[_selectedIndex.clamp(0, list.length - 1)];
   }
 
+  EpgProgram? get _liveProgram {
+    for (final p in _epg) {
+      if (p.isLiveAt(_now)) return p;
+    }
+    return null;
+  }
+
+  EpgProgram? get _nextProgram {
+    if (_epg.isEmpty) return null;
+    final live = _liveProgram;
+    if (live == null) return _epg.first;
+    final i = _epg.indexOf(live);
+    return (i >= 0 && i + 1 < _epg.length) ? _epg[i + 1] : null;
+  }
+
   Future<void> _loadEpg() async {
     final ch = _selectedChannel;
     if (ch == null) {
@@ -946,6 +961,8 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                                       fontWeight: FontWeight.w900,
                                       fontSize: 18)),
                               const SizedBox(width: 12),
+                              _logoThumb(ch.logoUrl, 52, 32),
+                              const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment:
@@ -959,12 +976,31 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                                             color: Colors.white,
                                             fontWeight: FontWeight.bold,
                                             fontSize: 16)),
-                                    Text(ch.category,
-                                        maxLines: 1,
-                                        style: const TextStyle(
-                                            color:
-                                                AppColors.textSecondary,
-                                            fontSize: 12)),
+                                    if (_liveProgram != null)
+                                      Text(
+                                          '${_liveProgram!.rangeLabel()}  ${_liveProgram!.title}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12)),
+                                    if (_nextProgram != null &&
+                                        _nextProgram != _liveProgram)
+                                      Text(
+                                          '${_nextProgram!.rangeLabel()}  ${_nextProgram!.title}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                              color:
+                                                  AppColors.textSecondary,
+                                              fontSize: 12)),
+                                    if (_liveProgram == null)
+                                      Text(ch.category,
+                                          maxLines: 1,
+                                          style: const TextStyle(
+                                              color:
+                                                  AppColors.textSecondary,
+                                              fontSize: 12)),
                                   ],
                                 ),
                               ),
@@ -1114,28 +1150,9 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     const days = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
     return Column(
       children: [
-        Container(
-          width: double.infinity,
-          padding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.cardBorder),
-          ),
-          child: Text(
-            _clockLabel,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-                fontSize: 18),
-          ),
-        ),
-        const SizedBox(height: 8),
         Expanded(
           child: ListView.builder(
-            itemCount: 7,
+            itemCount: 10,
             itemBuilder: (context, i) {
               final day = DateTime(_now.year, _now.month, _now.day)
                   .add(Duration(days: i));

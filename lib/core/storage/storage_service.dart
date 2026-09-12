@@ -79,6 +79,12 @@ class StorageService {
     await _prefs.setStringList(_keyRecentUrls, recents);
   }
 
+  Future<void> removeRecentUrl(String url) async {
+    final recents = getRecentUrls();
+    recents.remove(url);
+    await _prefs.setStringList(_keyRecentUrls, recents);
+  }
+
   // --- Xtream Codes Account ---
   XtreamAccount? getXtreamAccount() {
     final raw = _prefs.getString(_keyXtreamAccount);

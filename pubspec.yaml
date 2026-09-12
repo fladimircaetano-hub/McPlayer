@@ -43,6 +43,7 @@ dependencies:
   screen_brightness: ^2.0.0
   cached_network_image: ^3.4.1
   google_fonts: ^6.2.1
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

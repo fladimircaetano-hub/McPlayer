@@ -380,4 +380,7 @@ class IptvController extends ChangeNotifier {
   void _showOnlyFavoritesReset() {
     // Estado de filtro fica na HomeScreen; aqui só garantimos busca limpa.
   }
+
+  /// Força reconstrução das telas (ex.: após remover URL recente).
+  void refresh() => notifyListeners();
 }

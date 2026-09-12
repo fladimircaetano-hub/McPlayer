@@ -41,8 +41,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   EpgService get _epgService => widget.controller.epgService;
   int _epgToken = 0;
 
-  // Navegação da coluna esquerda (ao vivo): categorias -> canais
-  bool _inChannels = false;
+  // Navegação do guia (ao vivo): categorias filtram, canais dão preview.
   String? _selectedCategory;
   int _selectedIndex = 0;
 
@@ -410,11 +409,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   }
 
   void _onBack() {
-    if (_inChannels) {
-      setState(() => _inChannels = false);
-    } else {
-      Navigator.of(context).maybePop();
-    }
+    Navigator.of(context).maybePop();
   }
 
   String get _clockLabel =>
@@ -427,23 +422,95 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       children: [
         _buildTvTopBar(),
         if (_isSearching) _buildSearchRow(),
+        _buildGuideHeader(),
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(width: 300, child: _buildLeftNav()),
+                SizedBox(width: 250, child: _buildCategoryCol()),
+                const SizedBox(width: 12),
+                SizedBox(width: 300, child: _buildChannelCol()),
                 const SizedBox(width: 12),
                 Expanded(child: _buildCenter()),
                 const SizedBox(width: 12),
-                SizedBox(width: 150, child: _buildRightRail()),
+                SizedBox(width: 120, child: _buildRightRail()),
               ],
             ),
           ),
         ),
       ],
     );
+  }
+
+  /// Faixa "All + total + Sort ... data" como no modelo.
+  Widget _buildGuideHeader() {
+    final total = widget.controller.totalLiveCount;
+    final date =
+        '${_now.year}/${_now.month.toString().padLeft(2, '0')}/${_now.day.toString().padLeft(2, '0')}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Row(
+        children: [
+          const Icon(Icons.grid_view_rounded,
+              color: Colors.white, size: 20),
+          const SizedBox(width: 10),
+          const Text('All',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16)),
+          const SizedBox(width: 24),
+          Text('$total',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16)),
+          const SizedBox(width: 16),
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onPressed: _toggleSort,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.cardBorder),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.sort_rounded,
+                      color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Text('Sort${_sortAZ ? ' ✓' : ''}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+          const Spacer(),
+          Text(date,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16)),
+        ],
+      ),
+    );
+  }
+
+  void _toggleSort() {
+    setState(() {
+      _sortAZ = !_sortAZ;
+      _selectedIndex = 0;
+    });
+    _loadEpg();
   }
 
   Widget _buildTvTopBar() {
@@ -460,13 +527,13 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                   _colorAction(
                     color: Colors.redAccent,
                     label: 'Organizar${_sortAZ ? ' ✓' : ''}',
-                    onTap: () => setState(() => _sortAZ = !_sortAZ),
+                    onTap: _toggleSort,
                   ),
                   const SizedBox(width: 16),
                   _colorAction(
                     color: AppColors.accentGreen,
                     label: 'Categoria',
-                    onTap: () => setState(() => _inChannels = false),
+                    onTap: () => _selectCategory('TODOS'),
                   ),
                   const SizedBox(width: 16),
                   _colorAction(
@@ -555,47 +622,47 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     );
   }
 
-  Widget _buildLeftNav() {
-    if (!_inChannels) {
-      final cats = _cats;
-      return Column(
-        children: [
-          _navHeader(
-              icon: Icons.grid_view_rounded,
-              title: 'CATEGORIAS',
-              count: null),
-          const SizedBox(height: 8),
-          Expanded(
-            child: ListView.builder(
-              itemCount: cats.length + 1,
-              itemBuilder: (context, i) {
-                if (i == 0) {
-                  return _categoryRow(
-                    name: 'TODOS',
-                    count: widget.controller.totalLiveCount,
-                    selected: _selectedCategory == 'TODOS',
-                    autofocus: true,
-                    onFocus: (_) => _selectCategory('TODOS'),
-                    onTap: () =>
-                        setState(() => _inChannels = true),
-                  );
-                }
-                final cat = cats[i - 1];
+  /// Coluna 1: categorias com contagem (foco seleciona e filtra).
+  Widget _buildCategoryCol() {
+    final cats = _cats;
+    return Column(
+      children: [
+        _navHeader(
+            icon: Icons.grid_view_rounded,
+            title: 'CATEGORIAS',
+            count: null),
+        const SizedBox(height: 8),
+        Expanded(
+          child: ListView.builder(
+            itemCount: cats.length + 1,
+            itemBuilder: (context, i) {
+              if (i == 0) {
                 return _categoryRow(
-                  name: cat.name,
-                  count: cat.count,
-                  selected: _selectedCategory == cat.name,
-                  onFocus: (_) => _selectCategory(cat.name),
-                  onTap: () =>
-                      setState(() => _inChannels = true),
+                  name: 'TODOS',
+                  count: widget.controller.totalLiveCount,
+                  selected: _selectedCategory == 'TODOS',
+                  autofocus: true,
+                  onFocus: (_) => _selectCategory('TODOS'),
+                  onTap: () {},
                 );
-              },
-            ),
+              }
+              final cat = cats[i - 1];
+              return _categoryRow(
+                name: cat.name,
+                count: cat.count,
+                selected: _selectedCategory == cat.name,
+                onFocus: (_) => _selectCategory(cat.name),
+                onTap: () {},
+              );
+            },
           ),
-        ],
-      );
-    }
+        ),
+      ],
+    );
+  }
 
+  /// Coluna 2: canais numerados da categoria (foco troca preview + EPG).
+  Widget _buildChannelCol() {
     final list = _channels();
     return Column(
       children: [
@@ -603,7 +670,6 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
           icon: Icons.grid_view_rounded,
           title: (_selectedCategory ?? '').toUpperCase(),
           count: list.length,
-          onBack: () => setState(() => _inChannels = false),
         ),
         const SizedBox(height: 8),
         Expanded(
@@ -620,7 +686,6 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                       number: i + 1,
                       item: item,
                       selected: selected,
-                      autofocus: i == 0,
                       onFocus: (_) => _selectChannel(i),
                       onTap: () => _openPlayer(list, i),
                     );

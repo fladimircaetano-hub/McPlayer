@@ -1392,102 +1392,6 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
 
   // ----- VOD: grade de pôsteres (será refinada no próximo modelo) -----
 
-  /// Nível 1 das séries: listagem por nome (nº + logo + nome + favorito).
-  /// O toque abre as temporadas e depois os episódios.
-  Widget _buildSeriesList(List<StreamItem> items) {
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      itemCount: items.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return TvFocusable(
-          borderRadius: BorderRadius.circular(10),
-          onPressed: () => _openSeriesEpisodes(items, index),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceLight.withValues(alpha: 0.6),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.cardBorder),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 34,
-                  child: Text(
-                    '${index + 1}',
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                if (item.logoUrl != null && item.logoUrl!.isNotEmpty)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Image.network(
-                      item.logoUrl!,
-                      width: 44,
-                      height: 44,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const Icon(Icons.movie_filter_rounded,
-                              color: Colors.white54),
-                    ),
-                  )
-                else
-                  const Icon(Icons.movie_filter_rounded,
-                      color: Colors.white54),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        item.category,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    item.isFavorite ? Icons.star : Icons.star_border,
-                    color: item.isFavorite
-                        ? AppColors.accentOrange
-                        : Colors.white54,
-                  ),
-                  onPressed: () =>
-                      widget.controller.toggleFavorite(item),
-                ),
-                const Icon(Icons.chevron_right_rounded,
-                    color: Colors.white54),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildVodScaffold() {
     return Scaffold(
       appBar: AppBar(
@@ -1613,9 +1517,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                             style: TextStyle(
                                 color: AppColors.textSecondary)),
                       )
-                    : _type == StreamType.series
-                        ? _buildSeriesList(items)
-                        : GridView.builder(
+                    : GridView.builder(
                         padding: const EdgeInsets.all(12),
                         gridDelegate:
                             SliverGridDelegateWithFixedCrossAxisCount(

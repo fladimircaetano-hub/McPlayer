@@ -1,16 +1,122 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../core/activation/activation_models.dart';
+import '../../core/activation/activation_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/tv_focusable.dart';
 import 'add_playlist_screen.dart';
 import 'home_screen.dart';
 
-/// Tela "Playlist" conforme modelo: título + botão +,
+/// Tela "Playlist" — entrada do app: título + botão +,
 /// linhas numeradas (ativa em branco) com lixeira, rodapé do aparelho.
-class ListsScreen extends StatelessWidget {
+///
+/// Também é o ponto da ativação remota: registra a chave no Dashboard
+/// e aplica a lista aprovada sozinha (polling em background).
+class ListsScreen extends StatefulWidget {
   final IptvController controller;
 
   const ListsScreen({super.key, required this.controller});
+
+  @override
+  State<ListsScreen> createState() => _ListsScreenState();
+}
+
+class _ListsScreenState extends State<ListsScreen> {
+  IptvController get controller => widget.controller;
+
+  // Ativação remota via Dashboard (Supabase). Desligada se não configurada.
+  final ActivationService _activation = ActivationService();
+  Timer? _pollTimer;
+  String? _activationNote;
+  bool _autoActivating = false;
+
+  late final String _deviceId;
+  late final String _deviceMac;
+
+  @override
+  void initState() {
+    super.initState();
+    _deviceId = controller.storageService.getDeviceId();
+    _deviceMac = controller.storageService.getDeviceMac();
+    _setupActivation();
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Ativação remota: registra a chave no Dashboard e observa aprovação.
+  /// Sem configuração no ActivationConfig, não faz nada.
+  Future<void> _setupActivation() async {
+    if (!_activation.isEnabled) return;
+    final result = await _activation.checkIn(
+      deviceId: _deviceId,
+      mac: _deviceMac,
+    );
+    if (!mounted) return;
+    if (result.status == ActivationStatus.approved &&
+        result.listData != null) {
+      _applyRemoteApproval(result.listData!);
+      return;
+    }
+    if (result.status == ActivationStatus.rejected) {
+      setState(() => _activationNote = 'Dispositivo rejeitado no painel.');
+      return;
+    }
+    setState(() => _activationNote = 'Aguardando aprovação no painel…');
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _pollActivation(),
+    );
+  }
+
+  Future<void> _pollActivation() async {
+    if (!mounted || _autoActivating) return;
+    final result = await _activation.fetchStatus(_deviceId);
+    if (!mounted || _autoActivating) return;
+    if (result.status == ActivationStatus.approved &&
+        result.listData != null) {
+      _pollTimer?.cancel();
+      _applyRemoteApproval(result.listData!);
+    } else if (result.status == ActivationStatus.rejected) {
+      _pollTimer?.cancel();
+      setState(() => _activationNote = 'Dispositivo rejeitado no painel.');
+    }
+  }
+
+  /// Aplica a lista vinculada pelo operador e entra direto.
+  Future<void> _applyRemoteApproval(ActivationListData list) async {
+    _autoActivating = true;
+    if (mounted) {
+      setState(() => _activationNote = 'Aprovado! Carregando sua lista…');
+    }
+    bool success = false;
+    if (list.isXtream &&
+        list.serverUrl != null &&
+        list.username != null &&
+        list.password != null) {
+      success = await controller.loginXtream(
+        serverUrl: list.serverUrl!,
+        username: list.username!,
+        password: list.password!,
+      );
+    } else if (list.isM3u && list.url != null && list.url!.isNotEmpty) {
+      success = await controller.loadFromM3uUrl(list.url!);
+    }
+    if (success && mounted) {
+      _openActive();
+    } else {
+      _autoActivating = false;
+      if (mounted) {
+        setState(() => _activationNote =
+            'Aprovação recebida, mas a lista falhou. Confira no painel.');
+      }
+    }
+  }
 
   Future<void> _loadRecent(BuildContext context, String url) async {
     final ok = await controller.loadFromM3uUrl(url);
@@ -31,7 +137,7 @@ class ListsScreen extends StatelessWidget {
     await controller.logout();
   }
 
-  Future<void> _openActive(BuildContext context) async {
+  void _openActive() {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
           builder: (_) => HomeScreen(controller: controller)),
@@ -65,9 +171,6 @@ class ListsScreen extends StatelessWidget {
         for (final u in recents) {
           rows.add(_PlaylistRow(name: u, url: u, isXtream: false));
         }
-
-        final deviceId = storage.getDeviceId();
-        final mac = storage.getDeviceMac();
 
         return Scaffold(
           body: SafeArea(
@@ -115,6 +218,27 @@ class ListsScreen extends StatelessWidget {
                           ),
                         ],
                       ),
+                      if (_activationNote != null)
+                        Container(
+                          margin: const EdgeInsets.only(top: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: AppColors.primary
+                                    .withValues(alpha: 0.4)),
+                          ),
+                          child: Text(
+                            _activationNote!,
+                            style: const TextStyle(
+                              color: AppColors.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 20),
                       if (rows.isEmpty)
                         const Center(
@@ -141,7 +265,7 @@ class ListsScreen extends StatelessWidget {
                                         BorderRadius.circular(10),
                                     onPressed: () {
                                       if (i == 0 && hasActive) {
-                                        _openActive(context);
+                                        _openActive();
                                       } else if (row.url != null) {
                                         _loadRecent(context, row.url!);
                                       }
@@ -235,7 +359,7 @@ class ListsScreen extends StatelessWidget {
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13)),
                           ),
-                          Text('Device key: $deviceId',
+                          Text('Device key: $_deviceId',
                               style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
@@ -244,7 +368,7 @@ class ListsScreen extends StatelessWidget {
                       ),
                       Align(
                         alignment: Alignment.centerRight,
-                        child: Text('Mac Address: $mac',
+                        child: Text('Mac Address: $_deviceMac',
                             style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w600,

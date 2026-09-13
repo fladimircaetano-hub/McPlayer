@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../core/theme/app_theme.dart';
@@ -5,8 +6,8 @@ import '../controllers/iptv_controller.dart';
 import '../widgets/tv_focusable.dart';
 import 'home_screen.dart';
 
-/// Tela "Add playlist" conforme modelo: Code/Username/Password,
-/// Cancel/Ok, ajuda do site + QR, rodapé do aparelho.
+/// Tela "Add playlist": 2 modos (Xtream Codes | Lista M3U),
+/// ajuda do site + QR, rodapé do aparelho.
 class AddPlaylistScreen extends StatefulWidget {
   final IptvController controller;
 
@@ -17,10 +18,17 @@ class AddPlaylistScreen extends StatefulWidget {
 }
 
 class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
+  bool _isXtream = true;
+
+  // Xtream
   final _codeCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _obscure = true;
+
+  // M3U
+  final _urlCtrl = TextEditingController();
+
   bool _sending = false;
 
   @override
@@ -28,10 +36,30 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
     _codeCtrl.dispose();
     _userCtrl.dispose();
     _passCtrl.dispose();
+    _urlCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  void _goHome() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+          builder: (_) => HomeScreen(controller: widget.controller)),
+      (r) => false,
+    );
+  }
+
+  void _snack(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: error ? Colors.redAccent.shade700 : null,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _submitXtream() async {
     // Guarda contra duplo toque / Enter repetido no D-pad: loginXtream
     // concorrente duplica EPG em background e navegação.
     if (_sending) return;
@@ -39,12 +67,7 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
     final user = _userCtrl.text.trim();
     final pass = _passCtrl.text.trim();
     if (code.isEmpty || user.isEmpty || pass.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Preencha Code, Username e Password'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _snack('Preencha Code, Username e Password');
       return;
     }
     FocusScope.of(context).unfocus();
@@ -57,19 +80,58 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
     if (!mounted) return;
     setState(() => _sending = false);
     if (ok) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-            builder: (_) => HomeScreen(controller: widget.controller)),
-        (r) => false,
-      );
+      _goHome();
     } else if (widget.controller.errorMessage != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(widget.controller.errorMessage!),
-          backgroundColor: Colors.redAccent.shade700,
-          behavior: SnackBarBehavior.floating,
-        ),
+      _snack(widget.controller.errorMessage!, error: true);
+    }
+  }
+
+  Future<void> _submitM3uUrl() async {
+    if (_sending) return;
+    final url = _urlCtrl.text.trim();
+    if (url.isEmpty) {
+      _snack('Informe a URL da lista .m3u ou .m3u8');
+      return;
+    }
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https') ||
+        !uri.host.contains('.')) {
+      _snack('URL inválida. Use http(s)://seu-servidor/playlist.m3u8');
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() => _sending = true);
+    final ok = await widget.controller.loadFromM3uUrl(url);
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (ok) {
+      _goHome();
+    } else if (widget.controller.errorMessage != null) {
+      _snack(widget.controller.errorMessage!, error: true);
+    }
+  }
+
+  Future<void> _pickM3uFile() async {
+    if (_sending) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['m3u', 'm3u8', 'txt'],
       );
+      final path = result?.files.single.path;
+      if (path == null) return;
+      setState(() => _sending = true);
+      final ok = await widget.controller.loadFromLocalFile(path);
+      if (!mounted) return;
+      setState(() => _sending = false);
+      if (ok) {
+        _goHome();
+      } else if (widget.controller.errorMessage != null) {
+        _snack(widget.controller.errorMessage!, error: true);
+      }
+    } catch (e) {
+      _snack('Erro ao selecionar arquivo: ${e.toString()}', error: true);
     }
   }
 
@@ -92,22 +154,45 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
                       color: Colors.white,
                       fontWeight: FontWeight.w900,
                       fontSize: 30)),
-              const SizedBox(height: 28),
-              _field(_codeCtrl, 'Code', light: true),
-              const SizedBox(height: 12),
-              _field(_userCtrl, 'Username'),
-              const SizedBox(height: 12),
-              _field(_passCtrl, 'Password',
-                  obscure: _obscure,
-                  onToggleObscure: () =>
-                      setState(() => _obscure = !_obscure)),
+              const SizedBox(height: 16),
+              _modeToggle(),
+              const SizedBox(height: 16),
+              if (_isXtream) ...[
+                _field(_codeCtrl, 'Code', light: true),
+                const SizedBox(height: 12),
+                _field(_userCtrl, 'Username'),
+                const SizedBox(height: 12),
+                _field(_passCtrl, 'Password',
+                    obscure: _obscure,
+                    onToggleObscure: () =>
+                        setState(() => _obscure = !_obscure)),
+              ] else ...[
+                _field(_urlCtrl, 'http://servidor.com/playlist.m3u8'),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _pillButton('Carregar URL', _submitM3uUrl,
+                          primary: true, loading: _sending),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _pillButton(
+                          'Arquivo Local', _pickM3uFile,
+                          loading: _sending),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _pillButton('Cancel', () => Navigator.of(context).pop()),
                   const SizedBox(width: 16),
-                  _pillButton('Ok', _submit, loading: _sending),
+                  if (_isXtream)
+                    _pillButton('Ok', _submitXtream,
+                        primary: true, loading: _sending),
                 ],
               ),
               const Spacer(),
@@ -179,6 +264,48 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
     );
   }
 
+  /// Alternador Xtream | M3U (segmentado simples, focável na TV).
+  Widget _modeToggle() {
+    Widget seg(String label, bool selected, VoidCallback onTap) {
+      return Expanded(
+        child: TvFocusable(
+          borderRadius: BorderRadius.circular(10),
+          onPressed: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? AppColors.primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: selected ? Colors.black : Colors.white70,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13)),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: Row(
+        children: [
+          seg('Xtream Codes', _isXtream,
+              () => setState(() => _isXtream = true)),
+          seg('Lista M3U', !_isXtream,
+              () => setState(() => _isXtream = false)),
+        ],
+      ),
+    );
+  }
+
   Widget _field(
     TextEditingController ctrl,
     String hint, {
@@ -215,7 +342,7 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
   }
 
   Widget _pillButton(String label, VoidCallback onTap,
-      {bool loading = false}) {
+      {bool loading = false, bool primary = false}) {
     return TvFocusable(
       borderRadius: BorderRadius.circular(20),
       onPressed: loading ? () {} : onTap,
@@ -223,7 +350,7 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
         padding:
             const EdgeInsets.symmetric(horizontal: 36, vertical: 10),
         decoration: BoxDecoration(
-          color: AppColors.surfaceLight,
+          color: primary ? AppColors.primary : AppColors.surfaceLight,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: AppColors.cardBorder),
         ),
@@ -235,8 +362,10 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
                     strokeWidth: 2, color: Colors.white),
               )
             : Text(label,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w600)),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: primary ? Colors.black : Colors.white,
+                    fontWeight: FontWeight.w600)),
       ),
     );
   }

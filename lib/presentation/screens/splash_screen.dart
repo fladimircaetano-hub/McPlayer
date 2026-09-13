@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/app_logo.dart';
-import 'entry_screen.dart';
 import 'home_screen.dart';
+import 'lists_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   final IptvController controller;
@@ -71,7 +71,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => EntryScreen(controller: widget.controller)),
+        MaterialPageRoute(builder: (_) => ListsScreen(controller: widget.controller)),
       );
     }
   }

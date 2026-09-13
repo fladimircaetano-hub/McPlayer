@@ -4,7 +4,7 @@ import '../../core/storage/storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/tv_focusable.dart';
-import 'entry_screen.dart';
+import 'lists_screen.dart';
 
 /// Tela "Settings" conforme modelo: menu à esquerda, painel à direita.
 ///
@@ -50,7 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
-            builder: (_) => EntryScreen(controller: widget.controller)),
+            builder: (_) => ListsScreen(controller: widget.controller)),
         (r) => false,
       );
     }

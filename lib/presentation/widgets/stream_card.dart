@@ -130,22 +130,22 @@ class StreamCard extends StatelessWidget {
   // Layout estilo Canal Ao Vivo (Horizontal/Card com Logo)
   Widget _buildLiveLayout(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       child: Row(
         children: [
-          // Logo do Canal
+          // Logo do Canal (compacto, só identificação)
           Container(
-            width: 58,
-            height: 58,
+            width: 28,
+            height: 28,
             decoration: BoxDecoration(
               color: AppColors.surfaceLight,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(6),
               border: Border.all(color: AppColors.cardBorder),
             ),
-            padding: const EdgeInsets.all(4),
+            padding: const EdgeInsets.all(2),
             child: _buildImage(isPoster: false),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 6),
           // Informações do Canal
           Expanded(
             child: Column(
@@ -155,22 +155,25 @@ class StreamCard extends StatelessWidget {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
                       decoration: BoxDecoration(
                         color: AppColors.accentLive.withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: AppColors.accentLive, width: 0.8),
+                        border: Border.all(
+                            color: AppColors.accentLive, width: 0.8),
                       ),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.fiber_manual_record, color: AppColors.accentLive, size: 8),
-                          SizedBox(width: 4),
+                          Icon(Icons.fiber_manual_record,
+                              color: AppColors.accentLive, size: 6),
+                          SizedBox(width: 3),
                           Text(
                             'AO VIVO',
                             style: TextStyle(
                               color: AppColors.accentLive,
-                              fontSize: 9,
+                              fontSize: 7,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.5,
                             ),
@@ -178,26 +181,27 @@ class StreamCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         item.category,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                        style: const TextStyle(
+                            color: AppColors.textMuted, fontSize: 9),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   item.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: AppColors.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -243,7 +247,7 @@ class StreamCard extends StatelessWidget {
             ? Icons.tv_rounded
             : (item.streamType == StreamType.series ? Icons.video_collection_rounded : Icons.movie_rounded),
         color: AppColors.textMuted,
-        size: 28,
+        size: 18,
       ),
     );
   }
@@ -256,11 +260,11 @@ class StreamCard extends StatelessWidget {
         customBorder: const CircleBorder(),
         onTap: onToggleFavorite,
         child: Padding(
-          padding: const EdgeInsets.all(6),
+          padding: const EdgeInsets.all(4),
           child: Icon(
             item.isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
             color: item.isFavorite ? AppColors.accentOrange : AppColors.textSecondary,
-            size: 20,
+            size: 16,
           ),
         ),
       ),

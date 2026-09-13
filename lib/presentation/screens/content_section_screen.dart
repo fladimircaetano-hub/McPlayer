@@ -1400,17 +1400,43 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       ),
       body: Column(
         children: [
+          // Busca (padrão do exemplo)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Pesquisa por canal...',
+                hintStyle: const TextStyle(
+                    color: AppColors.textMuted, fontSize: 13),
+                prefixIcon: const Icon(Icons.search,
+                    size: 18, color: AppColors.textMuted),
+                filled: true,
+                fillColor: AppColors.surfaceLight,
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 8),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              style:
+                  const TextStyle(color: Colors.white, fontSize: 13),
+              onChanged: _onSearchChanged,
+            ),
+          ),
           // Preview compacto
           if (ch != null)
             Container(
-              margin: const EdgeInsets.all(12),
+              margin: const EdgeInsets.fromLTRB(8, 6, 8, 4),
               decoration: BoxDecoration(
                 color: Colors.black,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppColors.cardBorder),
               ),
               clipBehavior: Clip.antiAlias,
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   AspectRatio(
                     aspectRatio: 16 / 9,
@@ -1419,7 +1445,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                         ? CachedNetworkImage(
                             imageUrl: ch.logoUrl!,
                             fit: BoxFit.contain,
-                            memCacheWidth: 700,
+                            memCacheWidth: 500,
                             errorWidget: (_, _, _) =>
                                 _previewPlaceholder(ch),
                           )
@@ -1427,17 +1453,31 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                   ),
                   ListTile(
                     dense: true,
+                    visualDensity: VisualDensity.compact,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 0),
                     title: Text(ch.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             color: Colors.white,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold)),
                     subtitle: Text(ch.category,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             color: AppColors.textSecondary,
-                            fontSize: 12)),
+                            fontSize: 10)),
                     trailing: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        textStyle: const TextStyle(fontSize: 11),
+                        minimumSize: Size.zero,
+                        tapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                      ),
                       onPressed: () =>
                           _openPlayer(list, _selectedIndex),
                       child: const Text('Assistir'),
@@ -1446,96 +1486,235 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                 ],
               ),
             ),
-          // Categorias
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12),
+          // Abas Canais | Favoritos (padrão do exemplo)
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: Row(
               children: [
-                _mChip('TODOS', _selectedCategory == 'TODOS',
-                    () => _selectCategory('TODOS')),
-                _mChip('FAVORITOS ★', _showOnlyFavorites,
-                    () => setState(() {
-                          _showOnlyFavorites = !_showOnlyFavorites;
-                          _selectedIndex = 0;
-                        }),
-                    highlight: AppColors.accentOrange),
-                ..._cats.map((c) => Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: _mChip(
-                          '${c.name} (${c.count})',
-                          _selectedCategory == c.name &&
-                              !_showOnlyFavorites,
-                          () => _selectCategory(c.name)),
-                    )),
+                Expanded(
+                    child: _liveTab('Canais', !_showOnlyFavorites,
+                        () {
+                  setState(() {
+                    _showOnlyFavorites = false;
+                    _selectedIndex = 0;
+                  });
+                })),
+                Container(
+                    width: 1,
+                    height: 18,
+                    color: AppColors.cardBorder),
+                Expanded(
+                    child: _liveTab('Favoritos', _showOnlyFavorites,
+                        () {
+                  setState(() {
+                    _showOnlyFavorites = true;
+                    _selectedIndex = 0;
+                  });
+                })),
               ],
             ),
           ),
-          // Canais
+          // Categorias à esquerda + canais à direita
           Expanded(
-            child: list.isEmpty
-                ? const Center(
-                    child: Text('Nenhum canal encontrado',
-                        style: TextStyle(
-                            color: AppColors.textSecondary)))
-                : ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: list.length,
-                    itemBuilder: (context, i) {
-                      final item = list[i];
-                      return Card(
-                        child: ListTile(
-                          leading: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                width: 30,
-                                child: Text('${i + 1}',
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                              _logoThumb(item.logoUrl, 46, 32),
-                            ],
-                          ),
-                          title: Text(item.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600)),
-                          subtitle: Text(item.category,
-                              style: const TextStyle(
-                                  color: AppColors.textMuted,
-                                  fontSize: 12)),
-                          trailing: InkWell(
-                            onTap: () => widget.controller
-                                .toggleFavorite(item),
-                            child: Padding(
-                              padding: const EdgeInsets.all(6),
-                              child: Icon(
-                                item.isFavorite
-                                    ? Icons.star_rounded
-                                    : Icons.star_outline_rounded,
-                                color: item.isFavorite
-                                    ? AppColors.accentOrange
-                                    : AppColors.textSecondary,
-                              ),
-                            ),
-                          ),
-                          selected: i == _selectedIndex,
-                          onTap: () {
-                            _selectChannel(i);
-                            _openPlayer(list, i);
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _liveSideBar(),
+                Expanded(
+                  child: list.isEmpty
+                      ? const Center(
+                          child: Text('Nenhum canal encontrado',
+                              style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 12)))
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(
+                              0, 2, 8, 8),
+                          itemCount: list.length,
+                          itemBuilder: (context, i) {
+                            final item = list[i];
+                            final selected =
+                                i == _selectedIndex;
+                            final nowTitle = _epgService
+                                .liveNow(item.id, _now)
+                                ?.title;
+                            return _liveRow(
+                              item: item,
+                              index: i,
+                              selected: selected,
+                              subtitle: (nowTitle != null &&
+                                      nowTitle.isNotEmpty)
+                                  ? nowTitle
+                                  : item.category,
+                              onTap: () {
+                                _selectChannel(i);
+                                _openPlayer(list, i);
+                              },
+                            );
                           },
                         ),
-                      );
-                    },
-                  ),
+                ),
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Aba de texto do guia mobile (Canais | Favoritos).
+  Widget _liveTab(String label, bool selected, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Text(label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: selected
+                    ? AppColors.primary
+                    : AppColors.textSecondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w800)),
+      ),
+    );
+  }
+
+  /// Coluna de categorias à esquerda (padrão do exemplo).
+  Widget _liveSideBar() {
+    Widget catItem(String label, bool selected, VoidCallback onTap) {
+      return InkWell(
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(
+              horizontal: 8, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.transparent,
+            border: Border(
+                left: BorderSide(
+                    color: selected
+                        ? AppColors.primary
+                        : Colors.transparent,
+                    width: 3)),
+          ),
+          child: Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: selected
+                      ? Colors.white
+                      : AppColors.textSecondary,
+                  fontSize: 10,
+                  fontWeight: selected
+                      ? FontWeight.bold
+                      : FontWeight.w500)),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: 112,
+      child: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        children: [
+          catItem('Todos', _selectedCategory == 'TODOS',
+              () => _selectCategory('TODOS')),
+          catItem('Favoritos', _showOnlyFavorites, () {
+            setState(() {
+              _showOnlyFavorites = true;
+              _selectedIndex = 0;
+            });
+          }),
+          ..._cats.map((c) => catItem(
+              c.name,
+              _selectedCategory == c.name &&
+                  !_showOnlyFavorites,
+              () => _selectCategory(c.name))),
+        ],
+      ),
+    );
+  }
+
+  /// Linha do canal: logo + número/nome + programa atual + seta.
+  Widget _liveRow({
+    required StreamItem item,
+    required int index,
+    required bool selected,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    final num = (index + 1).toString().padLeft(3, '0');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      decoration: BoxDecoration(
+        gradient: selected
+            ? LinearGradient(
+                colors: [
+                  AppColors.primary.withValues(alpha: 0.38),
+                  AppColors.primary.withValues(alpha: 0.16),
+                ],
+              )
+            : null,
+        color: selected ? null : AppColors.surfaceCard,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: 6, vertical: 6),
+          child: Row(
+            children: [
+              _logoThumb(item.logoUrl, 40, 26),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('$num  ${item.name}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold)),
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 10)),
+                  ],
+                ),
+              ),
+              InkWell(
+                onTap: () =>
+                    widget.controller.toggleFavorite(item),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    item.isFavorite
+                        ? Icons.star_rounded
+                        : Icons.star_outline_rounded,
+                    size: 16,
+                    color: item.isFavorite
+                        ? AppColors.accentOrange
+                        : AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded,
+                  color: AppColors.textSecondary, size: 20),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1763,6 +1942,185 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     );
   }
 
+  /// Sidebar de categorias p/ celular em retrato (estreita, à esquerda).
+  Widget _vodMobileSideBar(List<IptvCategory> cats) {
+    Widget sideBtn(String label, bool selected, VoidCallback onTap,
+        {Color? highlight}) {
+      final active = highlight ?? AppColors.primary;
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: TvFocusable(
+          borderRadius: BorderRadius.circular(8),
+          onPressed: onTap,
+          child: Container(
+            width: double.infinity,
+            padding:
+                const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            decoration: BoxDecoration(
+              color: selected
+                  ? active.withValues(alpha: 0.18)
+                  : AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: selected ? active : AppColors.cardBorder),
+            ),
+            child: Text(label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: selected ? active : AppColors.textPrimary,
+                    fontSize: 10,
+                    fontWeight: selected
+                        ? FontWeight.bold
+                        : FontWeight.w500)),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: 100,
+      padding: const EdgeInsets.fromLTRB(6, 8, 2, 8),
+      child: ListView(
+        children: [
+          sideBtn(
+              'TODOS',
+              !_showOnlyFavorites &&
+                  (_selectedCategory == 'TODOS' ||
+                      _selectedCategory == null), () {
+            setState(() {
+              _showOnlyFavorites = false;
+              _selectedCategory = 'TODOS';
+            });
+          }),
+          sideBtn('FAV ★', _showOnlyFavorites, () {
+            setState(
+                () => _showOnlyFavorites = !_showOnlyFavorites);
+          }, highlight: AppColors.accentOrange),
+          ...cats.map((c) => sideBtn(
+                  '${c.name} (${c.count})',
+                  !_showOnlyFavorites &&
+                      _selectedCategory == c.name, () {
+                setState(() {
+                  _showOnlyFavorites = false;
+                  _selectedCategory = c.name;
+                });
+              })),
+        ],
+      ),
+    );
+  }
+
+  /// Lista compacta p/ celular em retrato: thumb pequena + nome.
+  /// Séries entram agrupadas (1 linha por série).
+  Widget _vodCompactList(List<StreamItem> items) {
+    final isSeries = _type == StreamType.series;
+    final groups = isSeries ? _seriesGroups(items) : null;
+    final count = isSeries ? groups!.length : items.length;
+    if (count == 0) {
+      return const Center(
+        child: Text('Nenhum conteúdo encontrado',
+            style: TextStyle(color: AppColors.textSecondary)),
+      );
+    }
+    return ListView.builder(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      itemCount: count,
+      itemBuilder: (context, index) {
+        late final StreamItem item;
+        late final VoidCallback onTap;
+        if (isSeries) {
+          final g = groups![index];
+          item = StreamItem(
+            id: 'group:${g.name}',
+            name: g.name,
+            streamUrl: g.rep.streamUrl,
+            logoUrl: g.logoUrl,
+            category: g.episodes.length == 1
+                ? g.category
+                : '${g.episodes.length} episódios',
+            streamType: StreamType.series,
+            seriesId: g.seriesId,
+            isFavorite: g.rep.isFavorite,
+          );
+          onTap = () => _openSeriesGroup(g);
+        } else {
+          item = items[index];
+          onTap = () => _openPlayer(items, index);
+        }
+        return Card(
+          margin: const EdgeInsets.only(bottom: 4),
+          child: ListTile(
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 6, vertical: 0),
+            leading: _vodThumb(item.logoUrl),
+            title: Text(item.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600)),
+            subtitle: Text(item.category,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: AppColors.textMuted, fontSize: 9)),
+            trailing: InkWell(
+              onTap: () =>
+                  widget.controller.toggleFavorite(isSeries
+                      ? groups![index].rep
+                      : item),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  item.isFavorite
+                      ? Icons.star_rounded
+                      : Icons.star_outline_rounded,
+                  size: 16,
+                  color: item.isFavorite
+                      ? AppColors.accentOrange
+                      : AppColors.textSecondary,
+                ),
+              ),
+            ),
+            onTap: onTap,
+          ),
+        );
+      },
+    );
+  }
+
+  /// Thumb pequena (só identificação) da lista compacta.
+  Widget _vodThumb(String? url) {
+    return Container(
+      width: 24,
+      height: 36,
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: (url != null && url.isNotEmpty)
+          ? CachedNetworkImage(
+              imageUrl: url,
+              fit: BoxFit.cover,
+              memCacheWidth: 96,
+              memCacheHeight: 144,
+              errorWidget: (_, _, _) => const Icon(
+                  Icons.movie_rounded,
+                  color: Colors.white70,
+                  size: 14),
+            )
+          : const Icon(Icons.movie_rounded,
+              color: Colors.white70, size: 14),
+    );
+  }
+
   Widget _buildVodMobile() {
     return Scaffold(
       appBar: AppBar(
@@ -1845,6 +2203,22 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
           final crossAxisCount = _isTv
               ? 6
               : (MediaQuery.of(context).size.width > 600 ? 4 : 2);
+          // Retrato no celular: categorias à esquerda + lista compacta
+          // (logos pequenos, só identificação). Paisagem mantém a grade.
+          final isPortrait = MediaQuery.of(context).orientation ==
+              Orientation.portrait;
+          if (isPortrait &&
+              MediaQuery.of(context).size.width < 600) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _vodMobileSideBar(cats),
+                Expanded(
+                  child: _vodCompactList(items),
+                ),
+              ],
+            );
+          }
           return Column(
             children: [
               SizedBox(

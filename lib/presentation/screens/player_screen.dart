@@ -64,7 +64,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double? _seekPreview;
 
   int _retryCount = 0;
-  static const int _maxRetries = 2;
+  static const int _maxRetries = 3;
+
+  /// Watchdog anti-travamento: detecta buffering infinito ou frame
+  /// congelado (posição sem avançar) e reconecta sozinho.
+  Timer? _stallTimer;
+  DateTime? _bufferingSince;
+  DateTime _lastProgressAt = DateTime.now();
+  static const _bufferTimeout = Duration(seconds: 20);
+  static const _stallTimeout = Duration(seconds: 10);
 
   PlayerAspect _currentAspect = PlayerAspect.original;
 
@@ -110,6 +118,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
       _subscribe();
       _open(_currentItem.streamUrl);
+      _startStallWatchdog();
     }
 
     if (widget.keepScreenOn) {
@@ -137,12 +146,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted && pos.inSeconds != _position.inSeconds) {
         setState(() => _position = pos);
       }
+      // Sinal de vida para o watchdog (mesmo sem rebuild).
+      _lastProgressAt = DateTime.now();
     }));
     _subs.add(_player!.stream.duration.listen((dur) {
       if (mounted) setState(() => _duration = dur);
     }));
     _subs.add(_player!.stream.buffering.listen((buffering) {
       if (mounted) setState(() => _isBuffering = buffering);
+      if (buffering) {
+        _bufferingSince ??= DateTime.now();
+      } else {
+        _bufferingSince = null;
+        _lastProgressAt = DateTime.now();
+      }
     }));
     _subs.add(_player!.stream.tracks.listen((tracks) {
       if (mounted) setState(() => _tracks = tracks);
@@ -155,6 +172,55 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }));
   }
 
+  void _startStallWatchdog() {
+    _stallTimer?.cancel();
+    _lastProgressAt = DateTime.now();
+    _bufferingSince = DateTime.now();
+    _stallTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!mounted || _isWebPreview || _hasError || _player == null) return;
+      final now = DateTime.now();
+
+      // 1) Buffering infinito: nunca saiu do loading.
+      if (_isBuffering && _bufferingSince != null) {
+        if (now.difference(_bufferingSince!) >= _bufferTimeout) {
+          _bufferingSince = now; // evita disparo duplo no próximo tick
+          _autoReconnect('travou no carregamento');
+        }
+        return;
+      }
+
+      // 2) Frame congelado: tocando, sem buffering, mas posição parada.
+      // VOD pausado ou no fim não conta.
+      if (_isPlaying && !_isBuffering) {
+        final atEnd = !_isLive &&
+            _duration.inSeconds > 0 &&
+            _position.inSeconds >= _duration.inSeconds - 1;
+        if (!atEnd && now.difference(_lastProgressAt) >= _stallTimeout) {
+          _lastProgressAt = now;
+          _autoReconnect('imagem congelada');
+        }
+      }
+    });
+  }
+
+  void _autoReconnect(String motivo) {
+    if (!mounted || _hasError) return;
+    if (_retryCount >= _maxRetries) {
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _isBuffering = false;
+          _errorMessage =
+              'Conexão instável ($motivo após ${_maxRetries + 1} tentativas). Toque em Tentar Novamente.';
+        });
+      }
+      return;
+    }
+    _retryCount++;
+    if (mounted) setState(() => _isBuffering = true);
+    _open(_currentItem.streamUrl, isRetry: true);
+  }
+
   Future<void> _initBrightness() async {
     try {
       _brightness = await ScreenBrightness().system;
@@ -165,6 +231,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _open(String url, {bool isRetry = false}) async {
     if (!isRetry) _retryCount = 0;
+    _lastProgressAt = DateTime.now();
+    _bufferingSince = DateTime.now();
     if (mounted) {
       setState(() {
         _hasError = false;
@@ -422,6 +490,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _stallTimer?.cancel();
     for (final s in _subs) {
       s.cancel();
     }
@@ -479,9 +548,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 if (_isAdjustingBrightness) _buildBrightnessHud(),
                 if (_isAdjustingVolume) _buildVolumeHud(),
                 if (_isBuffering && !_hasError)
-                  const Center(
-                    child: CircularProgressIndicator(
-                        color: AppColors.primary, strokeWidth: 3),
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(
+                            color: AppColors.primary, strokeWidth: 3),
+                        if (_retryCount > 0) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            'Reconectando (tentativa ${_retryCount + 1}/${_maxRetries + 1})…',
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 13),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        TvFocusable(
+                          borderRadius: BorderRadius.circular(10),
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 18, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.cardBorder),
+                            ),
+                            child: const Text('Cancelar',
+                                style: TextStyle(
+                                    color: Colors.white, fontSize: 13)),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 if (_hasError) _buildErrorOverlay(),
                 if (_showControls && !_hasError) _buildControlsOverlay(),

@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import '../../core/activation/activation_models.dart';
+import '../../core/activation/activation_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/app_logo.dart';
@@ -31,6 +34,12 @@ class _EntryScreenState extends State<EntryScreen> with SingleTickerProviderStat
   late final String _deviceId;
   late final String _deviceMac;
 
+  // Ativação remota via Dashboard (Supabase). Desligada se não configurada.
+  final ActivationService _activation = ActivationService();
+  Timer? _pollTimer;
+  String? _activationNote;
+  bool _autoActivating = false;
+
   @override
   void initState() {
     super.initState();
@@ -52,10 +61,13 @@ class _EntryScreenState extends State<EntryScreen> with SingleTickerProviderStat
       _userCtrl.text = savedAccount.username;
       _passCtrl.text = savedAccount.password;
     }
+
+    _setupActivation();
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _tabController.dispose();
     _urlCtrl.dispose();
     _serverCtrl.dispose();
@@ -136,6 +148,79 @@ class _EntryScreenState extends State<EntryScreen> with SingleTickerProviderStat
     }
   }
 
+  /// Ativação remota: registra a chave no Dashboard e observa aprovação.
+  /// Sem configuração no ActivationConfig, não faz nada (modo manual).
+  Future<void> _setupActivation() async {
+    if (!_activation.isEnabled) return;
+    final result = await _activation.checkIn(
+      deviceId: _deviceId,
+      mac: _deviceMac,
+    );
+    if (!mounted) return;
+    if (result.status == ActivationStatus.approved && result.listData != null) {
+      _applyRemoteApproval(result.listData!);
+      return;
+    }
+    if (result.status == ActivationStatus.rejected) {
+      setState(() => _activationNote = 'Dispositivo rejeitado no painel.');
+      return;
+    }
+    setState(
+      () => _activationNote = 'Aguardando aprovação no painel…',
+    );
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _pollActivation(),
+    );
+  }
+
+  Future<void> _pollActivation() async {
+    if (!mounted || _autoActivating) return;
+    final result = await _activation.fetchStatus(_deviceId);
+    if (!mounted || _autoActivating) return;
+    if (result.status == ActivationStatus.approved &&
+        result.listData != null) {
+      _pollTimer?.cancel();
+      _applyRemoteApproval(result.listData!);
+    } else if (result.status == ActivationStatus.rejected) {
+      _pollTimer?.cancel();
+      setState(() => _activationNote = 'Dispositivo rejeitado no painel.');
+    }
+  }
+
+  /// Aplica a lista vinculada pelo operador e entra direto.
+  Future<void> _applyRemoteApproval(ActivationListData list) async {
+    _autoActivating = true;
+    if (mounted) {
+      setState(() => _activationNote = 'Aprovado! Carregando sua lista…');
+    }
+    bool success = false;
+    if (list.isXtream &&
+        list.serverUrl != null &&
+        list.username != null &&
+        list.password != null) {
+      success = await widget.controller.loginXtream(
+        serverUrl: list.serverUrl!,
+        username: list.username!,
+        password: list.password!,
+      );
+    } else if (list.isM3u && list.url != null && list.url!.isNotEmpty) {
+      success = await widget.controller.loadFromM3uUrl(list.url!);
+    }
+    if (success && mounted) {
+      _goToHome();
+    } else {
+      _autoActivating = false;
+      if (mounted) {
+        setState(
+          () => _activationNote =
+              'Aprovação recebida, mas a lista falhou. Confira no painel.',
+        );
+      }
+    }
+  }
+
   void _goToHome() {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -190,7 +275,48 @@ class _EntryScreenState extends State<EntryScreen> with SingleTickerProviderStat
                         children: [
                           // Header Logo & Título
                           _buildHeader(),
-                          const SizedBox(height: 28),
+                          const SizedBox(height: 8),
+                          // Chave/MAC sempre visíveis (sem precisar rolar)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceLight,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: AppColors.cardBorder),
+                            ),
+                            child: Text(
+                              'Chave: $_deviceId   •   MAC: $_deviceMac',
+                              style: const TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (_activationNote != null)
+                            Container(
+                              margin: const EdgeInsets.only(top: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceLight,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: AppColors.primary
+                                        .withValues(alpha: 0.4)),
+                              ),
+                              child: Text(
+                                _activationNote!,
+                                style: const TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 20),
 
                           // Seletor de Método de Login (Tabs)
                           Container(

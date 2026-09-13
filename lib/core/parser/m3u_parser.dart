@@ -99,6 +99,25 @@ class M3uParser {
     return line.substring(valueStart, endIndex);
   }
 
+  /// URL sem query/fragment, em minúsculas (para checar extensão real).
+  /// Ex.: `.../12345.m3u8?token=abc` vira `.../12345.m3u8`.
+  static String _urlPath(String url) {
+    var end = url.length;
+    final q = url.indexOf('?');
+    if (q != -1) end = q;
+    final h = url.indexOf('#');
+    if (h != -1 && h < end) end = h;
+    return url.substring(0, end).toLowerCase();
+  }
+
+  /// Classificação pelo FORMATO da lista, não pelo nome da categoria:
+  /// 1. path Xtream (/live/, /movie/, /series/) é determinístico;
+  /// 2. episódio marcado no nome (S01E01, T1:E2, EP 12...);
+  /// 3. extensão de arquivo VOD (.mp4, .mkv...);
+  /// 4. transporte ao vivo (.m3u8, .ts...);
+  /// 5. só então o nome do grupo desempata (URLs sem formato claro).
+  /// Isso evita que canais ao vivo caiam em Filmes/Séries só porque o
+  /// grupo se chama "FILME E SERIES" ou o canal se chama "TNT SERIES".
   static StreamType _classifyStreamType({
     required String name,
     required String group,
@@ -108,33 +127,60 @@ class M3uParser {
     final lowerName = name.toLowerCase();
     final lowerGroup = group.toLowerCase();
     final lowerUrl = url.toLowerCase();
+    final path = _urlPath(url);
 
-    // 1. Verificação de Série
+    // 1. Painel Xtream no path da URL (determinístico).
+    if (lowerUrl.contains('/live/')) return StreamType.live;
+    if (lowerUrl.contains('/movie/')) return StreamType.movie;
+    if (lowerUrl.contains('/series/')) return StreamType.series;
+
+    // 2. Episódio marcado no nome ou na URL.
+    final regexEpisode = RegExp(
+        r'(\bs\d{1,2}\s*e\d{1,2}\b|\bt\d{1,2}\s*:\s*e\d{1,2}\b|\bep\.?\s*\d{1,3}\b|\bcap\.?\s*\d{1,3}\b|\bcapitulo\s+\d{1,3}\b|\bepisodio\s+\d{1,3}\b)',
+        caseSensitive: false);
     if (regexSeries.hasMatch(name) ||
         regexSeries.hasMatch(url) ||
-        lowerName.contains('série') ||
-        lowerName.contains('series') ||
-        lowerGroup.contains('série') ||
+        regexEpisode.hasMatch(lowerName)) {
+      return StreamType.series;
+    }
+
+    // 3. Arquivo de vídeo (VOD).
+    if (path.endsWith('.mp4') ||
+        path.endsWith('.mkv') ||
+        path.endsWith('.avi') ||
+        path.endsWith('.mov') ||
+        path.endsWith('.mpg') ||
+        path.endsWith('.mpeg') ||
+        path.endsWith('.flv') ||
+        path.endsWith('.webm') ||
+        path.endsWith('.wmv')) {
+      return StreamType.movie;
+    }
+
+    // 4. Transporte de transmissão ao vivo.
+    if (path.endsWith('.m3u8') ||
+        path.endsWith('.m3u') ||
+        path.endsWith('.ts') ||
+        path.endsWith('.mpd')) {
+      return StreamType.live;
+    }
+
+    // 5. Nome do grupo como último recurso (URLs sem formato claro).
+    if (lowerGroup.contains('série') ||
         lowerGroup.contains('series') ||
         lowerGroup.contains('temporada') ||
         lowerGroup.contains('season')) {
       return StreamType.series;
     }
 
-    // 2. Verificação de Filmes / VOD
     if (lowerGroup.contains('filme') ||
         lowerGroup.contains('movie') ||
         lowerGroup.contains('vod') ||
-        lowerGroup.contains('cinema') ||
-        lowerUrl.endsWith('.mp4') ||
-        lowerUrl.endsWith('.mkv') ||
-        lowerUrl.endsWith('.avi')) {
+        lowerGroup.contains('cinema')) {
       return StreamType.movie;
     }
 
-    // 2b. Grupos de catálogo VOD (provedores/streamings): em listas grandes
-    // grupos como "Netflix", "Prime Vídeo", "DISNEY+" trazem
-    // filmes e episódios avulsos sem extensão na URL. Antes caíam como live.
+    // 5b. Grupos de catálogo VOD (provedores/streamings) sem extensão na URL.
     const vodProviders = [
       'netflix',
       'prime v',
@@ -163,7 +209,7 @@ class M3uParser {
       return StreamType.movie;
     }
 
-    // 3. Padrão: Canais Ao Vivo
+    // 6. Padrão: Canais Ao Vivo
     return StreamType.live;
   }
 }

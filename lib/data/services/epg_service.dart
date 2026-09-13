@@ -158,6 +158,19 @@ class EpgService {
 
   void clear() => _cache = {};
 
+  /// Programa no ar agora para o canal ([StreamItem.id] == tvg-id).
+  /// Síncrono sobre o cache: barato para chamar por linha de lista.
+  /// Sem cache ou fora do ar retorna null.
+  EpgProgram? liveNow(String channelId, DateTime now) {
+    final all = _cache[channelId];
+    if (all == null || all.isEmpty) return null;
+    final utc = now.toUtc();
+    for (final p in all) {
+      if (!utc.isBefore(p.start) && utc.isBefore(p.end)) return p;
+    }
+    return null;
+  }
+
   /// Programas do canal no dia local informado (00h–24h).
   /// A chave é o [StreamItem.id] (tvg-id no M3U). Nunca lança: sem cache
   /// ou sem chave retorna lista vazia. Síncrono por cima do cache, mas

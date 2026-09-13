@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mcplayer/core/activation/activation_service.dart';
 import 'package:mcplayer/core/network/api_client.dart';
 import 'package:mcplayer/core/storage/storage_service.dart';
 import 'package:mcplayer/data/datasources/xtream_api.dart';
@@ -9,6 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   setUpAll(() {
+    // Desliga a ativação remota: evita rede real e timer de polling
+    // periódico na EntryScreen (quebra o teste com "Timer still pending").
+    ActivationService.testBypass = true;
     // media_kit nativo (libmpv) não existe no ambiente de teste — ignora.
     try {
       MediaKit.ensureInitialized();

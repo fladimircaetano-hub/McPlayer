@@ -32,6 +32,9 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
   }
 
   Future<void> _submit() async {
+    // Guarda contra duplo toque / Enter repetido no D-pad: loginXtream
+    // concorrente duplica EPG em background e navegação.
+    if (_sending) return;
     final code = _codeCtrl.text.trim();
     final user = _userCtrl.text.trim();
     final pass = _passCtrl.text.trim();

@@ -4,7 +4,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/models/stream_item.dart';
 import 'tv_focusable.dart';
 
-class StreamCard extends StatelessWidget {
+class StreamCard extends StatefulWidget {
   final StreamItem item;
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
@@ -19,9 +19,32 @@ class StreamCard extends StatelessWidget {
   });
 
   @override
+  State<StreamCard> createState() => _StreamCardState();
+}
+
+class _StreamCardState extends State<StreamCard> {
+  /// InkWell da estrela está aninhado no GestureDetector do card: o Flutter
+  /// entrega o tap aos dois. Ignora o tap do card logo após favoritar.
+  DateTime? _favTapAt;
+  static const _favGuard = Duration(milliseconds: 400);
+
+  StreamItem get item => widget.item;
+
+  void _onFavTap() {
+    _favTapAt = DateTime.now();
+    widget.onToggleFavorite();
+  }
+
+  void _onCardTap() {
+    final t = _favTapAt;
+    if (t != null && DateTime.now().difference(t) < _favGuard) return;
+    widget.onTap();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return TvFocusable(
-      onPressed: onTap,
+      onPressed: _onCardTap,
       borderRadius: BorderRadius.circular(14),
       child: Container(
         decoration: BoxDecoration(
@@ -30,7 +53,7 @@ class StreamCard extends StatelessWidget {
           border: Border.all(color: AppColors.cardBorder, width: 1),
         ),
         clipBehavior: Clip.antiAlias,
-        child: isVod ? _buildVodLayout(context) : _buildLiveLayout(context),
+        child: widget.isVod ? _buildVodLayout(context) : _buildLiveLayout(context),
       ),
     );
   }
@@ -258,7 +281,7 @@ class StreamCard extends StatelessWidget {
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
-        onTap: onToggleFavorite,
+        onTap: _onFavTap,
         child: Padding(
           padding: const EdgeInsets.all(4),
           child: Icon(

@@ -63,6 +63,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Rebuild após escrita async em prefs. Escritas são rápidas, mas o
+  /// usuário pode ter voltado da tela no meio do await — sem o guard,
+  /// setState em widget desmontado lança exceção.
+  void _refresh() {
+    if (!mounted) return;
+    _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -181,7 +189,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       value: _storage.getTmdbEnabled(),
                       onChanged: (v) async {
                         await _storage.setTmdbEnabled(v);
-                        setState(() {});
+                        _refresh();
                       },
                     ),
                 ],
@@ -362,7 +370,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           checked: lang == 'pt',
           onTap: () async {
             await _storage.setLanguage('pt');
-            setState(() {});
+            _refresh();
             _snack('Idioma: Português');
           },
         ),
@@ -371,7 +379,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           checked: lang == 'en',
           onTap: () async {
             await _storage.setLanguage('en');
-            setState(() {});
+            _refresh();
             _snack('Language: English');
           },
         ),
@@ -390,7 +398,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           checked: fmt == 'mpegts',
           onTap: () async {
             await _storage.setStreamFormat('mpegts');
-            setState(() {});
+            _refresh();
             _snack('Formato: mpegts — vale para os canais Xtream');
           },
         ),
@@ -399,7 +407,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           checked: fmt == 'm3u8',
           onTap: () async {
             await _storage.setStreamFormat('m3u8');
-            setState(() {});
+            _refresh();
             _snack('Formato: m3u8 — vale para os canais Xtream');
           },
         ),
@@ -438,7 +446,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             }
             await _storage.setPin(pin);
             _pinCtrl.clear();
-            setState(() {});
+            _refresh();
             _snack('PIN salvo');
           },
           child: Container(
@@ -468,7 +476,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           value: !hidden.contains('live'),
           onChanged: (v) async {
             await _storage.setSectionHidden('live', !v);
-            setState(() {});
+            _refresh();
           },
         ),
         _switchRow(
@@ -476,7 +484,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           value: !hidden.contains('movie'),
           onChanged: (v) async {
             await _storage.setSectionHidden('movie', !v);
-            setState(() {});
+            _refresh();
           },
         ),
         _switchRow(
@@ -484,7 +492,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           value: !hidden.contains('series'),
           onChanged: (v) async {
             await _storage.setSectionHidden('series', !v);
-            setState(() {});
+            _refresh();
           },
         ),
       ],
@@ -547,7 +555,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           value: _storage.getShowCounts(),
           onChanged: (v) async {
             await _storage.setShowCounts(v);
-            setState(() {});
+            _refresh();
           },
         ),
       ],
@@ -564,7 +572,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           value: _storage.getTmdbEnabled(),
           onChanged: (v) async {
             await _storage.setTmdbEnabled(v);
-            setState(() {});
+            _refresh();
           },
         ),
       ],
@@ -581,7 +589,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           value: _storage.getKeepScreenOn(),
           onChanged: (v) async {
             await _storage.setKeepScreenOn(v);
-            setState(() {});
+            _refresh();
           },
         ),
       ],

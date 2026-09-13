@@ -53,6 +53,21 @@ class _TvFocusableState extends State<TvFocusable> {
   }
 
   @override
+  void didUpdateWidget(TvFocusable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      final oldNode = _node;
+      oldNode.removeListener(_handleFocusChange);
+      // Nó interno (criado por nós) precisa ser descartado na troca;
+      // nó externo pertence ao pai — só removemos o listener.
+      if (oldWidget.focusNode == null) oldNode.dispose();
+      _node = widget.focusNode ?? FocusNode();
+      _node.addListener(_handleFocusChange);
+      _isFocused = _node.hasFocus;
+    }
+  }
+
+  @override
   void dispose() {
     if (widget.focusNode == null) {
       _node.dispose();

@@ -108,14 +108,14 @@ class DeviceIdCard extends StatelessWidget {
 void showDeviceIdDialog(BuildContext context, String deviceId, String mac) {
   showDialog(
     context: context,
-    builder: (_) => AlertDialog(
+    builder: (ctx) => AlertDialog(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: const Text('Meu aparelho', style: TextStyle(color: Colors.white)),
       content: DeviceIdCard(deviceId: deviceId, mac: mac),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(ctx),
           child: const Text('Fechar', style: TextStyle(color: AppColors.primary)),
         ),
       ],

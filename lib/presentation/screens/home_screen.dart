@@ -4,6 +4,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/models/stream_item.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/app_logo.dart';
+import '../widgets/double_back_to_exit.dart';
 import '../widgets/starfield_background.dart';
 import '../widgets/tv_focusable.dart';
 import 'content_section_screen.dart';
@@ -113,7 +114,8 @@ class HomeScreen extends StatelessWidget {
           ),
         ];
 
-        return Scaffold(
+        return DoubleBackToExit(
+          child: Scaffold(
           body: StarfieldBackground(
             child: SafeArea(
               child: Stack(
@@ -245,6 +247,7 @@ class HomeScreen extends StatelessWidget {
                 ],
               ),
             ),
+          ),
           ),
         );
       },

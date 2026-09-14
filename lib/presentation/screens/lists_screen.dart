@@ -4,6 +4,7 @@ import '../../core/activation/activation_models.dart';
 import '../../core/activation/activation_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../controllers/iptv_controller.dart';
+import '../widgets/double_back_to_exit.dart';
 import '../widgets/tv_focusable.dart';
 import 'add_playlist_screen.dart';
 import 'home_screen.dart';
@@ -159,7 +160,8 @@ class _ListsScreenState extends State<ListsScreen> {
           rows.add(_PlaylistRow(name: u, url: u, isXtream: false));
         }
 
-        return Scaffold(
+        return DoubleBackToExit(
+          child: Scaffold(
           body: SafeArea(
             child: Stack(
               children: [
@@ -367,6 +369,7 @@ class _ListsScreenState extends State<ListsScreen> {
                   ),
               ],
             ),
+          ),
           ),
         );
       },

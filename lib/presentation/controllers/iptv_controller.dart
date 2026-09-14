@@ -290,6 +290,14 @@ class IptvController extends ChangeNotifier {
     }
   }
 
+  /// Injeta itens direto, sem rede (testes de widget).
+  @visibleForTesting
+  void debugLoadItems(List<StreamItem> items, {String name = 'Teste'}) {
+    _organizeItems(items);
+    _loadedListName = name;
+    notifyListeners();
+  }
+
   /// Organiza os itens carregados em abas e categorias
   void _organizeItems(List<StreamItem> items) {
     _allItems = items;

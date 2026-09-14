@@ -1306,6 +1306,11 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   Widget _buildMobileGuide() {
     final list = _channels();
     final ch = _selectedChannel;
+    // Programa atual do canal em destaque (ou categoria como fallback):
+    // a faixa identifica o canal mesmo sem logo/arte.
+    final nowTitle = ch == null
+        ? null
+        : _epgService.liveNow(ch.id, _now)?.title;
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 8,
@@ -1425,63 +1430,79 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
               onChanged: _onSearchChanged,
             ),
           ),
-          // Preview compacto
+          // Faixa compacta do canal em destaque (altura fixa ~72px):
+          // identifica número + nome + programa atual mesmo sem logo,
+          // e nunca estoura a coluna (era um preview 16:9 + ficha que
+          // causava BOTTOM OVERFLOWED em telas menores).
           if (ch != null)
             Container(
               margin: const EdgeInsets.fromLTRB(8, 6, 8, 4),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 8, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.black,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppColors.cardBorder),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 children: [
-                  AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: (ch.logoUrl != null &&
-                            ch.logoUrl!.isNotEmpty)
-                        ? CachedNetworkImage(
-                            imageUrl: ch.logoUrl!,
-                            fit: BoxFit.contain,
-                            memCacheWidth: 500,
-                            errorWidget: (_, _, _) =>
-                                _previewPlaceholder(ch),
-                          )
-                        : _previewPlaceholder(ch),
-                  ),
-                  ListTile(
-                    dense: true,
-                    visualDensity: VisualDensity.compact,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 0),
-                    title: Text(ch.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold)),
-                    subtitle: Text(ch.category,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: AppColors.textSecondary,
-                            fontSize: 10)),
-                    trailing: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
-                        textStyle: const TextStyle(fontSize: 11),
-                        minimumSize: Size.zero,
-                        tapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: () =>
-                          _openPlayer(list, _selectedIndex),
-                      child: const Text('Assistir'),
+                  _logoThumb(ch.logoUrl, 52, 36),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                            '${(_selectedIndex + 1).toString().padLeft(3, '0')}  ${ch.name}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold)),
+                        Text(
+                            (nowTitle != null && nowTitle.isNotEmpty)
+                                ? nowTitle
+                                : ch.category,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: AppColors.primary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600)),
+                      ],
                     ),
+                  ),
+                  InkWell(
+                    onTap: () =>
+                        widget.controller.toggleFavorite(ch),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        ch.isFavorite
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        size: 20,
+                        color: ch.isFavorite
+                            ? AppColors.accentOrange
+                            : AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      textStyle: const TextStyle(fontSize: 12),
+                      minimumSize: Size.zero,
+                      tapTargetSize:
+                          MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () =>
+                        _openPlayer(list, _selectedIndex),
+                    child: const Text('Assistir'),
                   ),
                 ],
               ),

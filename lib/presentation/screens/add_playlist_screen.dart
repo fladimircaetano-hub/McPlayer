@@ -5,11 +5,14 @@ import '../controllers/iptv_controller.dart';
 import '../widgets/tv_focusable.dart';
 import 'home_screen.dart';
 
+/// WhatsApp do suporte (só dígitos, país+DDD). O QR abre a conversa
+/// com chave e MAC do aparelho já preenchidos na mensagem.
+const _supportWhatsApp = '554391190684';
+
 /// Tela "Add playlist" (só Xtream Codes): Code/Username/Password,
 /// Cancel/Ok, ajuda do site + QR do WhatsApp, rodapé do aparelho.
 /// Listas M3U entram via Dashboard (ativação remota silenciosa).
-class AddPlaylistScreen extends StatefulWidget {
-  final IptvController controller;
+class AddPlaylistScreen extends StatefulWidget {  final IptvController controller;
 
   const AddPlaylistScreen({super.key, required this.controller});
 
@@ -143,7 +146,8 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
                     padding: const EdgeInsets.all(8),
                     color: Colors.white,
                     child: QrImageView(
-                      data: 'MAC:$mac|KEY:$deviceId',
+                      data:
+                          'https://wa.me/$_supportWhatsApp?text=${Uri.encodeComponent('Olá! Preciso ativar meu McPlayer. Chave: $deviceId | MAC: $mac')}',
                       size: 120,
                     ),
                   ),

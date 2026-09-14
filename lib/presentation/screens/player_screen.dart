@@ -104,21 +104,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // Preview web: sem player nativo, só layout + aviso.
       _isBuffering = false;
     } else {
-      _player = Player(
-        configuration: const PlayerConfiguration(
-          title: 'MC Player',
-          osc: false,
-        ),
-      );
-      _videoController = VideoController(
-        _player!,
-        configuration: const VideoControllerConfiguration(
-          enableHardwareAcceleration: true,
-        ),
-      );
-      _subscribe();
-      _open(_currentItem.streamUrl);
-      _startStallWatchdog();
+      _initNativePlayer();
     }
 
     if (widget.keepScreenOn) {
@@ -131,6 +117,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
     ]);
 
     _initBrightness();
+  }
+
+  /// Inicialização ordenada do player nativo: cria, liga a decodificação
+  /// por hardware e só então abre a stream. Sem hwdec, o mpv decodifica
+  /// por software na CPU — SD abre, mas HD/FHD travam em sticks fracos
+  /// (foi o caso do Fire TV Stick HD). `mediacopy` = MediaCodec com
+  /// renderização direta (zero-copy); se o aparelho não suportar, o mpv
+  /// volta sozinho para software.
+  ///
+  /// Nota: media_kit 1.2.6 não expõe `setProperty` no `Player` público
+  /// (só no platform nativo), por isso o `dynamic` contido abaixo.
+  Future<void> _initNativePlayer() async {
+    _player = Player(
+      configuration: const PlayerConfiguration(
+        title: 'MC Player',
+        osc: false,
+      ),
+    );
+    try {
+      final platform = _player!.platform;
+      if (platform != null) {
+        await (platform as dynamic)
+            .setProperty('hwdec', 'mediacopy')
+            .timeout(const Duration(seconds: 5));
+      }
+    } catch (_) {
+      // Aparelho sem MediaCodec utilizável: segue em software.
+    }
+    if (!mounted) return;
+    _videoController = VideoController(
+      _player!,
+      configuration: const VideoControllerConfiguration(
+        enableHardwareAcceleration: true,
+      ),
+    );
+    _subscribe();
+    _open(_currentItem.streamUrl);
+    _startStallWatchdog();
   }
 
   void _subscribe() {

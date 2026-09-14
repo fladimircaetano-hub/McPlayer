@@ -25,10 +25,10 @@ class ListsScreen extends StatefulWidget {
 class _ListsScreenState extends State<ListsScreen> {
   IptvController get controller => widget.controller;
 
-  // Ativação remota via Dashboard (Supabase). Desligada se não configurada.
+  // Ativação remota via Dashboard (Supabase), silenciosa: sem aviso
+  // visível — a lista aprovada no painel entra sozinha.
   final ActivationService _activation = ActivationService();
   Timer? _pollTimer;
-  String? _activationNote;
   bool _autoActivating = false;
 
   late final String _deviceId;
@@ -48,8 +48,8 @@ class _ListsScreenState extends State<ListsScreen> {
     super.dispose();
   }
 
-  /// Ativação remota: registra a chave no Dashboard e observa aprovação.
-  /// Sem configuração no ActivationConfig, não faz nada.
+  /// Ativação remota: registra a chave no Dashboard e observa aprovação
+  /// em silêncio. Sem configuração no ActivationConfig, não faz nada.
   Future<void> _setupActivation() async {
     if (!_activation.isEnabled) return;
     final result = await _activation.checkIn(
@@ -62,11 +62,6 @@ class _ListsScreenState extends State<ListsScreen> {
       _applyRemoteApproval(result.listData!);
       return;
     }
-    if (result.status == ActivationStatus.rejected) {
-      setState(() => _activationNote = 'Dispositivo rejeitado no painel.');
-      return;
-    }
-    setState(() => _activationNote = 'Aguardando aprovação no painel…');
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(
       const Duration(seconds: 10),
@@ -84,16 +79,12 @@ class _ListsScreenState extends State<ListsScreen> {
       _applyRemoteApproval(result.listData!);
     } else if (result.status == ActivationStatus.rejected) {
       _pollTimer?.cancel();
-      setState(() => _activationNote = 'Dispositivo rejeitado no painel.');
     }
   }
 
-  /// Aplica a lista vinculada pelo operador e entra direto.
+  /// Aplica a lista vinculada pelo operador e entra direto, sem aviso.
   Future<void> _applyRemoteApproval(ActivationListData list) async {
     _autoActivating = true;
-    if (mounted) {
-      setState(() => _activationNote = 'Aprovado! Carregando sua lista…');
-    }
     bool success = false;
     if (list.isXtream &&
         list.serverUrl != null &&
@@ -111,10 +102,6 @@ class _ListsScreenState extends State<ListsScreen> {
       _openActive();
     } else {
       _autoActivating = false;
-      if (mounted) {
-        setState(() => _activationNote =
-            'Aprovação recebida, mas a lista falhou. Confira no painel.');
-      }
     }
   }
 
@@ -218,27 +205,6 @@ class _ListsScreenState extends State<ListsScreen> {
                           ),
                         ],
                       ),
-                      if (_activationNote != null)
-                        Container(
-                          margin: const EdgeInsets.only(top: 12),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceLight,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                                color: AppColors.primary
-                                    .withValues(alpha: 0.4)),
-                          ),
-                          child: Text(
-                            _activationNote!,
-                            style: const TextStyle(
-                              color: AppColors.primary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
                       const SizedBox(height: 20),
                       if (rows.isEmpty)
                         const Center(

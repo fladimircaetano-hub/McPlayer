@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/activation/activation_models.dart';
 import '../../core/activation/activation_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -25,6 +26,10 @@ class ListsScreen extends StatefulWidget {
 
 class _ListsScreenState extends State<ListsScreen> {
   IptvController get controller => widget.controller;
+
+  // Voltar unificado (botão visível + gesto/D-pad): volta à Home se
+  // veio de lá; se a Playlist é a raiz, 2 toques para sair.
+  final DoubleBackController _backController = DoubleBackController();
 
   // Ativação remota via Dashboard (Supabase), silenciosa: sem aviso
   // visível — a lista aprovada no painel entra sozinha.
@@ -133,6 +138,21 @@ class _ListsScreenState extends State<ListsScreen> {
     );
   }
 
+  /// Botão voltar visível: retorna à Home se veio de lá (botão Listas);
+  /// se a Playlist é a raiz, exige 2 toques para sair (mesma lógica do
+  /// gesto/D-pad, via [_backController] compartilhado).
+  void _onBackButton() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+    if (_backController.registerPress()) {
+      SystemNavigator.pop();
+    } else {
+      showExitHint(context, 'Pressione voltar novamente para sair');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -161,6 +181,7 @@ class _ListsScreenState extends State<ListsScreen> {
         }
 
         return DoubleBackToExit(
+          controller: _backController,
           child: Scaffold(
           body: SafeArea(
             child: Stack(
@@ -172,6 +193,18 @@ class _ListsScreenState extends State<ListsScreen> {
                     children: [
                       Row(
                         children: [
+                          TvFocusable(
+                            borderRadius: BorderRadius.circular(10),
+                            onPressed: _onBackButton,
+                            child: const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: Icon(
+                                  Icons.arrow_back_rounded,
+                                  color: Colors.white,
+                                  size: 26),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
                           const Expanded(
                             child: Text('Playlist',
                                 style: TextStyle(

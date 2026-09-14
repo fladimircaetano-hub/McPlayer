@@ -5,6 +5,12 @@ import 'package:mcplayer/presentation/widgets/double_back_to_exit.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('controller: 1º toque avisa, 2º confirma', () {
+    final c = DoubleBackController();
+    expect(c.registerPress(), isFalse);
+    expect(c.registerPress(), isTrue);
+  });
+
   testWidgets('1º voltar avisa e permanece; não dá pop',
       (WidgetTester tester) async {
     await tester.pumpWidget(

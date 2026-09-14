@@ -1,14 +1,13 @@
-McPlayer — código Downloader (Firestick / Android TV)
-=====================================================
-Código: 4827653
-Uso: app Downloader > digitar 4827653 > Go
+McPlayer — códigos Downloader (Firestick / Android TV / celular)
+================================================================
+Código atual (arm64, v1.0.1+2): 4827653
+Uso: app Downloader > digitar o código > Go
 
-Versão atual servida:
-- v1.0.1+2 — app-arm64-v8a-release.apk (31,5 MB)
-- URL direta: https://files.catbox.moe/72mwm2.apk
-- Gerado em: 2026-09-14
+v1.0.2+3 (player com hwdec=mediacopy — corrige HD/FHD no Fire Stick):
+- Stick/TV 32-bit (armeabi-v7a, 28,4 MB):
+  https://files.catbox.moe/yu1ibv.apk
+- Celular 64-bit (arm64-v8a, 31,5 MB):
+  https://files.catbox.moe/u3twzp.apk
 
-Para atualizar (manter o mesmo código):
-1. Gerar novo APK release (flutter build apk --release --split-per-abi)
-2. Subir no mesmo host com o mesmo nome (sobrescrever) OU
-   editar o destino em https://go.aftvnews.com (requer nova submissão)
+Para publicar: colar cada link em https://go.aftvnews.com/ e anotar
+os códigos gerados aqui. O código 4827653 segue apontando p/ v1.0.1+2.

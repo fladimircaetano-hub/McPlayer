@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/xtream_account.dart';
 
@@ -22,7 +23,13 @@ class StorageService {
 
   final SharedPreferences _prefs;
 
-  StorageService(this._prefs);
+  /// Idioma atual ('pt'/'en'). Notifica ouvintes para troca imediata
+  /// sem reiniciar o app.
+  final ValueNotifier<String> languageNotifier = ValueNotifier('pt');
+
+  StorageService(this._prefs) {
+    languageNotifier.value = getLanguage();
+  }
 
   static Future<StorageService> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -193,7 +200,9 @@ class StorageService {
   String getLanguage() => _prefs.getString(_keyLanguage) ?? 'pt';
 
   Future<void> setLanguage(String v) async {
-    await _prefs.setString(_keyLanguage, v == 'en' ? 'en' : 'pt');
+    final lang = v == 'en' ? 'en' : 'pt';
+    await _prefs.setString(_keyLanguage, lang);
+    languageNotifier.value = lang;
   }
 
   Future<void> clearFavorites() async {

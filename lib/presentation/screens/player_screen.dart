@@ -9,7 +9,6 @@ import 'package:screen_brightness/screen_brightness.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/stream_item.dart';
 import '../widgets/tv_focusable.dart';
-
 enum PlayerAspect {
   fit16x9('16:9', 16 / 9, BoxFit.contain),
   fit4x3('4:3', 4 / 3, BoxFit.contain),
@@ -64,14 +63,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double? _seekPreview;
 
   int _retryCount = 0;
-  static const int _maxRetries = 3;
+  static const int _maxRetries = 2;
+  int _openGeneration = 0;
 
   /// Watchdog anti-travamento: detecta buffering infinito ou frame
   /// congelado (posição sem avançar) e reconecta sozinho.
   Timer? _stallTimer;
   DateTime? _bufferingSince;
   DateTime _lastProgressAt = DateTime.now();
-  static const _bufferTimeout = Duration(seconds: 20);
+  static const _bufferTimeout = Duration(seconds: 15);
   static const _stallTimeout = Duration(seconds: 10);
 
   PlayerAspect _currentAspect = PlayerAspect.original;
@@ -88,6 +88,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final FocusNode _aspectNode = FocusNode();
   final FocusNode _backNode = FocusNode();
 
+  /// Nós da tela de erro: o overlay entra depois do build inicial, então o
+  /// autofocus sozinho nem sempre entrega o foco no Fire TV (D-pad). Sem
+  /// foco, o OK não ativa nenhum botão — por isso forçamos o foco via
+  /// [_focusErrorOverlay] sempre que o erro aparece.
+  final FocusNode _errorBackNode = FocusNode();
+  final FocusNode _errorRetryNode = FocusNode();
+
   static const _uaHeaders = {
     'User-Agent': 'IPTVSmarters/1.0.0 (Linux; Android 12)',
   };
@@ -95,6 +102,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    // Libera os pôsteres da RAM ao abrir o player (as listas ficam na
+    // pilha de navegação segurando imagens; no stick de 1 GB isso conta).
+    PaintingBinding.instance.imageCache.clear();
     _currentItem = widget.item;
     if (widget.playlist != null && widget.initialIndex != null) {
       _currentIndex = widget.initialIndex!;
@@ -138,8 +148,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       final platform = _player!.platform;
       if (platform != null) {
-        await (platform as dynamic)
+        final dyn = platform as dynamic;
+        await dyn
             .setProperty('hwdec', 'mediacopy')
+            .timeout(const Duration(seconds: 5));
+        // Stick de 1 GB: o padrão do mpv (250 MB de buffer + 100 MB para
+        // trás) estoura a RAM em filmes e o sistema mata o app (LMK).
+        await dyn
+            .setProperty('demuxer-max-bytes', '64MiB')
+            .timeout(const Duration(seconds: 5));
+        await dyn
+            .setProperty('demuxer-max-back-bytes', '16MiB')
             .timeout(const Duration(seconds: 5));
       }
     } catch (_) {
@@ -230,14 +249,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _autoReconnect(String motivo) {
     if (!mounted || _hasError) return;
     if (_retryCount >= _maxRetries) {
-      if (mounted) {
-        setState(() {
-          _hasError = true;
-          _isBuffering = false;
-          _errorMessage =
-              'Conexão instável ($motivo após ${_maxRetries + 1} tentativas). Toque em Tentar Novamente.';
-        });
-      }
+      _fail(
+          'Conexão instável ($motivo após ${_maxRetries + 1} tentativas). Toque em Tentar Novamente.');
       return;
     }
     _retryCount++;
@@ -255,6 +268,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _open(String url, {bool isRetry = false}) async {
     if (!isRetry) _retryCount = 0;
+    // Geração: zaps rápidos disparam _open concorrentes no mesmo player
+    // nativo — o atrasado (stale) deve abortar em vez de disputar o mpv,
+    // o que derrubava o app principalmente em filmes (VOD).
+    final gen = ++_openGeneration;
     _lastProgressAt = DateTime.now();
     _bufferingSince = DateTime.now();
     if (mounted) {
@@ -268,45 +285,88 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await _player!
           .open(Media(url, httpHeaders: _uaHeaders), play: true)
           .timeout(
-            const Duration(seconds: 25),
-            onTimeout: () => throw TimeoutException('Tempo esgotado (25s).'),
+            const Duration(seconds: 15),
+            onTimeout: () => throw TimeoutException('Tempo esgotado (15s).'),
           );
+      if (!mounted || gen != _openGeneration) return;
       await _player!.setVolume(_volume * 100);
+      try {
+        final current = await (_player!.platform as dynamic)
+            .getProperty('hwdec-current')
+            .timeout(const Duration(seconds: 3));
+        debugPrint('[Player] hwdec-current=$current url=${_currentItem.streamUrl}');
+      } catch (_) {}
       if (mounted) {
         _resetControlsTimeout();
       }
     } catch (e) {
+      if (!mounted || gen != _openGeneration) return;
+      final msg = e.toString().replaceAll('Exception:', '').trim();
+      // Erro definitivo (DNS, servidor fora, bloqueio): repetir não
+      // adianta — mostra a falha na hora em vez de enrolar no retry.
+      if (_isFatalError(msg)) {
+        if (mounted) _fail('Falha ao conectar: $msg');
+        return;
+      }
       if (_retryCount < _maxRetries && mounted) {
         _retryCount++;
-        await Future.delayed(Duration(seconds: _retryCount * 2));
+        await Future.delayed(Duration(seconds: _retryCount));
         if (mounted) return _open(url, isRetry: true);
       }
       if (mounted) {
-        setState(() {
-          _hasError = true;
-          _isBuffering = false;
-          _errorMessage = e is TimeoutException
-              ? 'Tempo esgotado (tentativa ${_retryCount + 1}/${_maxRetries + 1}). Verifique a internet ou reconecte.'
-              : 'Falha ao conectar: ${e.toString().replaceAll('Exception:', '').trim()}';
-        });
+        _fail(e is TimeoutException
+            ? 'Tempo esgotado (tentativa ${_retryCount + 1}/${_maxRetries + 1}). Verifique a internet ou reconecte.'
+            : 'Falha ao conectar: $msg');
       }
     }
   }
 
+  /// Erros que retry não resolve: DNS inexistente, conexão recusada,
+  /// rede inalcançável e HTTP 401/403/404.
+  bool _isFatalError(String message) {
+    final m = message.toLowerCase();
+    return m.contains('failed to resolve hostname') ||
+        m.contains('no address associated with hostname') ||
+        m.contains('connection refused') ||
+        m.contains('connection reset') ||
+        m.contains('network is unreachable') ||
+        m.contains('no route to host') ||
+        m.contains('http error 401') ||
+        m.contains('http error 403') ||
+        m.contains('http error 404');
+  }
+
   void _onPlayerError(String error) {
     if (!mounted || _hasError) return;
+    if (_isFatalError(error)) {
+      _fail(error.length > 220 ? '${error.substring(0, 220)}...' : error);
+      return;
+    }
     if (_retryCount < _maxRetries) {
       _retryCount++;
-      Future.delayed(Duration(seconds: _retryCount * 2), () {
+      Future.delayed(Duration(seconds: _retryCount), () {
         if (mounted) _open(_currentItem.streamUrl, isRetry: true);
       });
     } else {
-      setState(() {
-        _hasError = true;
-        _isBuffering = false;
-        _errorMessage = error.length > 220 ? '${error.substring(0, 220)}...' : error;
-      });
+      _fail(error.length > 220 ? '${error.substring(0, 220)}...' : error);
     }
+  }
+
+  /// Mostra a tela de erro e garante o foco no botão principal.
+  /// Sem isso, no Fire TV o D-pad pode ficar sem alvo focado e o OK
+  /// (nem o Voltar) responde.
+  void _fail(String message) {
+    if (!mounted) return;
+    setState(() {
+      _hasError = true;
+      _isBuffering = false;
+      _errorMessage = message;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _hasError) {
+        _errorRetryNode.requestFocus();
+      }
+    });
   }
 
   void _onCompleted() {
@@ -416,7 +476,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _resetControlsTimeout();
   }
 
-  void _handleVerticalDragUpdate(DragUpdateDetails details, double screenWidth) {
+  /// Volta uma única tela. Usa [BackGuard] global: sem ele, segurar o
+  /// botão no Fire TV pulava player -> lista -> início (2 telas).
+  void _goBack() {
+    if (!BackGuard.claim()) return;
+    Navigator.of(context).maybePop();
+  }
+
+  Future<void> _handleVerticalDragUpdate(DragUpdateDetails details, double screenWidth) async {
     final isLeft = details.globalPosition.dx < (screenWidth / 2);
     final delta = -details.primaryDelta! / 250;
     if (isLeft) {
@@ -424,7 +491,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _isAdjustingBrightness = true;
         _brightness = (_brightness + delta).clamp(0.0, 1.0);
       });
-      ScreenBrightness().setApplicationScreenBrightness(_brightness);
+      try {
+        await ScreenBrightness().setApplicationScreenBrightness(_brightness);
+      } catch (_) {
+        // Fire TV e TVs não têm esse controle — ignora sem derrubar o app.
+      }
     } else {
       setState(() {
         _isAdjustingVolume = true;
@@ -522,6 +593,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _reconnectNode.dispose();
     _aspectNode.dispose();
     _backNode.dispose();
+    _errorBackNode.dispose();
+    _errorRetryNode.dispose();
     _player?.dispose();
     WakelockPlus.disable();
     try {
@@ -545,18 +618,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
       body: CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.select): () {
-            if (!_showControls) _toggleControls();
+            if (!_showControls && !_hasError) _toggleControls();
           },
           const SingleActivator(LogicalKeyboardKey.enter): () {
-            if (!_showControls) _toggleControls();
+            if (!_showControls && !_hasError) _toggleControls();
           },
           const SingleActivator(LogicalKeyboardKey.mediaPlayPause): _togglePlay,
           const SingleActivator(LogicalKeyboardKey.arrowUp): _zapPrev,
           const SingleActivator(LogicalKeyboardKey.arrowDown): _zapNext,
           const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _seekBy(-10),
           const SingleActivator(LogicalKeyboardKey.arrowRight): () => _seekBy(10),
-          const SingleActivator(LogicalKeyboardKey.goBack): () =>
-              Navigator.of(context).maybePop(),
+          const SingleActivator(LogicalKeyboardKey.goBack): _goBack,
         },
         child: FocusScope(
           autofocus: true,
@@ -975,7 +1047,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Container(
       color: Colors.black.withValues(alpha: 0.85),
       child: Center(
-        child: Padding(
+        // Escopo próprio: o D-pad circula só entre Voltar/Tentar e o
+        // botão voltar do controle (goBack/escape) sempre sai da tela,
+        // mesmo se o foco estiver perdido.
+        child: FocusScope(
+          autofocus: true,
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.goBack ||
+                  event.logicalKey == LogicalKeyboardKey.escape) {
+                _goBack();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1003,6 +1090,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TvFocusable(
+                    focusNode: _errorBackNode,
                     onPressed: () => Navigator.of(context).pop(),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -1017,6 +1105,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                   const SizedBox(width: 14),
                   TvFocusable(
+                    focusNode: _errorRetryNode,
                     autofocus: true,
                     onPressed: _reconnect,
                     child: Container(
@@ -1038,6 +1127,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );

@@ -3,11 +3,17 @@ McPlayer — códigos Downloader (Firestick / Android TV / celular)
 Código atual (arm64, v1.0.1+2): 4827653
 Uso: app Downloader > digitar o código > Go
 
-v1.0.2+3 (player com hwdec=mediacopy — corrige HD/FHD no Fire Stick):
-- Stick/TV 32-bit (armeabi-v7a, 28,4 MB):
-  https://files.catbox.moe/yu1ibv.apk
-- Celular 64-bit (arm64-v8a, 31,5 MB):
-  https://files.catbox.moe/u3twzp.apk
+v1.0.2+10 (parser estrutural: EXTINF quebrado, live numérica, [L]/dual):
+- Stick/TV 32-bit (armeabi-v7a, 28,5 MB):
+  https://files.catbox.moe/ca8ttk.apk
+- Celular 64-bit (arm64-v8a, 31,6 MB):
+  https://files.catbox.moe/csxu4j.apk
+
+v1.0.3+11 (settings PT/EN + versão do app, player watchdog/foco erro Fire TV, parser + cache 32 MB stick):
+- Stick/TV 32-bit (armeabi-v7a, 28,5 MB):
+  https://files.catbox.moe/mnb27f.apk
+- Celular 64-bit (arm64-v8a, 31,6 MB):
+  https://files.catbox.moe/alp5md.apk
 
 Para publicar: colar cada link em https://go.aftvnews.com/ e anotar
 os códigos gerados aqui. O código 4827653 segue apontando p/ v1.0.1+2.

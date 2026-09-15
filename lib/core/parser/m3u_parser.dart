@@ -3,11 +3,28 @@ import 'package:flutter/foundation.dart';
 import '../../data/models/stream_item.dart';
 
 class M3uParser {
+  /// Compilado uma vez: antes era recriado a cada item (233 mil vezes).
+  static final RegExp regexEpisode = RegExp(
+      r'(\bs\d{1,2}\s*e\d{1,2}\b|\bt\d{1,2}\s*:\s*e\d{1,2}\b|\bep\.?\s*\d{1,3}\b|\bcap\.?\s*\d{1,3}\b|\bcapitulo\s+\d{1,3}\b|\bepisodio\s+\d{1,3}\b)',
+      caseSensitive: false);
+
+  static final RegExp _numericStreamUrl = RegExp(r'/\d+/\d+/\d+\s*$');
+
+  /// Grupos que são canais ao vivo (estrutura do provedor). Só vale quando
+  /// a URL não tem cara de VOD (/movie/, /series/, .mp4...) nem o nome tem
+  /// marcador de episódio — nesses casos as regras 1 e 2 já decidiram.
+  static bool _isLiveGroup(String lowerGroup) {
+    return lowerGroup.contains('ao vivo') ||
+        lowerGroup.contains('canais') ||
+        lowerGroup.contains('tv aberta') ||
+        lowerGroup.contains('tv fechada') ||
+        lowerGroup.contains('24/7') ||
+        lowerGroup.contains('24h');
+  }
   /// Executa o parsing em background Isolate usando compute()
   static Future<List<StreamItem>> parseM3u(String content) async {
     return compute(_parseM3uInternal, content);
   }
-
   static List<StreamItem> _parseM3uInternal(String content) {
     final List<StreamItem> items = [];
     final lines = const LineSplitter().convert(content);
@@ -17,6 +34,24 @@ class M3uParser {
     String? currentLogo;
     String? currentGroup;
     String? currentName;
+    // #EXTINF acumulado: alguns provedores quebram a linha no meio
+    // (ex.: tvg-logo longo) — a continuação vem na linha seguinte.
+    String? pendingExtinf;
+
+    void readExtinf(String line) {
+      currentTvgId = _extractAttribute(line, 'tvg-id');
+      currentTvgName = _extractAttribute(line, 'tvg-name');
+      currentLogo = _extractAttribute(line, 'tvg-logo');
+      currentGroup = _extractAttribute(line, 'group-title');
+
+      // Extrair nome após a última vírgula
+      final commaIndex = line.lastIndexOf(',');
+      if (commaIndex != -1 && commaIndex < line.length - 1) {
+        currentName = line.substring(commaIndex + 1).trim();
+      } else {
+        currentName = currentTvgName ?? 'Sem Nome';
+      }
+    }
 
     final regexSeries = RegExp(r'[sS]\d{1,2}\s*[eE]\d{1,2}', caseSensitive: false);
 
@@ -25,26 +60,25 @@ class M3uParser {
       if (line.isEmpty) continue;
 
       if (line.startsWith('#EXTINF:')) {
-        // Extrair atributos da linha #EXTINF
-        currentTvgId = _extractAttribute(line, 'tvg-id');
-        currentTvgName = _extractAttribute(line, 'tvg-name');
-        currentLogo = _extractAttribute(line, 'tvg-logo');
-        currentGroup = _extractAttribute(line, 'group-title');
-
-        // Extrair nome após a última vírgula
-        final commaIndex = line.lastIndexOf(',');
-        if (commaIndex != -1 && commaIndex < line.length - 1) {
-          currentName = line.substring(commaIndex + 1).trim();
-        } else {
-          currentName = currentTvgName ?? 'Sem Nome';
-        }
+        pendingExtinf = line;
+        readExtinf(line);
       } else if (!line.startsWith('#')) {
-        // É uma URL de stream
+        if (!(line.startsWith('http://') ||
+            line.startsWith('https://'))) {
+          // Não é URL (continuação de EXTINF quebrado): acumula,
+          // re-extrai e aguarda a URL real na próxima linha.
+          if (pendingExtinf != null) {
+            pendingExtinf = '$pendingExtinf $line';
+            readExtinf(pendingExtinf);
+          }
+          continue;
+        }
         final streamUrl = line;
         final name = currentName ?? currentTvgName ?? 'Canal ${items.length + 1}';
-        final group = (currentGroup != null && currentGroup.isNotEmpty)
-            ? currentGroup
-            : 'Outros';
+        final logo = currentLogo;
+        final grp = currentGroup;
+        final group =
+            (grp != null && grp.isNotEmpty) ? grp : 'Outros';
 
         final streamType = _classifyStreamType(
           name: name,
@@ -58,7 +92,7 @@ class M3uParser {
             id: currentTvgId ?? 'item_${items.length}_${streamUrl.hashCode}',
             name: name,
             streamUrl: streamUrl,
-            logoUrl: (currentLogo != null && currentLogo.isNotEmpty) ? currentLogo : null,
+            logoUrl: (logo != null && logo.isNotEmpty) ? logo : null,
             category: group,
             streamType: streamType,
           ),
@@ -70,6 +104,7 @@ class M3uParser {
         currentLogo = null;
         currentGroup = null;
         currentName = null;
+        pendingExtinf = null;
       }
     }
 
@@ -135,13 +170,17 @@ class M3uParser {
     if (lowerUrl.contains('/series/')) return StreamType.series;
 
     // 2. Episódio marcado no nome ou na URL.
-    final regexEpisode = RegExp(
-        r'(\bs\d{1,2}\s*e\d{1,2}\b|\bt\d{1,2}\s*:\s*e\d{1,2}\b|\bep\.?\s*\d{1,3}\b|\bcap\.?\s*\d{1,3}\b|\bcapitulo\s+\d{1,3}\b|\bepisodio\s+\d{1,3}\b)',
-        caseSensitive: false);
     if (regexSeries.hasMatch(name) ||
         regexSeries.hasMatch(url) ||
         regexEpisode.hasMatch(lowerName)) {
       return StreamType.series;
+    }
+
+    // 2b. URL numérica Xtream sem extensão (/user/pass/12345): stream ao
+    // vivo (saída mpegts do get.php). VOD desse formato sempre traz
+    // /movie|/series/ e extensão — já resolvidos nas regras 1 e 3.
+    if (_numericStreamUrl.hasMatch(path)) {
+      return StreamType.live;
     }
 
     // 3. Arquivo de vídeo (VOD).
@@ -162,6 +201,13 @@ class M3uParser {
         path.endsWith('.m3u') ||
         path.endsWith('.ts') ||
         path.endsWith('.mpd')) {
+      return StreamType.live;
+    }
+
+    // 4b. Estrutura do provedor: grupo de canais ao vivo com URL sem
+    // formato claro (ex.: 24/7 dentro de grupo "SÉRIES 24H"). Só alcança
+    // aqui quem não é episódio nem arquivo VOD/live conhecido.
+    if (_isLiveGroup(lowerGroup)) {
       return StreamType.live;
     }
 

@@ -12,6 +12,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
 
+  // Stick de 1 GB: o cache de imagens padrão (100 MB de pôsteres) disputa
+  // RAM com o vídeo e ajuda o sistema a matar o app. Teto de 32 MB.
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 32 << 20;
+
   // Configuração inicial de orientação e sistema
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,

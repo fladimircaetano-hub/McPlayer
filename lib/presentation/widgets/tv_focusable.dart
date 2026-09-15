@@ -128,3 +128,24 @@ class _TvFocusableState extends State<TvFocusable> {
     );
   }
 }
+
+/// Guarda global do botão voltar (D-pad/controle).
+///
+/// Segurar o voltar no Fire TV gera eventos repetidos: o primeiro fecha o
+/// player e os seguintes — ainda com o botão segurado — fechariam a lista
+/// também, pulando 2 telas. Como cada tela tem seu próprio handler, um
+/// debounce local não adianta: o estado precisa ser compartilhado.
+/// [claim] retorna true uma vez por janela e false para as repetições.
+class BackGuard {
+  static DateTime? _lastClaim;
+
+  static bool claim({int windowMs = 900}) {
+    final now = DateTime.now();
+    if (_lastClaim != null &&
+        now.difference(_lastClaim!).inMilliseconds < windowMs) {
+      return false;
+    }
+    _lastClaim = now;
+    return true;
+  }
+}

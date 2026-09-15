@@ -1,10 +1,116 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/storage/storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/tv_focusable.dart';
 import 'lists_screen.dart';
+
+/// Textos da tela em PT/EN. O idioma vem de [StorageService.languageNotifier]
+/// e a troca aplica na hora (listener no [initState]), sem reiniciar o app.
+const Map<String, Map<String, String>> _strings = {
+  'pt': {
+    'settings': 'Settings',
+    'm_info': 'Informações gerais',
+    'm_lang': 'Trocar idioma',
+    'm_format': 'Formato do stream',
+    'm_pin': 'Código PIN',
+    'm_cats': 'Gerenciar categorias',
+    'm_clear': 'Limpar dados',
+    'm_time': 'Data e hora',
+    'm_high': 'Destaques da home',
+    'm_tmdb': 'Usar TMDB API',
+    'm_player': 'Configurações do player',
+    'p_info': 'Info do aparelho',
+    'mac': 'Endereço MAC',
+    'appver': 'Versão do app',
+    'devkey': 'Chave do aparelho',
+    'xtream_user': 'Usuário Xtream',
+    'lista': 'Lista',
+    'p_lang': 'Trocar idioma',
+    'snack_pt': 'Idioma: Português',
+    'snack_en': 'Idioma: inglês',
+    'p_format': 'Formato do stream',
+    'snack_ts': 'Formato: mpegts — vale para os canais Xtream',
+    'snack_hls': 'Formato: m3u8 — vale para os canais Xtream',
+    'p_pin': 'Trocar PIN',
+    'pin_set': 'PIN definido',
+    'pin_no': 'Sem PIN',
+    'pin_hint': 'Novo PIN (4 dígitos)',
+    'pin_save': 'Salvar',
+    'pin_need4': 'Digite 4 dígitos',
+    'pin_saved': 'PIN salvo',
+    'p_cats': 'Gerenciar categorias',
+    'cat_live': 'TV ao vivo',
+    'cat_movies': 'Filmes',
+    'cat_series': 'Séries',
+    'p_clear': 'Limpar dados',
+    'clear_fav': 'Limpar favoritos',
+    'fav_cleared': 'Favoritos apagados',
+    'logout_keep': 'Sair da lista (manter favoritos)',
+    'wipe': 'Apagar tudo',
+    'p_time': 'Data e hora',
+    'dev_time': 'Horário do aparelho',
+    'tz': 'Fuso',
+    'p_high': 'Destaques da home',
+    'show_counts': 'Mostrar contadores no menu',
+    'p_tmdb': 'Usar TMDB API',
+    'tmdb_desc': 'Buscar pôsteres e sinopses (TMDB)',
+    'p_player': 'Configurações do player',
+    'keep_on': 'Manter tela ligada no player',
+  },
+  'en': {
+    'settings': 'Settings',
+    'm_info': 'General Info',
+    'm_lang': 'Change Language',
+    'm_format': 'Change Stream Format',
+    'm_pin': 'Change Pin Code',
+    'm_cats': 'Manage Categories',
+    'm_clear': 'Clear Storage',
+    'm_time': 'Time Settings',
+    'm_high': 'Home Highlights',
+    'm_tmdb': 'Use TMDB API',
+    'm_player': 'Player Settings',
+    'p_info': 'Device Info',
+    'mac': 'Mac Address',
+    'appver': 'App version',
+    'devkey': 'Device key',
+    'xtream_user': 'Xtream user',
+    'lista': 'Playlist',
+    'p_lang': 'Change Language',
+    'snack_pt': 'Language: Portuguese',
+    'snack_en': 'Language: English',
+    'p_format': 'Change Stream Format',
+    'snack_ts': 'Format: mpegts — applies to Xtream channels',
+    'snack_hls': 'Format: m3u8 — applies to Xtream channels',
+    'p_pin': 'Change Pin Code',
+    'pin_set': 'PIN set',
+    'pin_no': 'No PIN',
+    'pin_hint': 'New PIN (4 digits)',
+    'pin_save': 'Save',
+    'pin_need4': 'Enter 4 digits',
+    'pin_saved': 'PIN saved',
+    'p_cats': 'Manage Categories',
+    'cat_live': 'Live TV',
+    'cat_movies': 'Movies',
+    'cat_series': 'Series',
+    'p_clear': 'Clear Storage',
+    'clear_fav': 'Clear favorites',
+    'fav_cleared': 'Favorites deleted',
+    'logout_keep': 'Sign out of playlist (keep favorites)',
+    'wipe': 'Erase everything',
+    'p_time': 'Time Settings',
+    'dev_time': 'Device time',
+    'tz': 'Time zone',
+    'p_high': 'Home Highlights',
+    'show_counts': 'Show counters in menu',
+    'p_tmdb': 'Use TMDB API',
+    'tmdb_desc': 'Fetch posters and synopses (TMDB)',
+    'p_player': 'Player Settings',
+    'keep_on': 'Keep screen on in player',
+  },
+};
 
 /// Tela "Settings" conforme modelo: menu à esquerda, painel à direita.
 ///
@@ -20,27 +126,48 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const _menu = [
-    'General Info',
-    'Change Language',
-    'Change Stream Format',
-    'Change Pin Code',
-    'Manage Categories',
-    'Clear Storage',
-    'Time Settings',
-    'Home Highlights',
-    'Use TMDB API',
-    'Player Settings',
-  ];
-
   int _selected = 0;
   final TextEditingController _pinCtrl = TextEditingController();
+  String _appVersion = '';
 
   StorageService get _storage => widget.controller.storageService;
   bool get _isTv => MediaQuery.of(context).size.width >= 900;
 
+  String tr(String key) {
+    final lang = _storage.languageNotifier.value;
+    return _strings[lang]?[key] ?? _strings['pt']![key] ?? key;
+  }
+
+  List<String> get _menu => [
+        tr('m_info'),
+        tr('m_lang'),
+        tr('m_format'),
+        tr('m_pin'),
+        tr('m_cats'),
+        tr('m_clear'),
+        tr('m_time'),
+        tr('m_high'),
+        tr('m_tmdb'),
+        tr('m_player'),
+      ];
+
+  @override
+  void initState() {
+    super.initState();
+    _storage.languageNotifier.addListener(_onLangChanged);
+    PackageInfo.fromPlatform().then((info) {
+      if (!mounted) return;
+      setState(() => _appVersion = '${info.version}+${info.buildNumber}');
+    });
+  }
+
+  void _onLangChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _storage.languageNotifier.removeListener(_onLangChanged);
     _pinCtrl.dispose();
     super.dispose();
   }
@@ -68,7 +195,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// setState em widget desmontado lança exceção.
   void _refresh() {
     if (!mounted) return;
-    _refresh();
+    setState(() {});
   }
 
   @override
@@ -105,8 +232,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          const Text('Settings',
-                              style: TextStyle(
+                          Text(tr('settings'),
+                              style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w900,
                                   fontSize: 34)),
@@ -147,12 +274,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildMenu() {
+    final menu = _menu;
     return ListView.builder(
       shrinkWrap: true,
       physics: _isTv
           ? const AlwaysScrollableScrollPhysics()
           : const NeverScrollableScrollPhysics(),
-      itemCount: _menu.length,
+      itemCount: menu.length,
       itemBuilder: (context, i) {
         final selected = i == _selected;
         final isTmdb = i == 8;
@@ -176,7 +304,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      _menu[i],
+                      menu[i],
                       style: TextStyle(
                           color:
                               selected ? Colors.black : Colors.white,
@@ -346,15 +474,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Device Info'),
-        _panelTitle('Mac Address', value: mac.toLowerCase()),
-        _panelTitle('App version', value: '1.0.0'),
-        _panelTitle('Product Version', value: '1.0.0+1'),
-        _panelTitle('Device key', value: deviceId),
+        _panelTitle(tr('p_info')),
+        _panelTitle(tr('mac'), value: mac.toLowerCase()),
+        _panelTitle(tr('appver'),
+            value: _appVersion.isEmpty ? '...' : _appVersion),
+        _panelTitle(tr('devkey'), value: deviceId),
         if (account != null)
-          _panelTitle('Xtream user', value: account.username),
+          _panelTitle(tr('xtream_user'), value: account.username),
         if (widget.controller.loadedListName != null)
-          _panelTitle('Lista', value: widget.controller.loadedListName!),
+          _panelTitle(tr('lista'), value: widget.controller.loadedListName!),
       ],
     );
   }
@@ -364,14 +492,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Change Language'),
+        _panelTitle(tr('p_lang')),
         _optionRow(
           label: 'Português',
           checked: lang == 'pt',
           onTap: () async {
             await _storage.setLanguage('pt');
-            _refresh();
-            _snack('Idioma: Português');
+            _snack(tr('snack_pt'));
           },
         ),
         _optionRow(
@@ -379,8 +506,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           checked: lang == 'en',
           onTap: () async {
             await _storage.setLanguage('en');
-            _refresh();
-            _snack('Language: English');
+            _snack(tr('snack_en'));
           },
         ),
       ],
@@ -392,14 +518,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Change Stream Format'),
+        _panelTitle(tr('p_format')),
         _optionRow(
           label: 'mpegts (TS)',
           checked: fmt == 'mpegts',
           onTap: () async {
             await _storage.setStreamFormat('mpegts');
             _refresh();
-            _snack('Formato: mpegts — vale para os canais Xtream');
+            _snack(tr('snack_ts'));
           },
         ),
         _optionRow(
@@ -408,7 +534,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onTap: () async {
             await _storage.setStreamFormat('m3u8');
             _refresh();
-            _snack('Formato: m3u8 — vale para os canais Xtream');
+            _snack(tr('snack_hls'));
           },
         ),
       ],
@@ -420,8 +546,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Change Pin Code',
-            value: hasPin ? 'PIN definido' : 'Sem PIN'),
+        _panelTitle(tr('p_pin'),
+            value: hasPin ? tr('pin_set') : tr('pin_no')),
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: TextField(
@@ -430,8 +556,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             maxLength: 4,
             obscureText: true,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(
-              hintText: 'Novo PIN (4 dígitos)',
+            decoration: InputDecoration(
+              hintText: tr('pin_hint'),
               counterText: '',
             ),
           ),
@@ -441,13 +567,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onPressed: () async {
             final pin = _pinCtrl.text.trim();
             if (pin.length != 4) {
-              _snack('Digite 4 dígitos');
+              _snack(tr('pin_need4'));
               return;
             }
             await _storage.setPin(pin);
             _pinCtrl.clear();
             _refresh();
-            _snack('PIN salvo');
+            _snack(tr('pin_saved'));
           },
           child: Container(
             padding: const EdgeInsets.symmetric(
@@ -456,8 +582,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               color: AppColors.primary,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Text('Salvar',
-                style: TextStyle(
+            child: Text(tr('pin_save'),
+                style: const TextStyle(
                     color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ),
@@ -470,9 +596,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Manage Categories'),
+        _panelTitle(tr('p_cats')),
         _switchRow(
-          label: 'TV ao vivo',
+          label: tr('cat_live'),
           value: !hidden.contains('live'),
           onChanged: (v) async {
             await _storage.setSectionHidden('live', !v);
@@ -480,7 +606,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           },
         ),
         _switchRow(
-          label: 'Filmes',
+          label: tr('cat_movies'),
           value: !hidden.contains('movie'),
           onChanged: (v) async {
             await _storage.setSectionHidden('movie', !v);
@@ -488,7 +614,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           },
         ),
         _switchRow(
-          label: 'Séries',
+          label: tr('cat_series'),
           value: !hidden.contains('series'),
           onChanged: (v) async {
             await _storage.setSectionHidden('series', !v);
@@ -503,23 +629,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Clear Storage'),
+        _panelTitle(tr('p_clear')),
         _optionRow(
-          label: 'Limpar favoritos',
+          label: tr('clear_fav'),
           showCheck: false,
           onTap: () async {
             await _storage.clearFavorites();
             await widget.controller.reload();
-            _snack('Favoritos apagados');
+            _snack(tr('fav_cleared'));
           },
         ),
         _optionRow(
-          label: 'Sair da lista (manter favoritos)',
+          label: tr('logout_keep'),
           showCheck: false,
           onTap: _logout,
         ),
         _optionRow(
-          label: 'Apagar tudo',
+          label: tr('wipe'),
           showCheck: false,
           onTap: () async {
             await _storage.clearAll();
@@ -538,9 +664,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Time Settings'),
-        _panelTitle('Horário do aparelho', value: label),
-        _panelTitle('Fuso', value: now.timeZoneName),
+        _panelTitle(tr('p_time')),
+        _panelTitle(tr('dev_time'), value: label),
+        _panelTitle(tr('tz'), value: now.timeZoneName),
       ],
     );
   }
@@ -549,9 +675,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Home Highlights'),
+        _panelTitle(tr('p_high')),
         _switchRow(
-          label: 'Mostrar contadores no menu',
+          label: tr('show_counts'),
           value: _storage.getShowCounts(),
           onChanged: (v) async {
             await _storage.setShowCounts(v);
@@ -566,9 +692,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Use TMDB API'),
+        _panelTitle(tr('p_tmdb')),
         _switchRow(
-          label: 'Buscar pôsteres e sinopses (TMDB)',
+          label: tr('tmdb_desc'),
           value: _storage.getTmdbEnabled(),
           onChanged: (v) async {
             await _storage.setTmdbEnabled(v);
@@ -583,9 +709,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _panelTitle('Player Settings'),
+        _panelTitle(tr('p_player')),
         _switchRow(
-          label: 'Manter tela ligada no player',
+          label: tr('keep_on'),
           value: _storage.getKeepScreenOn(),
           onChanged: (v) async {
             await _storage.setKeepScreenOn(v);

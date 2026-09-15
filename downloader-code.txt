@@ -10,9 +10,9 @@ v1.0.2+10 (parser estrutural: EXTINF quebrado, live numérica, [L]/dual):
   https://files.catbox.moe/csxu4j.apk
 
 v1.0.3+11 (settings PT/EN + versão do app, player watchdog/foco erro Fire TV, parser + cache 32 MB stick):
-- Stick/TV 32-bit (armeabi-v7a, 28,5 MB):
+- Stick/TV 32-bit (armeabi-v7a, 28,5 MB): código 8428099
   https://files.catbox.moe/mnb27f.apk
-- Celular 64-bit (arm64-v8a, 31,6 MB):
+- Celular 64-bit (arm64-v8a, 31,6 MB): código 3498216
   https://files.catbox.moe/alp5md.apk
 
 Para publicar: colar cada link em https://go.aftvnews.com/ e anotar

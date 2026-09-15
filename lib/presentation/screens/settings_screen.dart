@@ -59,6 +59,8 @@ const Map<String, Map<String, String>> _strings = {
     'tmdb_desc': 'Buscar pôsteres e sinopses (TMDB)',
     'p_player': 'Configurações do player',
     'keep_on': 'Manter tela ligada no player',
+    'disclaimer':
+        'McPlayer é apenas um reprodutor de mídia. Não fornece listas, canais ou conteúdos e não se responsabiliza pelo uso indevido do aplicativo.',
   },
   'en': {
     'settings': 'Settings',
@@ -109,6 +111,8 @@ const Map<String, Map<String, String>> _strings = {
     'tmdb_desc': 'Fetch posters and synopses (TMDB)',
     'p_player': 'Player Settings',
     'keep_on': 'Keep screen on in player',
+    'disclaimer':
+        'McPlayer is only a media player. It does not provide lists, channels or content and is not responsible for misuse of the app.',
   },
 };
 
@@ -483,6 +487,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _panelTitle(tr('xtream_user'), value: account.username),
         if (widget.controller.loadedListName != null)
           _panelTitle(tr('lista'), value: widget.controller.loadedListName!),
+        const SizedBox(height: 16),
+        Text(
+          tr('disclaimer'),
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
       ],
     );
   }

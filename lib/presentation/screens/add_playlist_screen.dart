@@ -154,6 +154,12 @@ class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
                 ],
               ),
               const SizedBox(height: 16),
+              const Text(
+                'McPlayer is only a media player. It does not provide lists, channels or content and is not responsible for misuse of the app.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+              const SizedBox(height: 8),
               Row(
                 children: [
                   const Expanded(

@@ -16,9 +16,9 @@ v1.0.3+11 (settings PT/EN + versão do app, player watchdog/foco erro Fire TV, p
   https://files.catbox.moe/alp5md.apk
 
 v1.0.3+12 (aviso legal: apenas reprodutor, sem listas):
-- Stick/TV 32-bit (armeabi-v7a, 28,5 MB):
+- Stick/TV 32-bit (armeabi-v7a, 28,5 MB): código 4362851
   https://files.catbox.moe/2wyiax.apk
-- Celular 64-bit (arm64-v8a, 31,6 MB):
+- Celular 64-bit (arm64-v8a, 31,6 MB): código 3061680
   https://files.catbox.moe/pna0bz.apk
 
 Para publicar: colar cada link em https://go.aftvnews.com/ e anotar

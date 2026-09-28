@@ -31,9 +31,9 @@ class ActivationListData {
     return ActivationListData(
       type: (json['type'] as String? ?? 'm3u').toLowerCase(),
       url: json['url'] as String?,
-      serverUrl: json['serverUrl'] as String?,
-      username: json['username'] as String?,
-      password: json['password'] as String?,
+      serverUrl: (json['serverUrl'] ?? json['server_url']) as String?,
+      username: (json['username'] ?? json['user']) as String?,
+      password: (json['password'] ?? json['pass']) as String?,
     );
   }
 }

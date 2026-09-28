@@ -32,8 +32,8 @@ class EpgProgram {
 
 /// Parse pesado roda em isolate: devolve só tipos primitivos.
 /// {channelKey: [{t: title, s: startMsUtc, e: endMsUtc}]}
-Future<Map<String, List<Map<String, Object>>>> _parseXmltv(
-    String raw) async {
+/// Deve ser top-level para funcionar com compute().
+Future<Map<String, List<Map<String, Object>>>> _parseXmltv(String raw) async {
   final result = <String, List<Map<String, Object>>>{};
   XmlDocument doc;
   try {
@@ -67,6 +67,7 @@ Future<Map<String, List<Map<String, Object>>>> _parseXmltv(
 }
 
 /// "20260914091400 -0300" ou "20260914091400" (sem offset = UTC).
+/// Deve ser top-level para funcionar com compute().
 DateTime? _parseXmltvDate(String? v) {
   if (v == null) return null;
   final m = RegExp(r'^(\d{14})(?:\s*([+-])(\d{2})(\d{2}))?')
@@ -124,6 +125,10 @@ class EpgService {
     required String username,
     required String password,
   }) async {
+    if (username.trim().isEmpty || password.trim().isEmpty) {
+      debugPrint('[EPG] Missing credentials for Xtream EPG');
+      return {};
+    }
     final base = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
     final url =
         '$base/xmltv.php?username=${Uri.encodeComponent(username.trim())}'
@@ -138,12 +143,16 @@ class EpgService {
       final uri = Uri.parse(m3uUrl.trim());
       final user = uri.queryParameters['username'] ?? '';
       final pass = uri.queryParameters['password'] ?? '';
-      if (user.isEmpty || pass.isEmpty) return {};
+      if (user.isEmpty || pass.isEmpty) {
+        debugPrint('[EPG] No credentials in M3U URL for EPG');
+        return {};
+      }
       var host = '${uri.scheme}://${uri.host}';
       if (uri.hasPort) host += ':${uri.port}';
       return await loadXtream(
           serverUrl: host, username: user, password: pass);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[EPG] Error parsing M3U URL for EPG: $e');
       return {};
     }
   }
@@ -192,9 +201,13 @@ class EpgService {
       final response = await _dio.get<String>(url);
       final raw = response.data ?? '';
       if (response.statusCode != null && response.statusCode! >= 400) {
+        debugPrint('[EPG] HTTP error: ${response.statusCode} for $url');
         return {};
       }
-      if (!raw.contains('<tv')) return {};
+      if (!raw.contains('<tv')) {
+        debugPrint('[EPG] Invalid XMLTV format from $url');
+        return {};
+      }
       final parsed = await compute(_parseXmltv, raw);
       final out = <String, List<EpgProgram>>{};
       parsed.forEach((key, list) {
@@ -209,8 +222,10 @@ class EpgService {
             ),
         ];
       });
+      debugPrint('[EPG] Loaded ${out.length} channels with EPG data');
       return out;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[EPG] Error fetching $url: $e');
       return {};
     }
   }

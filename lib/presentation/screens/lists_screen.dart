@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../../core/activation/activation_models.dart';
 import '../../core/activation/activation_service.dart';
+import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/back_navigation_mixin.dart';
+import '../../data/models/xtream_account.dart';
 import '../controllers/iptv_controller.dart';
-import '../widgets/double_back_to_exit.dart';
 import '../widgets/tv_focusable.dart';
 import 'add_playlist_screen.dart';
 import 'home_screen.dart';
@@ -24,16 +25,12 @@ class ListsScreen extends StatefulWidget {
   State<ListsScreen> createState() => _ListsScreenState();
 }
 
-class _ListsScreenState extends State<ListsScreen> {
+class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   IptvController get controller => widget.controller;
-
-  // Voltar unificado (botão visível + gesto/D-pad): volta à Home se
-  // veio de lá; se a Playlist é a raiz, 2 toques para sair.
-  final DoubleBackController _backController = DoubleBackController();
 
   // Ativação remota via Dashboard (Supabase), silenciosa: sem aviso
   // visível — a lista aprovada no painel entra sozinha.
-  final ActivationService _activation = ActivationService();
+  final ActivationService? _activation = sl.activationService;
   Timer? _pollTimer;
   bool _autoActivating = false;
 
@@ -57,8 +54,9 @@ class _ListsScreenState extends State<ListsScreen> {
   /// Ativação remota: registra a chave no Dashboard e observa aprovação
   /// em silêncio. Sem configuração no ActivationConfig, não faz nada.
   Future<void> _setupActivation() async {
-    if (!_activation.isEnabled) return;
-    final result = await _activation.checkIn(
+    final activation = _activation;
+    if (activation == null || !activation.isEnabled) return;
+    final result = await activation.checkIn(
       deviceId: _deviceId,
       mac: _deviceMac,
     );
@@ -76,8 +74,9 @@ class _ListsScreenState extends State<ListsScreen> {
   }
 
   Future<void> _pollActivation() async {
-    if (!mounted || _autoActivating) return;
-    final result = await _activation.fetchStatus(_deviceId);
+    final activation = _activation;
+    if (!mounted || _autoActivating || activation == null) return;
+    final result = await activation.fetchStatus(_deviceId);
     if (!mounted || _autoActivating) return;
     if (result.status == ActivationStatus.approved &&
         result.listData != null) {
@@ -114,7 +113,27 @@ class _ListsScreenState extends State<ListsScreen> {
   Future<void> _loadRecent(BuildContext context, String url) async {
     final ok = await controller.loadFromM3uUrl(url);
     if (ok && context.mounted) {
-      Navigator.of(context).popUntil((r) => r.isFirst);
+      _openActive();
+    } else if (context.mounted && controller.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(controller.errorMessage!),
+          backgroundColor: Colors.redAccent.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _loadXtream(
+      BuildContext context, XtreamAccount account) async {
+    final ok = await controller.loginXtream(
+      serverUrl: account.serverUrl,
+      username: account.username,
+      password: account.password,
+    );
+    if (ok && context.mounted) {
+      _openActive();
     } else if (context.mounted && controller.errorMessage != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -139,19 +158,8 @@ class _ListsScreenState extends State<ListsScreen> {
   }
 
   /// Botão voltar visível: retorna à Home se veio de lá (botão Listas);
-  /// se a Playlist é a raiz, exige 2 toques para sair (mesma lógica do
-  /// gesto/D-pad, via [_backController] compartilhado).
-  void _onBackButton() {
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-      return;
-    }
-    if (_backController.registerPress()) {
-      SystemNavigator.pop();
-    } else {
-      showExitHint(context, 'Pressione voltar novamente para sair');
-    }
-  }
+  /// se a Playlist é a raiz, exige 2 toques para sair (via BackGuard).
+  void _onBackButton() => handleBackButton();
 
   @override
   Widget build(BuildContext context) {
@@ -176,12 +184,27 @@ class _ListsScreenState extends State<ListsScreen> {
           rows.add(_PlaylistRow(
               name: activeName, url: lastUrl, isXtream: account != null));
         }
+        // Multi-listas: contas Xtream salvas (exceto a ativa) p/ trocar
+        // sem redigitar. M3U recentes continuam abaixo como antes.
+        for (final saved in storage.getXtreamAccounts()) {
+          final isActive = account != null &&
+              saved.serverUrl == account.serverUrl &&
+              saved.username == account.username;
+          if (isActive) continue;
+          if (rows.any((r) =>
+              r.account != null &&
+              r.account!.serverUrl == saved.serverUrl &&
+              r.account!.username == saved.username)) {
+            continue;
+          }
+          rows.add(_PlaylistRow(
+              name: saved.username, isXtream: true, account: saved));
+        }
         for (final u in recents) {
           rows.add(_PlaylistRow(name: u, url: u, isXtream: false));
         }
 
-        return DoubleBackToExit(
-          controller: _backController,
+        return buildWithDoubleBackExit(
           child: Scaffold(
           body: SafeArea(
             child: Stack(
@@ -267,6 +290,8 @@ class _ListsScreenState extends State<ListsScreen> {
                                     onPressed: () {
                                       if (i == 0 && hasActive) {
                                         _openActive();
+                                      } else if (row.account != null) {
+                                        _loadXtream(context, row.account!);
                                       } else if (row.url != null) {
                                         _loadRecent(context, row.url!);
                                       }
@@ -326,6 +351,10 @@ class _ListsScreenState extends State<ListsScreen> {
                                   onPressed: () async {
                                     if (i == 0 && hasActive) {
                                       await _removeActive(context);
+                                    } else if (row.account != null) {
+                                      await storage.removeXtreamAccount(
+                                          row.account!);
+                                      controller.refresh();
                                     } else if (row.url != null) {
                                       await storage
                                           .removeRecentUrl(row.url!);
@@ -414,6 +443,11 @@ class _PlaylistRow {
   final String name;
   final String? url;
   final bool isXtream;
+  final XtreamAccount? account;
 
-  _PlaylistRow({required this.name, this.url, required this.isXtream});
+  _PlaylistRow(
+      {required this.name,
+      this.url,
+      required this.isXtream,
+      this.account});
 }

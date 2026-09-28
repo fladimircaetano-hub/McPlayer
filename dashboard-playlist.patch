@@ -1,0 +1,271 @@
+diff --git a/src/components/DeviceApprovalModal.tsx b/src/components/DeviceApprovalModal.tsx
+index 3b177f1..fa4b7bc 100644
+--- a/src/components/DeviceApprovalModal.tsx
++++ b/src/components/DeviceApprovalModal.tsx
+@@ -1,5 +1,6 @@
+ import { useState } from 'react';
+ import Modal from '@/components/Modal';
++import { useIPTV } from '@/hooks/useIPTV';
+ import type { Device, PlaylistType, DeviceListData } from '@/types/iptv';
+ import { Smartphone, Link2, Server, User, Key, CheckCircle, Radio } from 'lucide-react';
+ 
+@@ -13,11 +14,13 @@ interface DeviceApprovalModalProps {
+ type ListTypeOption = 'm3u' | 'xtream';
+ 
+ export default function DeviceApprovalModal({ device, isOpen, onClose, onApprove }: DeviceApprovalModalProps) {
++  const { playlists } = useIPTV();
+   const [listType, setListType] = useState<ListTypeOption>('m3u');
+   const [m3uUrl, setM3uUrl] = useState('');
+   const [serverUrl, setServerUrl] = useState('');
+   const [username, setUsername] = useState('');
+   const [password, setPassword] = useState('');
++  const [selectedPlaylistId, setSelectedPlaylistId] = useState('');
+   const [errors, setErrors] = useState<Record<string, string>>({});
+ 
+   const resetForm = () => {
+@@ -26,9 +29,26 @@ export default function DeviceApprovalModal({ device, isOpen, onClose, onApprove
+     setServerUrl('');
+     setUsername('');
+     setPassword('');
++    setSelectedPlaylistId('');
+     setErrors({});
+   };
+ 
++  const handleSelectPlaylist = (playlistId: string) => {
++    setSelectedPlaylistId(playlistId);
++    if (!playlistId) return;
++    const p = playlists.find((x) => x.id === playlistId);
++    if (!p) return;
++    if (p.type === 'xtream') {
++      setListType('xtream');
++      setServerUrl(p.serverUrl ?? '');
++      setUsername(p.username ?? '');
++      setPassword(p.password ?? '');
++    } else {
++      setListType('m3u');
++      setM3uUrl(p.url ?? '');
++    }
++  };
++
+   const handleClose = () => {
+     resetForm();
+     onClose();
+@@ -93,6 +113,25 @@ export default function DeviceApprovalModal({ device, isOpen, onClose, onApprove
+           </div>
+         </div>
+ 
++        {playlists.length > 0 && (
++          <div>
++            <label className="block text-text-primary font-medium mb-3">Usar lista salva (opcional)</label>
++            <select
++              value={selectedPlaylistId}
++              onChange={(e) => handleSelectPlaylist(e.target.value)}
++              className="w-full px-4 py-3 bg-surface-light border border-border rounded-lg text-text-primary focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer"
++            >
++              <option value="">— preencher manual —</option>
++              {playlists.map((p) => (
++                <option key={p.id} value={p.id}>
++                  {p.name} ({p.type})
++                </option>
++              ))}
++            </select>
++            <p className="text-text-muted text-xs mt-2">Ao escolher, os campos abaixo são preenchidos e enviados ao aparelho na aprovação.</p>
++          </div>
++        )}
++
+         <div>
+           <label className="block text-text-primary font-medium mb-3">Tipo de Lista para Vincular</label>
+           <div className="grid grid-cols-2 gap-4">
+diff --git a/src/context/IPTVContext.ts b/src/context/IPTVContext.ts
+index 0ab8f92..7604536 100644
+--- a/src/context/IPTVContext.ts
++++ b/src/context/IPTVContext.ts
+@@ -7,8 +7,8 @@ export interface IPTVContextType {
+   playlists: Playlist[];
+   devices: Device[];
+ 
+-  // Client actions
+-  addClient: (client: Omit<Client, 'id' | 'createdAt'>) => void;
++  // Client actions (retorna o id criado para vincular dispositivo/lista)
++  addClient: (client: Omit<Client, 'id' | 'createdAt'>) => string;
+   updateClient: (id: string, client: Partial<Client>) => void;
+   deleteClient: (id: string) => void;
+ 
+diff --git a/src/context/IPTVProvider.tsx b/src/context/IPTVProvider.tsx
+index 2d36175..f393978 100644
+--- a/src/context/IPTVProvider.tsx
++++ b/src/context/IPTVProvider.tsx
+@@ -205,13 +205,14 @@ export default function IPTVProvider({ children }: { children: ReactNode }) {
+     };
+   }, []);
+ 
+-  const addClient = (clientData: Omit<Client, 'id' | 'createdAt'>) => {
++  const addClient = (clientData: Omit<Client, 'id' | 'createdAt'>): string => {
+     const newClient: Client = {
+       ...clientData,
+       id: `cli_${generateId()}`,
+       createdAt: new Date().toISOString().split('T')[0],
+     };
+     setClients((prev) => [...prev, newClient]);
++    return newClient.id;
+   };
+ 
+   const updateClient = (id: string, clientData: Partial<Client>) => {
+diff --git a/src/pages/Clients.tsx b/src/pages/Clients.tsx
+index 2af1702..ce1ec2d 100644
+--- a/src/pages/Clients.tsx
++++ b/src/pages/Clients.tsx
+@@ -14,6 +14,7 @@ interface FormData {
+   expirationDate: string;
+   deviceId: string;
+   deviceName: string;
++  playlistId: string;
+ }
+ 
+ const initialFormData: FormData = {
+@@ -23,10 +24,12 @@ const initialFormData: FormData = {
+   expirationDate: '',
+   deviceId: '',
+   deviceName: '',
++  playlistId: '',
+ };
+ 
+ export default function Clients() {
+-  const { clients, addClient, updateClient, deleteClient } = useIPTV();
++  const { clients, playlists, addClient, updateClient, deleteClient, checkInDevice, approveDeviceWithList } = useIPTV();
++  const [formMsg, setFormMsg] = useState<string | null>(null);
+ 
+   const [searchTerm, setSearchTerm] = useState('');
+   const [statusFilter, setStatusFilter] = useState<ClientStatus | 'all'>('all');
+@@ -55,8 +58,10 @@ export default function Clients() {
+       expirationDate: client.expirationDate,
+       deviceId: client.deviceId ?? '',
+       deviceName: client.deviceName ?? '',
++      playlistId: client.playlistId ?? '',
+     });
+     setEditingId(client.id);
++    setFormMsg(null);
+     setModalMode('edit');
+   };
+ 
+@@ -64,30 +69,84 @@ export default function Clients() {
+     setModalMode(null);
+     setEditingId(null);
+     setFormData(initialFormData);
++    setFormMsg(null);
+   };
+ 
+-  const handleSubmit = (e: React.FormEvent) => {
++  const playlistToListData = (playlistId: string) => {
++    const p = playlists.find((x) => x.id === playlistId);
++    if (!p) return null;
++    if (p.type === 'xtream') {
++      if (!p.serverUrl || !p.username || !p.password) return null;
++      return { type: p.type, serverUrl: p.serverUrl, username: p.username, password: p.password };
++    }
++    if (!p.url) return null;
++    return { type: p.type, url: p.url };
++  };
++
++  const handleSubmit = async (e: React.FormEvent) => {
+     e.preventDefault();
++    setFormMsg(null);
++
++    const deviceKey = formData.deviceId.trim();
+ 
+     if (modalMode === 'add') {
+-      addClient({
++      const newId = addClient({
+         name: formData.name,
+         phone: formData.phone,
+         status: formData.status,
+         expirationDate: formData.expirationDate,
+-        deviceId: formData.deviceId || null,
++        deviceId: deviceKey || null,
+         deviceName: formData.deviceName || null,
+-        playlistId: null,
++        playlistId: formData.playlistId || null,
+       });
++      // Fluxo Dashboard -> aparelho: cria o dispositivo (pending) e já
++      // aprova com a lista, gravando list_data no Supabase para o app receber.
++      if (deviceKey) {
++        try {
++          const dev = checkInDevice(deviceKey, formData.deviceName || 'McPlayer');
++          const listData = formData.playlistId ? playlistToListData(formData.playlistId) : null;
++          if (listData) {
++            const ok = await approveDeviceWithList(dev.id, listData, newId);
++            setFormMsg(
++              ok
++                ? 'Cliente criado, dispositivo aprovado e lista enviada ao aparelho.'
++                : 'Cliente criado, mas FALHA ao enviar lista ao Supabase.',
++            );
++            if (!ok) return;
++          }
++        } catch (err) {
++          setFormMsg(err instanceof Error ? err.message : 'Falha ao vincular dispositivo');
++          return;
++        }
++      }
+     } else if (modalMode === 'edit' && editingId) {
+       updateClient(editingId, {
+         name: formData.name,
+         phone: formData.phone,
+         status: formData.status,
+         expirationDate: formData.expirationDate,
+-        deviceId: formData.deviceId || null,
++        deviceId: deviceKey || null,
+         deviceName: formData.deviceName || null,
++        playlistId: formData.playlistId || null,
+       });
++      if (deviceKey && formData.playlistId) {
++        try {
++          const dev = checkInDevice(deviceKey, formData.deviceName || 'McPlayer');
++          const listData = playlistToListData(formData.playlistId);
++          if (listData) {
++            const ok = await approveDeviceWithList(dev.id, listData, editingId);
++            setFormMsg(
++              ok
++                ? 'Cliente salvo e lista enviada ao aparelho.'
++                : 'Cliente salvo, mas FALHA ao enviar lista ao Supabase.',
++            );
++            if (!ok) return;
++          }
++        } catch (err) {
++          setFormMsg(err instanceof Error ? err.message : 'Falha ao vincular dispositivo');
++          return;
++        }
++      }
+     }
+ 
+     closeModal();
+@@ -304,8 +363,30 @@ export default function Clients() {
+                 placeholder="Chave 6 dígitos ou MAC"
+               />
+             </div>
++            <div className="md:col-span-2">
++              <label className="block text-text-secondary text-sm mb-1.5">Playlist (vincula e envia ao aparelho)</label>
++              <select
++                value={formData.playlistId}
++                onChange={(e) => setFormData({ ...formData, playlistId: e.target.value })}
++                className="w-full px-4 py-2.5 bg-surface-light border border-border rounded-lg text-text-primary focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer"
++              >
++                <option value="">— sem playlist —</option>
++                {playlists.map((p) => (
++                  <option key={p.id} value={p.id}>
++                    {p.name} ({p.type})
++                  </option>
++                ))}
++              </select>
++              <p className="text-text-muted text-xs mt-1.5">
++                Ao salvar com dispositivo + playlist, a lista é gravada no Supabase (list_data) e o app recebe sozinho.
++              </p>
++            </div>
+           </div>
+ 
++          {formMsg && (
++            <p className="text-sm font-medium text-danger">{formMsg}</p>
++          )}
++
+           <div className="flex justify-end gap-3 mt-4">
+             <button
+               type="button"

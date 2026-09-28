@@ -10,6 +10,7 @@ class StorageService {
   static const String _keyLastM3uUrl = 'iptv_last_m3u_url';
   static const String _keyLastM3uPath = 'iptv_last_m3u_path';
   static const String _keyXtreamAccount = 'iptv_xtream_account';
+  static const String _keyXtreamAccounts = 'iptv_xtream_accounts';
   static const String _keyRecentUrls = 'iptv_recent_urls';
   static const String _keyDeviceId = 'device_id';
   static const String _keyDeviceMac = 'device_mac_virtual';
@@ -107,6 +108,54 @@ class StorageService {
   Future<void> saveXtreamAccount(XtreamAccount account) async {
     final raw = jsonEncode(account.toJson());
     await _prefs.setString(_keyXtreamAccount, raw);
+    // Multi-listas: mantém a conta na lista de salvas (sem duplicar).
+    final saved = getXtreamAccounts().toList();
+    saved.removeWhere((a) =>
+        a.serverUrl == account.serverUrl &&
+        a.username == account.username);
+    saved.insert(0, account);
+    await _prefs.setStringList(
+      _keyXtreamAccounts,
+      saved.map((a) => jsonEncode(a.toJson())).toList(),
+    );
+  }
+
+  /// Todas as contas Xtream já usadas (p/ trocar de lista sem redigitar).
+  /// Migra a conta única antiga para a lista automaticamente.
+  List<XtreamAccount> getXtreamAccounts() {
+    final list = _prefs.getStringList(_keyXtreamAccounts) ?? [];
+    final out = <XtreamAccount>[];
+    for (final raw in list) {
+      try {
+        out.add(XtreamAccount.fromJson(
+            jsonDecode(raw) as Map<String, dynamic>));
+      } catch (_) {
+        // Ignora entrada corrompida.
+      }
+    }
+    if (out.isEmpty) {
+      final single = getXtreamAccount();
+      if (single != null) out.add(single);
+    }
+    return out;
+  }
+
+  Future<void> removeXtreamAccount(XtreamAccount account) async {
+    final saved = getXtreamAccounts().toList()
+      ..removeWhere((a) =>
+          a.serverUrl == account.serverUrl &&
+          a.username == account.username);
+    await _prefs.setStringList(
+      _keyXtreamAccounts,
+      saved.map((a) => jsonEncode(a.toJson())).toList(),
+    );
+    // Se removeu a conta ativa, limpa o atalho de sessão também.
+    final current = getXtreamAccount();
+    if (current != null &&
+        current.serverUrl == account.serverUrl &&
+        current.username == account.username) {
+      await _prefs.remove(_keyXtreamAccount);
+    }
   }
 
   Future<void> clearAll() async {

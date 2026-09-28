@@ -21,10 +21,42 @@ class M3uParser {
         lowerGroup.contains('24/7') ||
         lowerGroup.contains('24h');
   }
+  static final _tvgIdRegex =
+      RegExp(r'(?:tvg-id|id)="([^"]*)"', caseSensitive: false);
+  static final _tvgNameRegex =
+      RegExp(r'(?:tvg-name|name)="([^"]*)"', caseSensitive: false);
+  static final _tvgLogoRegex =
+      RegExp(r'(?:tvg-logo|logo)="([^"]*)"', caseSensitive: false);
+  static final _groupTitleRegex =
+      RegExp(r'(?:group-title|group)="([^"]*)"', caseSensitive: false);
+
+  static final _tvgIdUnquoted =
+      RegExp(r'(?:tvg-id|id)=([^\s,"]+)', caseSensitive: false);
+  static final _tvgNameUnquoted =
+      RegExp(r'(?:tvg-name|name)=([^\s,"]+)', caseSensitive: false);
+  static final _tvgLogoUnquoted =
+      RegExp(r'(?:tvg-logo|logo)=([^\s,"]+)', caseSensitive: false);
+  static final _groupTitleUnquoted =
+      RegExp(r'(?:group-title|group)=([^\s,"]+)', caseSensitive: false);
+
   /// Executa o parsing em background Isolate usando compute()
   static Future<List<StreamItem>> parseM3u(String content) async {
     return compute(_parseM3uInternal, content);
   }
+
+  static int _findTitleComma(String line) {
+    bool inQuotes = false;
+    for (int i = 0; i < line.length; i++) {
+      final char = line[i];
+      if (char == '"') {
+        inQuotes = !inQuotes;
+      } else if (char == ',' && !inQuotes) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   static List<StreamItem> _parseM3uInternal(String content) {
     final List<StreamItem> items = [];
     final lines = const LineSplitter().convert(content);
@@ -39,13 +71,20 @@ class M3uParser {
     String? pendingExtinf;
 
     void readExtinf(String line) {
-      currentTvgId = _extractAttribute(line, 'tvg-id');
-      currentTvgName = _extractAttribute(line, 'tvg-name');
-      currentLogo = _extractAttribute(line, 'tvg-logo');
-      currentGroup = _extractAttribute(line, 'group-title');
+      currentTvgId = _tvgIdRegex.firstMatch(line)?.group(1) ??
+          _tvgIdUnquoted.firstMatch(line)?.group(1);
+      currentTvgName = _tvgNameRegex.firstMatch(line)?.group(1) ??
+          _tvgNameUnquoted.firstMatch(line)?.group(1);
+      currentLogo = _tvgLogoRegex.firstMatch(line)?.group(1) ??
+          _tvgLogoUnquoted.firstMatch(line)?.group(1);
+      final grp = _groupTitleRegex.firstMatch(line)?.group(1) ??
+          _groupTitleUnquoted.firstMatch(line)?.group(1);
+      if (grp != null && grp.isNotEmpty) {
+        currentGroup = grp;
+      }
 
-      // Extrair nome após a última vírgula
-      final commaIndex = line.lastIndexOf(',');
+      // Extrair nome após a primeira vírgula fora de aspas
+      final commaIndex = _findTitleComma(line);
       if (commaIndex != -1 && commaIndex < line.length - 1) {
         currentName = line.substring(commaIndex + 1).trim();
       } else {
@@ -59,12 +98,26 @@ class M3uParser {
       final line = lines[i].trim();
       if (line.isEmpty) continue;
 
-      if (line.startsWith('#EXTINF:')) {
+      final upper = line.toUpperCase();
+      if (upper.startsWith('#EXTINF')) {
         pendingExtinf = line;
         readExtinf(line);
+      } else if (upper.startsWith('#EXTGRP:')) {
+        final grp = line.substring(line.indexOf(':') + 1).trim();
+        if (grp.isNotEmpty) {
+          currentGroup = grp;
+        }
       } else if (!line.startsWith('#')) {
-        if (!(line.startsWith('http://') ||
-            line.startsWith('https://'))) {
+        final isUrl = line.startsWith('http://') ||
+            line.startsWith('https://') ||
+            line.startsWith('rtmp://') ||
+            line.startsWith('rtsp://') ||
+            line.startsWith('mms://') ||
+            line.startsWith('udp://') ||
+            line.contains('://') ||
+            line.startsWith('/');
+
+        if (!isUrl) {
           // Não é URL (continuação de EXTINF quebrado): acumula,
           // re-extrai e aguarda a URL real na próxima linha.
           if (pendingExtinf != null) {
@@ -109,29 +162,6 @@ class M3uParser {
     }
 
     return items;
-  }
-
-  static String? _extractAttribute(String line, String attributeName) {
-    final pattern = '$attributeName="';
-    final startIndex = line.indexOf(pattern);
-    if (startIndex == -1) {
-      // Tentar sem aspas
-      final patternNoQuotes = '$attributeName=';
-      final startNoQ = line.indexOf(patternNoQuotes);
-      if (startNoQ == -1) return null;
-      final valueStart = startNoQ + patternNoQuotes.length;
-      final spaceIndex = line.indexOf(' ', valueStart);
-      if (spaceIndex == -1) {
-        return line.substring(valueStart);
-      }
-      return line.substring(valueStart, spaceIndex);
-    }
-
-    final valueStart = startIndex + pattern.length;
-    final endIndex = line.indexOf('"', valueStart);
-    if (endIndex == -1) return null;
-
-    return line.substring(valueStart, endIndex);
   }
 
   /// URL sem query/fragment, em minúsculas (para checar extensão real).

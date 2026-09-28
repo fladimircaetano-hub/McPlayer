@@ -1,0 +1,238 @@
+diff --git a/src/components/DeviceApprovalModal.tsx b/src/components/DeviceApprovalModal.tsx
+index fa4b7bc..9de19bc 100644
+--- a/src/components/DeviceApprovalModal.tsx
++++ b/src/components/DeviceApprovalModal.tsx
+@@ -1,4 +1,4 @@
+-import { useState } from 'react';
++import { useEffect, useState } from 'react';
+ import Modal from '@/components/Modal';
+ import { useIPTV } from '@/hooks/useIPTV';
+ import type { Device, PlaylistType, DeviceListData } from '@/types/iptv';
+@@ -54,6 +54,30 @@ export default function DeviceApprovalModal({ device, isOpen, onClose, onApprove
+     onClose();
+   };
+ 
++  // Ao abrir para um dispositivo já aprovado, pré-preenche com a lista
++  // atual para edição/troca ficar à mostra (nada escondido).
++  useEffect(() => {
++    if (!isOpen || !device?.listData) return;
++    const ld = device.listData;
++    if (ld.type === 'xtream') {
++      setListType('xtream');
++      setServerUrl(ld.serverUrl ?? '');
++      setUsername(ld.username ?? '');
++      setPassword(ld.password ?? '');
++    } else {
++      setListType('m3u');
++      setM3uUrl(ld.url ?? '');
++    }
++    const match = playlists.find((p) =>
++      p.type === ld.type &&
++      (p.type === 'xtream'
++        ? p.serverUrl === ld.serverUrl && p.username === ld.username
++        : p.url === ld.url),
++    );
++    setSelectedPlaylistId(match?.id ?? '');
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [isOpen, device?.id]);
++
+   const validateForm = (): boolean => {
+     const newErrors: Record<string, string> = {};
+ 
+@@ -92,8 +116,10 @@ export default function DeviceApprovalModal({ device, isOpen, onClose, onApprove
+ 
+   if (!device) return null;
+ 
++  const isEditing = device.status === 'approved';
++
+   return (
+-    <Modal isOpen={isOpen} onClose={handleClose} title="Liberar Dispositivo" size="lg">
++    <Modal isOpen={isOpen} onClose={handleClose} title={isEditing ? 'Editar Lista do Dispositivo' : 'Liberar Dispositivo'} size="lg">
+       <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+         <div className="p-4 bg-surface-light rounded-xl border border-border">
+           <div className="flex items-center gap-4">
+@@ -277,7 +303,7 @@ export default function DeviceApprovalModal({ device, isOpen, onClose, onApprove
+             className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-success hover:bg-success/80 text-white rounded-lg transition-colors font-medium"
+           >
+             <CheckCircle className="w-5 h-5" />
+-            Aprovar e Vincular Lista
++            {isEditing ? 'Salvar e Enviar ao Aparelho' : 'Aprovar e Vincular Lista'}
+           </button>
+         </div>
+       </form>
+diff --git a/src/pages/Devices.tsx b/src/pages/Devices.tsx
+index 8a0224e..7ef16dc 100644
+--- a/src/pages/Devices.tsx
++++ b/src/pages/Devices.tsx
+@@ -14,12 +14,13 @@ import {
+   Link2,
+   Server,
+   Eye,
++  Pencil,
+   User,
+   KeyRound,
+ } from 'lucide-react';
+ 
+ export default function Devices() {
+-  const { devices, approveDeviceWithList, rejectDevice, clients, checkInDevice } = useIPTV();
++  const { devices, playlists, approveDeviceWithList, rejectDevice, clients, checkInDevice } = useIPTV();
+ 
+   const [searchTerm, setSearchTerm] = useState('');
+   const [statusFilter, setStatusFilter] = useState<DeviceStatus | 'all'>('all');
+@@ -27,6 +28,8 @@ export default function Devices() {
+   const [isModalOpen, setIsModalOpen] = useState(false);
+   const [expandedDevice, setExpandedDevice] = useState<string | null>(null);
+   const [approveMsg, setApproveMsg] = useState<string | null>(null);
++  // Playlist escolhida inline em cada dispositivo (espaço visível por linha)
++  const [rowPlaylist, setRowPlaylist] = useState<Record<string, string>>({});
+ 
+   // Simula o check-in que o McPlayer vai fazer (chave 6 dígitos + MAC)
+   const [checkinKey, setCheckinKey] = useState('');
+@@ -65,6 +68,7 @@ export default function Devices() {
+     listData: DeviceListData,
+   ) => {
+     const device = devices.find((d) => d.id === deviceId);
++    const wasApproved = device?.status === 'approved';
+     const ok = await approveDeviceWithList(
+       deviceId,
+       listData,
+@@ -72,8 +76,61 @@ export default function Devices() {
+     );
+     setApproveMsg(
+       ok
+-        ? `Dispositivo ${device?.deviceId ?? ''} aprovado e lista vinculada.`
+-        : 'FALHA ao gravar no Supabase — aprovação NÃO aplicada. Confira a conexão e tente de novo.',
++        ? (wasApproved
++          ? `Lista de ${device?.deviceId ?? ''} atualizada e enviada ao aparelho.`
++          : `Dispositivo ${device?.deviceId ?? ''} aprovado e lista vinculada.`)
++        : 'FALHA ao gravar no Supabase — alteração NÃO aplicada. Confira a conexão e tente de novo.',
++    );
++  };
++
++  const playlistToListData = (playlistId: string): DeviceListData | null => {
++    const p = playlists.find((x) => x.id === playlistId);
++    if (!p) return null;
++    if (p.type === 'xtream') {
++      if (!p.serverUrl || !p.username || !p.password) return null;
++      return { type: p.type, serverUrl: p.serverUrl, username: p.username, password: p.password };
++    }
++    if (!p.url) return null;
++    return { type: p.type, url: p.url };
++  };
++
++  const matchedPlaylistId = (device: Device): string => {
++    const ld = device.listData;
++    if (!ld) return '';
++    const m = playlists.find((p) =>
++      p.type === ld.type &&
++      (p.type === 'xtream'
++        ? p.serverUrl === ld.serverUrl && p.username === ld.username
++        : p.url === ld.url),
++    );
++    return m?.id ?? '';
++  };
++
++  // Vincula a playlist escolhida inline e aprova/atualiza de uma vez.
++  const handleRowLink = async (device: Device) => {
++    const listData = playlistToListData(rowPlaylist[device.id] ?? matchedPlaylistId(device));
++    if (!listData) {
++      setApproveMsg('Escolha uma playlist na linha do dispositivo.');
++      return;
++    }
++    await handleApproveWithList(device.id, listData);
++  };
++
++  const renderRowPlaylistSelect = (device: Device) => {
++    if (playlists.length === 0) return null;
++    return (
++      <select
++        value={rowPlaylist[device.id] ?? matchedPlaylistId(device)}
++        onChange={(e) => setRowPlaylist((prev) => ({ ...prev, [device.id]: e.target.value }))}
++        className="w-full px-3 py-2 bg-surface-light border border-border rounded-lg text-text-primary text-sm focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer"
++      >
++        <option value="">— escolher lista —</option>
++        {playlists.map((p) => (
++          <option key={p.id} value={p.id}>
++            {p.name} ({p.type})
++          </option>
++        ))}
++      </select>
+     );
+   };
+ 
+@@ -255,6 +312,18 @@ export default function Devices() {
+                 )}
+ 
+                 <div className="flex gap-2">
++                  {playlists.length > 0 && (
++                    <div className="mb-3 p-3 bg-surface-light rounded-lg border border-border">
++                      <p className="text-text-muted text-xs mb-1.5">Lista do aparelho</p>
++                      {renderRowPlaylistSelect(device)}
++                      <button
++                        onClick={() => handleRowLink(device)}
++                        className="mt-2 w-full px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors font-medium text-sm"
++                      >
++                        Vincular e aprovar com esta lista
++                      </button>
++                    </div>
++                  )}
+                   <button
+                     onClick={() => handleOpenApproval(device)}
+                     className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-success hover:bg-success/80 text-white rounded-lg transition-colors font-medium"
+@@ -315,15 +384,26 @@ export default function Devices() {
+                           <StatusBadge status={device.status} />
+                         </td>
+                         <td className="px-6 py-4 text-center">
+-                          {device.listData && (
+-                            <button
+-                              onClick={() => setExpandedDevice(expandedDevice === device.id ? null : device.id)}
+-                              className="p-2 rounded-lg text-text-secondary hover:text-primary hover:bg-primary-muted transition-colors"
+-                              title="Ver detalhes da lista"
+-                            >
+-                              <Eye className="w-4 h-4" />
+-                            </button>
+-                          )}
++                          <div className="flex items-center justify-center gap-1">
++                            {device.listData && (
++                              <button
++                                onClick={() => setExpandedDevice(expandedDevice === device.id ? null : device.id)}
++                                className="p-2 rounded-lg text-text-secondary hover:text-primary hover:bg-primary-muted transition-colors"
++                                title="Ver detalhes da lista"
++                              >
++                                <Eye className="w-4 h-4" />
++                              </button>
++                            )}
++                            {device.status === 'approved' && (
++                              <button
++                                onClick={() => handleOpenApproval(device)}
++                                className="p-2 rounded-lg text-text-secondary hover:text-warning hover:bg-warning-muted transition-colors"
++                                title="Editar / trocar lista do aparelho"
++                              >
++                                <Pencil className="w-4 h-4" />
++                              </button>
++                            )}
++                          </div>
+                         </td>
+                       </tr>
+                       {expandedDevice === device.id && device.listData && (
+@@ -359,6 +439,20 @@ export default function Devices() {
+                                   Aprovado em: {formatDate(device.approvedAt)}
+                                 </p>
+                               )}
++                              {device.status === 'approved' && playlists.length > 0 && (
++                                <div className="mt-4 pt-3 border-t border-border">
++                                  <p className="text-text-muted text-sm mb-1.5">Trocar lista deste aparelho</p>
++                                  <div className="flex flex-col md:flex-row gap-2">
++                                    <div className="flex-1">{renderRowPlaylistSelect(device)}</div>
++                                    <button
++                                      onClick={() => handleRowLink(device)}
++                                      className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors font-medium text-sm whitespace-nowrap"
++                                    >
++                                      Salvar e enviar
++                                    </button>
++                                  </div>
++                                </div>
++                              )}
+                             </div>
+                           </td>
+                         </tr>

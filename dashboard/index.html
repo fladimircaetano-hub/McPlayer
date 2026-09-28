@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>McPlayer — Painel de Gestão</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-main: #0c0f17;
+    --bg-card: #151a24;
+    --bg-card-hover: #1c2230;
+    --bg-input: #0e121a;
+    --border: #232b3d;
+    --border-focus: #3b82f6;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --success: #10b981;
+    --success-bg: rgba(16, 185, 129, 0.15);
+    --warning: #f59e0b;
+    --warning-bg: rgba(245, 158, 11, 0.15);
+    --danger: #ef4444;
+    --danger-bg: rgba(239, 68, 68, 0.15);
+    --whatsapp: #22c55e;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--bg-main);
+    color: var(--text-primary);
+    line-height: 1.5;
+    padding: 20px;
+    max-width: 1100px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+
+  .logo-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-badge {
+    width: 42px;
+    height: 42px;
+    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 20px;
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+  }
+
+  h1 { font-size: 20px; font-weight: 700; }
+  .subtitle { font-size: 13px; color: var(--text-secondary); }
+
+  /* Navigation Tabs */
+  .nav-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+  }
+
+  .nav-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s;
+  }
+
+  .nav-btn:hover { background: var(--bg-card); color: var(--text-primary); }
+  .nav-btn.active {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  }
+
+  .count-tag {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 12px;
+    background: rgba(0,0,0,0.3);
+    font-weight: 700;
+  }
+
+  /* Cards & Grid */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+
+  /* Buttons */
+  button {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+  }
+
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-success { background: var(--success); color: #000; }
+  .btn-success:hover { opacity: 0.9; }
+  .btn-danger { background: var(--danger-bg); color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+  .btn-outline { background: var(--bg-input); color: var(--text-primary); border-color: var(--border); }
+  .btn-outline:hover { background: var(--bg-card-hover); border-color: var(--border-focus); }
+  .btn-wa { background: #15803d; color: #fff; }
+  .btn-wa:hover { background: #16a34a; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+  /* Inputs */
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 8px 0 4px; }
+  input, select, textarea {
+    width: 100%;
+    padding: 9px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  @media (max-width: 700px) { .grid2, .grid3 { grid-template-columns: 1fr; } body { padding: 12px; } }
+
+  /* Device / Client Item */
+  .item-row {
+    border-top: 1px solid var(--border);
+    padding: 14px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .item-row:first-child { border-top: 0; }
+
+  .item-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-secondary); word-break: break-all; }
+  .key-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    background: #0e121a;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .status-badge {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 20px;
+    display: inline-block;
+  }
+  .status-pending { background: var(--warning-bg); color: #fbbf24; }
+  .status-approved { background: var(--success-bg); color: #34d399; }
+  .status-rejected { background: var(--danger-bg); color: #f87171; }
+  .status-expired { background: #7f1d1d; color: #fca5a5; }
+
+  .details-box {
+    background: #0e121a;
+    border: 1px solid #232b3d;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #cbd5e1;
+  }
+
+  /* Modals */
+  .modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 1000;
+  }
+  .modal-overlay.open { display: flex; }
+
+  .modal-window {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 520px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+    overflow: hidden;
+    animation: popIn 0.2s ease-out;
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  .modal-header {
+    padding: 16px 20px;
+    background: #11151f;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .modal-header h2 { font-size: 16px; font-weight: 700; }
+  .modal-close { background: none; border: 0; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 2px 6px; }
+  .modal-close:hover { color: #fff; }
+
+  .modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; max-height: 80vh; overflow-y: auto; }
+  .modal-footer {
+    padding: 14px 20px;
+    background: #11151f;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* Notifications / Toast */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    display: none;
+    z-index: 2000;
+  }
+  #toast.show { display: block; animation: toastIn 0.2s ease-out; }
+  .toast-ok { background: #065f46; color: #a7f3d0; border: 1px solid #10b981; }
+  .toast-err { background: #7f1d1d; color: #fecaca; border: 1px solid #ef4444; }
+
+  @keyframes toastIn { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .pwd-wrapper { position: relative; }
+  .pwd-toggle {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 2px 6px;
+  }
+  .pwd-toggle:hover { color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo-title">
+    <div class="logo-badge">M</div>
+    <div>
+      <h1>McPlayer — Painel de Gestão</h1>
+      <div class="subtitle">Aprovações, troca de listas por aparelho e cadastro completo de clientes</div>
+    </div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline" onclick="loadAll()" title="Atualizar dados do Supabase">
+      🔄 Atualizar
+    </button>
+  </div>
+</header>
+
+<!-- Navegação por Abas -->
+<div class="nav-tabs">
+  <button class="nav-btn active" id="tabBtnDevices" onclick="switchTab('devices')">
+    📱 Aparelhos / Dispositivos
+    <span class="count-tag" id="countDevices">0</span>
+  </button>
+  <button class="nav-btn" id="tabBtnClients" onclick="switchTab('clients')">
+    👥 Gestão de Clientes
+    <span class="count-tag" id="countClients">0</span>
+  </button>
+  <button class="nav-btn" id="tabBtnConfig" onclick="switchTab('config')">
+    ⚙️ Config / Banco
+  </button>
+</div>
+
+<!-- ============================================================== -->
+<!-- ABA 1: DISPOSITIVOS (MCPLAYER)                                  -->
+<!-- ============================================================== -->
+<div id="tabDevices">
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <input id="searchDevices" placeholder="🔍 Buscar por Chave (Device ID) ou MAC..." style="max-width:320px;" oninput="renderDevices()">
+    <div style="display:flex; gap:6px;">
+      <button class="btn-outline btn-sm" onclick="filterDevicesStatus('all')">Todos</button>
+      <button class="btn-outline btn-sm" style="color:#fbbf24" onclick="filterDevicesStatus('pending')">Pendentes</button>
+      <button class="btn-outline btn-sm" style="color:#4ade80" onclick="filterDevicesStatus('approved')">Aprovados</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="devicesList"><span class="mono">Carregando dispositivos...</span></div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<!-- ABA 2: GESTÃO DE CLIENTES                                       -->
+<!-- ============================================================== -->
+<div id="tabClients" style="display:none;">
+  <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+    <input id="searchClients" placeholder="🔍 Buscar por Nome, Telefone ou Chave..." style="max-width:320px;" oninput="renderClients()">
+    <button class="btn-primary" onclick="openClientModal()">
+      + Novo Cliente
+    </button>
+  </div>
+
+  <div class="card">
+    <div id="clientsList"><span class="mono">Nenhum cliente cadastrado. Clique em "+ Novo Cliente" acima.</span></div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<!-- ABA 3: CONFIGURAÇÃO / SUPABASE & SQL                           -->
+<!-- ============================================================== -->
+<div id="tabConfig" style="display:none;">
+  <div class="card">
+    <h2 style="font-size:16px; margin-bottom:12px;">Conexão Supabase</h2>
+    <div class="grid2">
+      <div>
+        <label>Supabase URL</label>
+        <input id="sbUrl" value="https://jtytonknduyllkbmsgys.supabase.co">
+      </div>
+      <div>
+        <label>Anon Key</label>
+        <input id="sbKey" value="sb_publishable_rdGe_pXvpA6wdOsmglwj8g_UOPeD7DE">
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn-primary" onclick="loadAll()">Testar & Salvar Conexão</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:16px; margin-bottom:8px;">Liberar Exclusão (DELETE) no Supabase</h2>
+    <p style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">
+      Se o botão de excluir não apagar os aparelhos, é porque o Supabase bloqueia a exclusão por segurança (RLS).
+      Para liberar a exclusão completa, copie o código abaixo e execute no <b>SQL Editor</b> do Supabase:
+    </p>
+    <textarea readonly rows="6" style="font-family:'JetBrains Mono', monospace; font-size:12px; color:#4ade80;" onclick="this.select()">
+-- 1. Libera exclusão de aparelhos para o painel
+create policy "Permitir exclusao de devices" on public.devices for delete using (true);
+
+-- 2. Tabela de clientes (opcional, para sincronizar nuvem)
+create table if not exists public.clients (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  phone text,
+  device_id text,
+  expiration_date date,
+  notes text,
+  status text default 'active',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+alter table public.clients enable row level security;
+create policy "Permitir tudo em clients" on public.clients for all using (true);
+    </textarea>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<!-- MODAL: EDITAR / TROCAR LISTA DO APARELHO                       -->
+<!-- ============================================================== -->
+<div class="modal-overlay" id="modalEditList">
+  <div class="modal-window">
+    <div class="modal-header">
+      <h2 id="modalEditTitle">Editar / Trocar Lista</h2>
+      <button class="modal-close" onclick="closeModal('modalEditList')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editDevId">
+
+      <div style="display:flex; justify-content:space-between; align-items:center; background:#0e121a; padding:10px 14px; border-radius:8px; border:1px solid var(--border);">
+        <div>
+          <span style="font-size:11px; color:var(--text-muted); display:block;">CHAVE DO APARELHO:</span>
+          <b style="font-size:18px; font-family:'JetBrains Mono', monospace; color:#fff;" id="editDevKey">000000</b>
+        </div>
+        <span class="status-badge status-approved" id="editDevStatus">Ativo</span>
+      </div>
+
+      <div class="grid2" style="margin-top:6px;">
+        <div>
+          <label>Tipo de Lista *</label>
+          <select id="editType" onchange="toggleEditType()">
+            <option value="xtream">Xtream Codes (Servidor/User/Pass)</option>
+            <option value="m3u">M3U (URL Completa)</option>
+          </select>
+        </div>
+        <div>
+          <label>Nome do Cliente (opcional)</label>
+          <input id="editClientName" placeholder="Ex: Carlos Silva">
+        </div>
+      </div>
+
+      <!-- Xtream Fields -->
+      <div id="boxXtream">
+        <label>URL do Servidor (com porta se houver) *</label>
+        <input id="editServer" placeholder="http://servidor:8080">
+        <div class="grid2">
+          <div>
+            <label>Usuário *</label>
+            <input id="editUser" placeholder="usuario">
+          </div>
+          <div>
+            <label>Senha *</label>
+            <div class="pwd-wrapper">
+              <input type="password" id="editPass" placeholder="senha">
+              <button type="button" class="pwd-toggle" onclick="togglePwd('editPass', this)">👁️</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- M3U Fields -->
+      <div id="boxM3u" style="display:none;">
+        <label>URL da Lista M3U *</label>
+        <input id="editM3uUrl" placeholder="https://.../lista.m3u">
+      </div>
+
+      <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+        Ao clicar em salvar, o <b>McPlayer</b> receberá os novos canais em até 10 segundos no aparelho.
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-outline" onclick="closeModal('modalEditList')">Cancelar</button>
+      <button class="btn-success" id="btnSaveList" onclick="submitSaveList()">
+        Salvar e Enviar ao Aparelho
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================== -->
+<!-- MODAL: CADASTRAR / EDITAR CLIENTE                              -->
+<!-- ============================================================== -->
+<div class="modal-overlay" id="modalClient">
+  <div class="modal-window">
+    <div class="modal-header">
+      <h2 id="modalClientTitle">Cadastrar Cliente</h2>
+      <button class="modal-close" onclick="closeModal('modalClient')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="clientId">
+
+      <label>Nome Completo do Cliente *</label>
+      <input id="cName" placeholder="Ex: João da Silva">
+
+      <div class="grid2">
+        <div>
+          <label>WhatsApp / Telefone *</label>
+          <input id="cPhone" placeholder="Ex: (11) 99999-9999">
+        </div>
+        <div>
+          <label>Chave do Aparelho (Device ID)</label>
+          <input id="cDeviceId" list="deviceSuggestions" placeholder="Ex: 837792">
+          <datalist id="deviceSuggestions"></datalist>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div>
+          <label>Data de Vencimento *</label>
+          <input type="date" id="cExpDate">
+        </div>
+        <div>
+          <label>Atalhos de Vencimento</label>
+          <div style="display:flex; gap:4px; margin-top:2px;">
+            <button type="button" class="btn-outline btn-sm" onclick="addDaysToExp(30)">+30d</button>
+            <button type="button" class="btn-outline btn-sm" onclick="addDaysToExp(60)">+60d</button>
+            <button type="button" class="btn-outline btn-sm" onclick="addDaysToExp(365)">+1 ano</button>
+          </div>
+        </div>
+      </div>
+
+      <label>Observações / Valor do Plano</label>
+      <input id="cNotes" placeholder="Ex: Plano Mensal R$ 35,00 - 1 Tela">
+    </div>
+    <div class="modal-footer">
+      <button class="btn-outline" onclick="closeModal('modalClient')">Cancelar</button>
+      <button class="btn-primary" onclick="submitClient()">Salvar Cliente</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let DEVICES = [];
+let CLIENTS = [];
+let DEVICE_FILTER = 'all';
+
+function cfg() {
+  return {
+    base: document.getElementById('sbUrl').value.trim().replace(/\/$/, ''),
+    key: document.getElementById('sbKey').value.trim()
+  };
+}
+
+function headers() {
+  const c = cfg();
+  return {
+    'apikey': c.key,
+    'Authorization': 'Bearer ' + c.key,
+    'Content-Type': 'application/json'
+  };
+}
+
+function showToast(msg, isOk = true) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + (isOk ? 'toast-ok' : 'toast-err');
+  setTimeout(() => { t.className = ''; }, 3500);
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function switchTab(tab) {
+  document.getElementById('tabDevices').style.display = tab === 'devices' ? 'block' : 'none';
+  document.getElementById('tabClients').style.display = tab === 'clients' ? 'block' : 'none';
+  document.getElementById('tabConfig').style.display = tab === 'config' ? 'block' : 'none';
+
+  document.getElementById('tabBtnDevices').classList.toggle('active', tab === 'devices');
+  document.getElementById('tabBtnClients').classList.toggle('active', tab === 'clients');
+  document.getElementById('tabBtnConfig').classList.toggle('active', tab === 'config');
+}
+
+function togglePwd(id, btn) {
+  const el = document.getElementById(id);
+  if (el.type === 'password') {
+    el.type = 'text';
+    btn.textContent = '🔒';
+  } else {
+    el.type = 'password';
+    btn.textContent = '👁️';
+  }
+}
+
+function toggleEditType() {
+  const t = document.getElementById('editType').value;
+  document.getElementById('boxXtream').style.display = t === 'xtream' ? 'block' : 'none';
+  document.getElementById('boxM3u').style.display = t === 'm3u' ? 'block' : 'none';
+}
+
+// -------------------------------------------------------------
+// CARREGAR TUDO (APARELHOS + CLIENTES)
+// -------------------------------------------------------------
+async function loadAll() {
+  await loadDevices();
+  loadClientsLocal();
+}
+
+async function loadDevices() {
+  const el = document.getElementById('devicesList');
+  el.innerHTML = '<span class="mono">Carregando aparelhos...</span>';
+  const c = cfg();
+  try {
+    const res = await fetch(`${c.base}/rest/v1/devices?select=*&limit=150`, { headers: headers() });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    DEVICES = await res.json();
+
+    // Ordena: pendentes primeiro, depois mais recentes
+    DEVICES.sort((a, b) => {
+      const aPend = (a.status === 'pending') ? 1 : 0;
+      const bPend = (b.status === 'pending') ? 1 : 0;
+      if (aPend !== bPend) return bPend - aPend;
+      const da = new Date(a.request_date || a.approved_at || 0).getTime();
+      const db = new Date(b.request_date || b.approved_at || 0).getTime();
+      return db - da;
+    });
+
+    document.getElementById('countDevices').textContent = DEVICES.length;
+    renderDevices();
+    updateDeviceSuggestions();
+  } catch (e) {
+    el.innerHTML = `<span class="mono" style="color:#ef4444">Erro ao carregar: ${esc(e.message)}</span>`;
+    showToast('Falha ao conectar com Supabase: ' + e.message, false);
+  }
+}
+
+function filterDevicesStatus(st) {
+  DEVICE_FILTER = st;
+  renderDevices();
+}
+
+function renderDevices() {
+  const q = (document.getElementById('searchDevices').value || '').trim().toLowerCase();
+  const list = DEVICES.filter(d => {
+    const st = (d.status || 'pending').toLowerCase();
+    const matchesSt = (DEVICE_FILTER === 'all') || (st === DEVICE_FILTER);
+    const matchesQ = !q || String(d.device_id).toLowerCase().includes(q) || String(d.mac).toLowerCase().includes(q);
+    return matchesSt && matchesQ;
+  });
+
+  const el = document.getElementById('devicesList');
+  if (!list.length) {
+    el.innerHTML = '<span class="mono">Nenhum aparelho encontrado.</span>';
+    return;
+  }
+
+  el.innerHTML = list.map(d => {
+    const st = (d.status || 'pending').toLowerCase();
+    const ld = d.list_data || {};
+    const isXtream = ld && (ld.type === 'xtream');
+    const isM3u = ld && (ld.type === 'm3u');
+
+    let listHtml = '';
+    if (st === 'approved') {
+      if (isXtream) {
+        listHtml = `
+          <div class="details-box">
+            <b>Xtream:</b> ${esc(ld.serverUrl || ld.server_url || '-')}
+            <span style="color:var(--text-muted)"> | Usuário:</span> <b>${esc(ld.username || '-')}</b>
+            <span style="color:var(--text-muted)"> | Senha:</span> <b>••••••••</b>
+            ${ld.clientName ? `<span style="color:#38bdf8"> | Cliente: <b>${esc(ld.clientName)}</b></span>` : ''}
+          </div>
+        `;
+      } else if (isM3u) {
+        listHtml = `
+          <div class="details-box">
+            <b>M3U:</b> <span class="mono">${esc(ld.url || '-')}</span>
+            ${ld.clientName ? `<span style="color:#38bdf8"> | Cliente: <b>${esc(ld.clientName)}</b></span>` : ''}
+          </div>
+        `;
+      } else {
+        listHtml = '<div class="details-box"><span style="color:var(--text-muted)">Aparelho aprovado sem lista vinculada.</span></div>';
+      }
+    } else {
+      listHtml = '<div class="details-box" style="color:#fbbf24">⏳ Aguardando aprovação e envio de lista no McPlayer.</div>';
+    }
+
+    const dt = d.request_date ? new Date(d.request_date).toLocaleString('pt-BR') : '';
+
+    return `
+      <div class="item-row">
+        <div class="item-top">
+          <div>
+            <span class="key-chip">${esc(d.device_id)}</span>
+            <span class="status-badge status-${st}">${st === 'approved' ? '✓ Aprovado' : (st === 'pending' ? '● Pendente' : '✕ Rejeitado')}</span>
+            <div class="mono" style="margin-top:4px;">
+              MAC: <b>${esc(d.mac || 'N/A')}</b> · Data: ${esc(dt)}
+            </div>
+          </div>
+
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn-primary btn-sm" onclick="openEditListModal('${esc(d.device_id)}')">
+              ✏️ Editar / Trocar Lista
+            </button>
+            <button class="btn-danger btn-sm" onclick="deleteDevice('${esc(d.device_id)}')">
+              🗑️ Excluir
+            </button>
+          </div>
+        </div>
+        ${listHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+// -------------------------------------------------------------
+// EDITAR / TROCAR LISTA (ABRE MODAL POP-UP)
+// -------------------------------------------------------------
+function openEditListModal(id) {
+  const d = DEVICES.find(x => String(x.device_id) === String(id));
+  if (!d) return;
+
+  document.getElementById('editDevId').value = d.device_id;
+  document.getElementById('editDevKey').textContent = d.device_id;
+  document.getElementById('editDevStatus').textContent = d.status === 'approved' ? 'Aprovado' : 'Pendente';
+  document.getElementById('editDevStatus').className = 'status-badge status-' + (d.status || 'pending');
+
+  const ld = d.list_data || {};
+  const type = (ld.type || 'xtream').toLowerCase();
+  document.getElementById('editType').value = type;
+  toggleEditType();
+
+  if (type === 'xtream') {
+    document.getElementById('editServer').value = ld.serverUrl || ld.server_url || '';
+    document.getElementById('editUser').value = ld.username || '';
+    document.getElementById('editPass').value = ld.password || '';
+    document.getElementById('editM3uUrl').value = '';
+  } else {
+    document.getElementById('editM3uUrl').value = ld.url || '';
+    document.getElementById('editServer').value = '';
+    document.getElementById('editUser').value = '';
+    document.getElementById('editPass').value = '';
+  }
+
+  document.getElementById('editClientName').value = ld.clientName || '';
+  openModal('modalEditList');
+}
+
+async function submitSaveList() {
+  const id = document.getElementById('editDevId').value;
+  const type = document.getElementById('editType').value;
+  const clientName = document.getElementById('editClientName').value.trim();
+
+  let ld = null;
+  if (type === 'xtream') {
+    const serverUrl = document.getElementById('editServer').value.trim();
+    const username = document.getElementById('editUser').value.trim();
+    const password = document.getElementById('editPass').value.trim();
+
+    if (!serverUrl || !username || !password) {
+      alert('Preencha Servidor, Usuário e Senha do Xtream.');
+      return;
+    }
+    ld = {
+      type: 'xtream',
+      serverUrl,
+      server_url: serverUrl,
+      username,
+      password,
+      clientName
+    };
+  } else {
+    const url = document.getElementById('editM3uUrl').value.trim();
+    if (!url) {
+      alert('Informe a URL da lista M3U.');
+      return;
+    }
+    ld = {
+      type: 'm3u',
+      url,
+      clientName
+    };
+  }
+
+  const btn = document.getElementById('btnSaveList');
+  btn.textContent = 'Enviando ao aparelho...';
+  btn.disabled = true;
+
+  const c = cfg();
+  try {
+    const payload = {
+      status: 'approved',
+      list_data: ld,
+      approved_at: new Date().toISOString()
+    };
+
+    const res = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    closeModal('modalEditList');
+    showToast(`Lista salva com sucesso para o aparelho ${id}! McPlayer receberá em até 10s.`, true);
+    await loadDevices();
+  } catch (e) {
+    alert('Erro ao salvar no Supabase: ' + e.message);
+  } finally {
+    btn.textContent = 'Salvar e Enviar ao Aparelho';
+    btn.disabled = false;
+  }
+}
+
+// -------------------------------------------------------------
+// EXCLUIR APARELHO (COM SUPORTE A RLS)
+// -------------------------------------------------------------
+async function deleteDevice(id) {
+  if (!confirm(`Deseja realmente EXCLUIR o aparelho ${id}?\n\nEle perderá o acesso e a lista será desvinculada.`)) {
+    return;
+  }
+
+  const c = cfg();
+  try {
+    // Tentativa 1: Exclusão real no banco
+    const res = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { ...headers(), 'Prefer': 'return=representation' }
+    });
+
+    const deletedRows = await res.json().catch(() => []);
+
+    // Se o Supabase bloqueou o DELETE por falta de política RLS:
+    if (Array.isArray(deletedRows) && deletedRows.length === 0) {
+      // Bloqueia e limpa o aparelho para não funcionar mais no McPlayer
+      const blockRes = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: headers(),
+        body: JSON.stringify({ status: 'rejected', list_data: null })
+      });
+
+      if (blockRes.ok) {
+        showToast(`Aparelho ${id} bloqueado/rejeitado (o acesso foi cancelado). Para apagar da tabela, ative a regra DELETE no SQL do Supabase (Aba Config).`, false);
+        await loadDevices();
+        return;
+      }
+    }
+
+    showToast(`Aparelho ${id} excluído com sucesso!`, true);
+    await loadDevices();
+  } catch (e) {
+    alert('Erro ao excluir: ' + e.message);
+  }
+}
+
+// -------------------------------------------------------------
+// ABA 2: GESTÃO DE CLIENTES
+// -------------------------------------------------------------
+function loadClientsLocal() {
+  try {
+    const raw = localStorage.getItem('mcplayer_clients');
+    CLIENTS = raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    CLIENTS = [];
+  }
+  document.getElementById('countClients').textContent = CLIENTS.length;
+  renderClients();
+}
+
+function saveClientsLocal() {
+  localStorage.setItem('mcplayer_clients', JSON.stringify(CLIENTS));
+  document.getElementById('countClients').textContent = CLIENTS.length;
+  renderClients();
+}
+
+function updateDeviceSuggestions() {
+  const dl = document.getElementById('deviceSuggestions');
+  dl.innerHTML = DEVICES.map(d => `<option value="${esc(d.device_id)}">${esc(d.device_id)} (${esc(d.status)})</option>`).join('');
+}
+
+function openClientModal(id = null) {
+  document.getElementById('clientId').value = id || '';
+  if (id) {
+    const c = CLIENTS.find(x => x.id === id);
+    if (!c) return;
+    document.getElementById('modalClientTitle').textContent = 'Editar Cliente';
+    document.getElementById('cName').value = c.name || '';
+    document.getElementById('cPhone').value = c.phone || '';
+    document.getElementById('cDeviceId').value = c.deviceId || '';
+    document.getElementById('cExpDate').value = c.expDate || '';
+    document.getElementById('cNotes').value = c.notes || '';
+  } else {
+    document.getElementById('modalClientTitle').textContent = 'Cadastrar Novo Cliente';
+    document.getElementById('cName').value = '';
+    document.getElementById('cPhone').value = '';
+    document.getElementById('cDeviceId').value = '';
+    document.getElementById('cNotes').value = '';
+    // Padrão: 30 dias a partir de hoje
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    document.getElementById('cExpDate').value = d.toISOString().split('T')[0];
+  }
+  openModal('modalClient');
+}
+
+function addDaysToExp(days) {
+  const cur = document.getElementById('cExpDate').value;
+  const base = cur ? new Date(cur) : new Date();
+  base.setDate(base.getDate() + days);
+  document.getElementById('cExpDate').value = base.toISOString().split('T')[0];
+}
+
+function submitClient() {
+  const name = document.getElementById('cName').value.trim();
+  const phone = document.getElementById('cPhone').value.trim();
+  const deviceId = document.getElementById('cDeviceId').value.trim();
+  const expDate = document.getElementById('cExpDate').value;
+  const notes = document.getElementById('cNotes').value.trim();
+  const id = document.getElementById('clientId').value || ('cli_' + Date.now());
+
+  if (!name) return alert('Informe o nome do cliente.');
+  if (!phone) return alert('Informe o WhatsApp / Telefone.');
+
+  const clientData = { id, name, phone, deviceId, expDate, notes };
+
+  const idx = CLIENTS.findIndex(x => x.id === id);
+  if (idx >= 0) {
+    CLIENTS[idx] = clientData;
+  } else {
+    CLIENTS.push(clientData);
+  }
+
+  saveClientsLocal();
+  closeModal('modalClient');
+  showToast('Cliente salvo com sucesso!', true);
+}
+
+function deleteClient(id) {
+  const c = CLIENTS.find(x => x.id === id);
+  if (!confirm(`Deseja excluir o cadastro do cliente "${c ? c.name : id}"?`)) return;
+  CLIENTS = CLIENTS.filter(x => x.id !== id);
+  saveClientsLocal();
+  showToast('Cliente excluído.', true);
+}
+
+function addClientDays(id, days) {
+  const c = CLIENTS.find(x => x.id === id);
+  if (!c) return;
+  const base = c.expDate ? new Date(c.expDate) : new Date();
+  base.setDate(base.getDate() + days);
+  c.expDate = base.toISOString().split('T')[0];
+  saveClientsLocal();
+  showToast(`Adicionados +${days} dias para ${c.name}. Novo vencimento: ${new Date(c.expDate).toLocaleDateString('pt-BR')}`, true);
+}
+
+function sendWhatsApp(phone, name, expDate) {
+  const cleanPhone = phone.replace(/\D/g, '');
+  const dtStr = expDate ? new Date(expDate).toLocaleDateString('pt-BR') : '';
+  const text = encodeURIComponent(`Olá ${name}, tudo bem? Passando para lembrar do seu acesso McPlayer com vencimento em ${dtStr}. Qualquer dúvida estamos à disposição!`);
+  window.open(`https://wa.me/55${cleanPhone}?text=${text}`, '_blank');
+}
+
+function renderClients() {
+  const q = (document.getElementById('searchClients').value || '').trim().toLowerCase();
+  const list = CLIENTS.filter(c => {
+    return !q || c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)) || (c.deviceId && c.deviceId.includes(q));
+  });
+
+  const el = document.getElementById('clientsList');
+  if (!list.length) {
+    el.innerHTML = '<span class="mono">Nenhum cliente cadastrado. Clique em "+ Novo Cliente" para adicionar.</span>';
+    return;
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+
+  el.innerHTML = list.map(c => {
+    const isExpired = c.expDate && c.expDate < today;
+    const diffDays = c.expDate ? Math.ceil((new Date(c.expDate) - new Date(today)) / (1000 * 60 * 60 * 24)) : null;
+
+    let badge = '';
+    if (!c.expDate) {
+      badge = '<span class="status-badge" style="background:#334155; color:#cbd5e1">Sem data</span>';
+    } else if (isExpired) {
+      badge = `<span class="status-badge status-expired">Vencido (${Math.abs(diffDays)}d atrás)</span>`;
+    } else if (diffDays <= 3) {
+      badge = `<span class="status-badge status-pending">Vence em ${diffDays} dia(s)</span>`;
+    } else {
+      badge = `<span class="status-badge status-approved">Em dia (${diffDays} dias)</span>`;
+    }
+
+    const expStr = c.expDate ? new Date(c.expDate).toLocaleDateString('pt-BR') : 'Não definida';
+
+    return `
+      <div class="item-row">
+        <div class="item-top">
+          <div>
+            <b style="font-size:16px;">${esc(c.name)}</b>
+            ${badge}
+            <div class="mono" style="margin-top:4px;">
+              📱 WhatsApp: <b>${esc(c.phone)}</b> ·
+              Chave TV: <b>${esc(c.deviceId || 'Não vinculada')}</b> ·
+              Vencimento: <b>${esc(expStr)}</b>
+              ${c.notes ? ` · <span style="color:#94a3b8">${esc(c.notes)}</span>` : ''}
+            </div>
+          </div>
+
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn-wa btn-sm" onclick="sendWhatsApp('${esc(c.phone)}', '${esc(c.name)}', '${esc(c.expDate)}')">
+              💬 WhatsApp
+            </button>
+            <button class="btn-outline btn-sm" onclick="addClientDays('${esc(c.id)}', 30)" title="Renovar +30 dias">
+              +30 dias
+            </button>
+            <button class="btn-outline btn-sm" onclick="openClientModal('${esc(c.id)}')">
+              ✏️ Editar
+            </button>
+            <button class="btn-danger btn-sm" onclick="deleteClient('${esc(c.id)}')">
+              🗑️ Excluir
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Iniciar
+window.addEventListener('DOMContentLoaded', () => {
+  loadAll();
+});
+</script>
+
+</body>
+</html>

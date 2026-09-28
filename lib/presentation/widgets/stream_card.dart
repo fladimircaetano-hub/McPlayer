@@ -133,16 +133,18 @@ class _StreamCardState extends State<StreamCard> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                item.category,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
+              if (item.category.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  item.category,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
@@ -242,10 +244,10 @@ class _StreamCardState extends State<StreamCard> {
       return CachedNetworkImage(
         imageUrl: item.logoUrl!,
         fit: isPoster ? BoxFit.cover : BoxFit.contain,
-        memCacheWidth: isPoster ? 400 : 200,
-        memCacheHeight: isPoster ? 600 : 200,
-        maxWidthDiskCache: 500,
-        maxHeightDiskCache: 750,
+        memCacheWidth: isPoster ? 256 : 128,
+        memCacheHeight: isPoster ? 384 : 128,
+        maxWidthDiskCache: 320,
+        maxHeightDiskCache: 480,
         fadeInDuration: const Duration(milliseconds: 150),
         placeholder: (context, url) => Center(
           child: SizedBox(

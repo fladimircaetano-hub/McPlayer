@@ -7,8 +7,10 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/back_navigation_mixin.dart';
 import '../../data/models/stream_item.dart';
 import '../widgets/tv_focusable.dart';
+
 enum PlayerAspect {
   fit16x9('16:9', 16 / 9, BoxFit.contain),
   fit4x3('4:3', 4 / 3, BoxFit.contain),
@@ -40,7 +42,7 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   Player? _player;
   VideoController? _videoController;
   late StreamItem _currentItem;
@@ -67,12 +69,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _openGeneration = 0;
 
   /// Watchdog anti-travamento: detecta buffering infinito ou frame
-  /// congelado (posição sem avançar) e reconecta sozinho.
+  /// congelado (posição sem avançar em VOD) e reconecta sozinho.
   Timer? _stallTimer;
   DateTime? _bufferingSince;
   DateTime _lastProgressAt = DateTime.now();
-  static const _bufferTimeout = Duration(seconds: 15);
-  static const _stallTimeout = Duration(seconds: 10);
+  static const _bufferTimeout = Duration(seconds: 25);
+  static const _stallTimeout = Duration(seconds: 20);
+  bool _watchdogActive = false;
 
   PlayerAspect _currentAspect = PlayerAspect.original;
 
@@ -130,14 +133,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   /// Inicialização ordenada do player nativo: cria, liga a decodificação
-  /// por hardware e só então abre a stream. Sem hwdec, o mpv decodifica
-  /// por software na CPU — SD abre, mas HD/FHD travam em sticks fracos
-  /// (foi o caso do Fire TV Stick HD). `mediacopy` = MediaCodec com
-  /// renderização direta (zero-copy); se o aparelho não suportar, o mpv
-  /// volta sozinho para software.
-  ///
-  /// Nota: media_kit 1.2.6 não expõe `setProperty` no `Player` público
-  /// (só no platform nativo), por isso o `dynamic` contido abaixo.
+  /// por hardware e só então abre a stream. `auto-safe` seleciona o decodificador
+  /// por hardware ideal para a plataforma (MediaCodec no Android, D3D11VA no Windows)
+  /// e faz fallback limpo para software se não disponível.
   Future<void> _initNativePlayer() async {
     _player = Player(
       configuration: const PlayerConfiguration(
@@ -149,8 +147,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final platform = _player!.platform;
       if (platform != null) {
         final dyn = platform as dynamic;
+        // Tenta habilitar decodificação por hardware com fallback automático
         await dyn
-            .setProperty('hwdec', 'mediacopy')
+            .setProperty('hwdec', 'auto-safe')
             .timeout(const Duration(seconds: 5));
         // Stick de 1 GB: o padrão do mpv (250 MB de buffer + 100 MB para
         // trás) estoura a RAM em filmes e o sistema mata o app (LMK).
@@ -160,9 +159,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await dyn
             .setProperty('demuxer-max-back-bytes', '16MiB')
             .timeout(const Duration(seconds: 5));
+        // Configurações adicionais para estabilidade
+        await dyn
+            .setProperty('cache-secs', '10')
+            .timeout(const Duration(seconds: 3));
+        await dyn
+            .setProperty('cache-pause', 'yes')
+            .timeout(const Duration(seconds: 3));
       }
-    } catch (_) {
-      // Aparelho sem MediaCodec utilizável: segue em software.
+    } catch (e) {
+      // Aparelho sem suporte: segue em software.
+      debugPrint('[Player] hwdec setup failed (fallback to software): $e');
     }
     if (!mounted) return;
     _videoController = VideoController(
@@ -182,6 +189,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         setState(() => _isPlaying = playing);
         if (playing) _resetControlsTimeout();
       }
+    }, onError: (e) {
+      debugPrint('[Player] playing stream error: $e');
     }));
     _subs.add(_player!.stream.position.listen((pos) {
       // Throttle: só rebuild quando o segundo muda e não está arrastando.
@@ -191,9 +200,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       // Sinal de vida para o watchdog (mesmo sem rebuild).
       _lastProgressAt = DateTime.now();
+    }, onError: (e) {
+      debugPrint('[Player] position stream error: $e');
     }));
     _subs.add(_player!.stream.duration.listen((dur) {
       if (mounted) setState(() => _duration = dur);
+    }, onError: (e) {
+      debugPrint('[Player] duration stream error: $e');
     }));
     _subs.add(_player!.stream.buffering.listen((buffering) {
       if (mounted) setState(() => _isBuffering = buffering);
@@ -203,15 +216,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _bufferingSince = null;
         _lastProgressAt = DateTime.now();
       }
+    }, onError: (e) {
+      debugPrint('[Player] buffering stream error: $e');
     }));
     _subs.add(_player!.stream.tracks.listen((tracks) {
       if (mounted) setState(() => _tracks = tracks);
+    }, onError: (e) {
+      debugPrint('[Player] tracks stream error: $e');
     }));
     _subs.add(_player!.stream.error.listen((error) {
       if (error.isNotEmpty) _onPlayerError(error);
+    }, onError: (e) {
+      debugPrint('[Player] error stream error: $e');
     }));
     _subs.add(_player!.stream.completed.listen((completed) {
       if (completed && mounted) _onCompleted();
+    }, onError: (e) {
+      debugPrint('[Player] completed stream error: $e');
     }));
   }
 
@@ -219,8 +240,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _stallTimer?.cancel();
     _lastProgressAt = DateTime.now();
     _bufferingSince = DateTime.now();
+    _watchdogActive = true;
     _stallTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (!mounted || _isWebPreview || _hasError || _player == null) return;
+      if (!mounted || _isWebPreview || _hasError || _player == null || !_watchdogActive) return;
       final now = DateTime.now();
 
       // 1) Buffering infinito: nunca saiu do loading.
@@ -232,11 +254,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         return;
       }
 
-      // 2) Frame congelado: tocando, sem buffering, mas posição parada.
-      // VOD pausado ou no fim não conta.
-      if (_isPlaying && !_isBuffering) {
-        final atEnd = !_isLive &&
-            _duration.inSeconds > 0 &&
+      // 2) Frame congelado (apenas VOD): tocando, sem buffering, mas posição parada.
+      // Em canais ao vivo (HLS/MPEG-TS), a posição costuma ficar estática em 0.
+      if (!_isLive && _isPlaying && !_isBuffering) {
+        final atEnd = _duration.inSeconds > 0 &&
             _position.inSeconds >= _duration.inSeconds - 1;
         if (!atEnd && now.difference(_lastProgressAt) >= _stallTimeout) {
           _lastProgressAt = now;
@@ -247,7 +268,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _autoReconnect(String motivo) {
-    if (!mounted || _hasError) return;
+    if (!mounted || _hasError || !_watchdogActive) return;
     if (_retryCount >= _maxRetries) {
       _fail(
           'Conexão instável ($motivo após ${_maxRetries + 1} tentativas). Toque em Tentar Novamente.');
@@ -282,22 +303,52 @@ class _PlayerScreenState extends State<PlayerScreen> {
       });
     }
     try {
+      // Suporte a URLs com headers no formato pipe: url|User-Agent=...&Referer=...
+      String cleanUrl = url.trim();
+      final headers = Map<String, String>.from(_uaHeaders);
+      final pipeIndex = cleanUrl.indexOf('|');
+      if (pipeIndex != -1) {
+        final queryHeaders = cleanUrl.substring(pipeIndex + 1);
+        cleanUrl = cleanUrl.substring(0, pipeIndex).trim();
+        final pairs = queryHeaders.split('&');
+        for (final pair in pairs) {
+          final eq = pair.indexOf('=');
+          if (eq != -1) {
+            final k = pair.substring(0, eq).trim();
+            final v = pair.substring(eq + 1).trim();
+            if (k.isNotEmpty && v.isNotEmpty) {
+              headers[k] = v;
+            }
+          }
+        }
+      }
+
       await _player!
-          .open(Media(url, httpHeaders: _uaHeaders), play: true)
+          .open(Media(cleanUrl, httpHeaders: headers), play: true)
           .timeout(
-            const Duration(seconds: 15),
-            onTimeout: () => throw TimeoutException('Tempo esgotado (15s).'),
+            const Duration(seconds: 25),
+            onTimeout: () => throw TimeoutException('Tempo esgotado (25s).'),
           );
       if (!mounted || gen != _openGeneration) return;
       await _player!.setVolume(_volume * 100);
       try {
-        final current = await (_player!.platform as dynamic)
+        final _ = await (_player!.platform as dynamic)
             .getProperty('hwdec-current')
             .timeout(const Duration(seconds: 3));
-        debugPrint('[Player] hwdec-current=$current url=${_currentItem.streamUrl}');
+        // debugPrint('[Player] hwdec-current=$current url=${_currentItem.streamUrl}');
       } catch (_) {}
       if (mounted) {
         _resetControlsTimeout();
+      }
+    } on TimeoutException catch (_) {
+      if (!mounted || gen != _openGeneration) return;
+      if (_retryCount < _maxRetries && mounted) {
+        _retryCount++;
+        await Future.delayed(Duration(seconds: _retryCount));
+        if (mounted) return _open(url, isRetry: true);
+      }
+      if (mounted) {
+        _fail('Tempo esgotado (tentativa ${_retryCount + 1}/${_maxRetries + 1}). Verifique a internet ou reconecte.');
       }
     } catch (e) {
       if (!mounted || gen != _openGeneration) return;
@@ -314,9 +365,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) return _open(url, isRetry: true);
       }
       if (mounted) {
-        _fail(e is TimeoutException
-            ? 'Tempo esgotado (tentativa ${_retryCount + 1}/${_maxRetries + 1}). Verifique a internet ou reconecte.'
-            : 'Falha ao conectar: $msg');
+        _fail('Falha ao conectar: $msg');
       }
     }
   }
@@ -337,7 +386,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _onPlayerError(String error) {
-    if (!mounted || _hasError) return;
+    if (!mounted || _hasError || !_watchdogActive) return;
     if (_isFatalError(error)) {
       _fail(error.length > 220 ? '${error.substring(0, 220)}...' : error);
       return;
@@ -345,7 +394,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_retryCount < _maxRetries) {
       _retryCount++;
       Future.delayed(Duration(seconds: _retryCount), () {
-        if (mounted) _open(_currentItem.streamUrl, isRetry: true);
+        if (mounted && _watchdogActive) _open(_currentItem.streamUrl, isRetry: true);
       });
     } else {
       _fail(error.length > 220 ? '${error.substring(0, 220)}...' : error);
@@ -357,6 +406,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// (nem o Voltar) responde.
   void _fail(String message) {
     if (!mounted) return;
+    _watchdogActive = false; // Para o watchdog ao mostrar erro
     setState(() {
       _hasError = true;
       _isBuffering = false;
@@ -423,6 +473,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _webNotice();
       return;
     }
+    _retryCount = 0;
+    _watchdogActive = true; // Reativa watchdog ao reconectar manualmente
     _open(_currentItem.streamUrl);
   }
 
@@ -474,13 +526,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final next = (_currentAspect.index + 1) % PlayerAspect.values.length;
     setState(() => _currentAspect = PlayerAspect.values[next]);
     _resetControlsTimeout();
-  }
-
-  /// Volta uma única tela. Usa [BackGuard] global: sem ele, segurar o
-  /// botão no Fire TV pulava player -> lista -> início (2 telas).
-  void _goBack() {
-    if (!BackGuard.claim()) return;
-    Navigator.of(context).maybePop();
   }
 
   Future<void> _handleVerticalDragUpdate(DragUpdateDetails details, double screenWidth) async {
@@ -584,6 +629,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _watchdogActive = false;
     _hideTimer?.cancel();
     _stallTimer?.cancel();
     for (final s in _subs) {
@@ -613,7 +659,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    return Scaffold(
+    return buildWithBackGuard(
+      child: Scaffold(
       backgroundColor: Colors.black,
       body: CallbackShortcuts(
         bindings: {
@@ -628,7 +675,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           const SingleActivator(LogicalKeyboardKey.arrowDown): _zapNext,
           const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _seekBy(-10),
           const SingleActivator(LogicalKeyboardKey.arrowRight): () => _seekBy(10),
-          const SingleActivator(LogicalKeyboardKey.goBack): _goBack,
         },
         child: FocusScope(
           autofocus: true,
@@ -684,6 +730,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -774,7 +821,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   TvFocusable(
                     focusNode: _backNode,
                     borderRadius: BorderRadius.circular(20),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: handleBackButton,
                     child: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -1047,21 +1094,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Container(
       color: Colors.black.withValues(alpha: 0.85),
       child: Center(
-        // Escopo próprio: o D-pad circula só entre Voltar/Tentar e o
-        // botão voltar do controle (goBack/escape) sempre sai da tela,
-        // mesmo se o foco estiver perdido.
+        // Escopo próprio: o D-pad circula só entre Voltar/Tentar.
+        // O voltar do controle é tratado pelo PopScope externo (pop único
+        // com debounce) — sem handler aqui para não dar pop duplo.
         child: FocusScope(
           autofocus: true,
-          onKeyEvent: (node, event) {
-            if (event is KeyDownEvent) {
-              if (event.logicalKey == LogicalKeyboardKey.goBack ||
-                  event.logicalKey == LogicalKeyboardKey.escape) {
-                _goBack();
-                return KeyEventResult.handled;
-              }
-            }
-            return KeyEventResult.ignored;
-          },
           child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(

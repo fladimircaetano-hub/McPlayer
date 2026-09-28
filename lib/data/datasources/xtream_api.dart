@@ -23,7 +23,7 @@ class XtreamApi {
   String _cleanUrl(String url) {
     var clean = url.trim();
     if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
-      clean = 'http://$clean';
+      clean = 'https://$clean';
     }
     if (clean.endsWith('/')) {
       clean = clean.substring(0, clean.length - 1);
@@ -78,7 +78,7 @@ class XtreamApi {
         if (userInfo is Map<String, dynamic>) {
           final auth = userInfo['auth'];
           final status = userInfo['status']?.toString();
-          final authOk = auth == 1 || auth == '1' || status?.toLowerCase() == 'active';
+          final authOk = auth == 1 || auth == '1' || auth == true || status?.toLowerCase() == 'active';
           if (authOk) {
             return XtreamAccount(
               serverUrl: base,
@@ -111,7 +111,13 @@ class XtreamApi {
       case DioExceptionType.connectionError:
         return 'Sem conexão com o servidor Xtream. Confira URL/rede.';
       case DioExceptionType.badResponse:
-        return 'Xtream respondeu ${e.response?.statusCode ?? 'com erro'}.';
+        final code = e.response?.statusCode;
+        if (code != null && code >= 520 && code <= 524) {
+          return 'Servidor do provedor fora do ar (erro $code). '
+              'Confira a porta no Code (ex.: :8080) e tente de novo; '
+              'se persistir, fale com o provedor.';
+        }
+        return 'Xtream respondeu ${code ?? 'com erro'}.';
       case DioExceptionType.cancel:
         return 'Autenticação cancelada.';
       default:
@@ -120,37 +126,46 @@ class XtreamApi {
   }
 
   /// Busca mapa category_id -> category_name. Nunca lança: retorna {} em falha.
+  /// Com 1 retry: no login saem 6 requisições em paralelo e provedor fraco
+  /// às vezes derruba uma — sem retry as séries caíam todas no balde único
+  /// "Séries" em vez das categorias (studios/gêneros) do provedor.
   Future<Map<String, String>> _fetchCategoryMap(
     XtreamAccount account,
     String action,
   ) async {
-    try {
-      final endpoint = '${account.serverUrl}/player_api.php';
-      final response = await _dio.get(
-        endpoint,
-        queryParameters: {
-          'username': account.username,
-          'password': account.password,
-          'action': action,
-        },
-      );
-      dynamic data = response.data;
-      if (data is String) data = jsonDecode(data);
-      if (data is! List) return {};
-      final map = <String, String>{};
-      for (final raw in data) {
-        if (raw is Map<String, dynamic>) {
-          final id = raw['category_id']?.toString();
-          final name = raw['category_name']?.toString();
-          if (id != null && id.isNotEmpty && name != null && name.isNotEmpty) {
-            map[id] = name;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final endpoint = '${account.serverUrl}/player_api.php';
+        final response = await _dio.get(
+          endpoint,
+          queryParameters: {
+            'username': account.username,
+            'password': account.password,
+            'action': action,
+          },
+        );
+        dynamic data = response.data;
+        if (data is String) data = jsonDecode(data);
+        if (data is! List) continue;
+        final map = <String, String>{};
+        for (final raw in data) {
+          if (raw is Map<String, dynamic>) {
+            final id = raw['category_id']?.toString();
+            final name = raw['category_name']?.toString();
+            if (id != null && id.isNotEmpty && name != null && name.isNotEmpty) {
+              map[id] = name;
+            }
           }
         }
+        if (map.isNotEmpty) {
+          return map;
+        }
+      } catch (_) {
+        // Tenta de novo uma vez antes de desistir.
       }
-      return map;
-    } catch (_) {
-      return {};
+      await Future.delayed(const Duration(seconds: 2));
     }
+    return {};
   }
 
   /// Busca todos os canais ao vivo e categorias.
@@ -357,20 +372,24 @@ class XtreamApi {
       }
       if (data is! Map<String, dynamic>) return [];
 
-    final episodesMap = data['episodes'] as Map<String, dynamic>?;
-    if (episodesMap == null) return [];
+      final rawEpisodes = data['episodes'];
+      if (rawEpisodes == null) return [];
 
-    final List<StreamItem> episodeItems = [];
-    episodesMap.forEach((seasonStr, epList) {
-      final seasonNum = int.tryParse(seasonStr) ?? 1;
-      if (epList is List) {
+      final List<StreamItem> episodeItems = [];
+
+      void addEpisodes(dynamic epList, int defaultSeason) {
+        if (epList is! List) return;
         for (final ep in epList) {
           if (ep is Map<String, dynamic>) {
             final epId = ep['id']?.toString() ?? '';
             final title = ep['title']?.toString() ?? 'Episódio';
-            final epNum = int.tryParse(ep['episode_num']?.toString() ?? '1') ?? 1;
+            final epNum =
+                int.tryParse(ep['episode_num']?.toString() ?? '1') ?? 1;
+            final seasonNum =
+                int.tryParse(ep['season']?.toString() ?? '') ?? defaultSeason;
             final ext = ep['container_extension']?.toString() ?? 'mp4';
-            final streamUrl = '${account.serverUrl}/series/${account.username}/${account.password}/$epId.$ext';
+            final streamUrl =
+                '${account.serverUrl}/series/${account.username}/${account.password}/$epId.$ext';
 
             episodeItems.add(
               StreamItem(
@@ -388,7 +407,15 @@ class XtreamApi {
           }
         }
       }
-      });
+
+      if (rawEpisodes is Map) {
+        rawEpisodes.forEach((seasonStr, epList) {
+          final seasonNum = int.tryParse(seasonStr.toString()) ?? 1;
+          addEpisodes(epList, seasonNum);
+        });
+      } else if (rawEpisodes is List) {
+        addEpisodes(rawEpisodes, 1);
+      }
 
       return episodeItems;
     } catch (_) {

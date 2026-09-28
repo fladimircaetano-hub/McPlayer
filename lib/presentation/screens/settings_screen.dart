@@ -1,66 +1,80 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import '../../core/activation/activation_config.dart';
+import '../../core/di/service_locator.dart';
+import '../../core/activation/activation_models.dart';
+import '../../core/activation/admin_config.dart';
 import '../../core/storage/storage_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/back_navigation_mixin.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/tv_focusable.dart';
 import 'lists_screen.dart';
+import 'admin_screen.dart';
 
 /// Textos da tela em PT/EN. O idioma vem de [StorageService.languageNotifier]
 /// e a troca aplica na hora (listener no [initState]), sem reiniciar o app.
 const Map<String, Map<String, String>> _strings = {
   'pt': {
     'settings': 'Settings',
-    'm_info': 'Informações gerais',
+    'm_info': 'Informacoes gerais',
     'm_lang': 'Trocar idioma',
     'm_format': 'Formato do stream',
-    'm_pin': 'Código PIN',
+    'm_pin': 'Codigo PIN',
     'm_cats': 'Gerenciar categorias',
     'm_clear': 'Limpar dados',
     'm_time': 'Data e hora',
     'm_high': 'Destaques da home',
     'm_tmdb': 'Usar TMDB API',
-    'm_player': 'Configurações do player',
+    'm_player': 'Configuracoes do player',
+    'm_test': 'Testar Conexao',
+    'm_admin': 'Admin (Dispositivos)',
     'p_info': 'Info do aparelho',
-    'mac': 'Endereço MAC',
-    'appver': 'Versão do app',
+    'mac': 'Endereco MAC',
+    'appver': 'Versao do app',
     'devkey': 'Chave do aparelho',
-    'xtream_user': 'Usuário Xtream',
+    'xtream_user': 'Usuario Xtream',
     'lista': 'Lista',
     'p_lang': 'Trocar idioma',
-    'snack_pt': 'Idioma: Português',
-    'snack_en': 'Idioma: inglês',
+    'snack_pt': 'Idioma: Portugues',
+    'snack_en': 'Idioma: ingles',
     'p_format': 'Formato do stream',
-    'snack_ts': 'Formato: mpegts — vale para os canais Xtream',
-    'snack_hls': 'Formato: m3u8 — vale para os canais Xtream',
+    'snack_ts': 'Formato: mpegts -- vale para os canais Xtream',
+    'snack_hls': 'Formato: m3u8 -- vale para os canais Xtream',
     'p_pin': 'Trocar PIN',
     'pin_set': 'PIN definido',
     'pin_no': 'Sem PIN',
-    'pin_hint': 'Novo PIN (4 dígitos)',
+    'pin_hint': 'Novo PIN (4 digitos)',
     'pin_save': 'Salvar',
-    'pin_need4': 'Digite 4 dígitos',
+    'pin_need4': 'Digite 4 digitos',
     'pin_saved': 'PIN salvo',
     'p_cats': 'Gerenciar categorias',
     'cat_live': 'TV ao vivo',
     'cat_movies': 'Filmes',
-    'cat_series': 'Séries',
+    'cat_series': 'Series',
     'p_clear': 'Limpar dados',
     'clear_fav': 'Limpar favoritos',
     'fav_cleared': 'Favoritos apagados',
     'logout_keep': 'Sair da lista (manter favoritos)',
     'wipe': 'Apagar tudo',
     'p_time': 'Data e hora',
-    'dev_time': 'Horário do aparelho',
+    'dev_time': 'Horario do aparelho',
     'tz': 'Fuso',
     'p_high': 'Destaques da home',
     'show_counts': 'Mostrar contadores no menu',
     'p_tmdb': 'Usar TMDB API',
-    'tmdb_desc': 'Buscar pôsteres e sinopses (TMDB)',
-    'p_player': 'Configurações do player',
+    'tmdb_desc': 'Buscar posteres e sinopses (TMDB)',
+    'p_player': 'Configuracoes do player',
     'keep_on': 'Manter tela ligada no player',
+    'p_test': 'Testar Conexao Dashboard',
+    'test_ok': 'Conexao OK',
+    'test_fail': 'Falha na conexao',
+    'test_pending': 'Testando...',
+    'test_unconfigured': 'Ativacao remota desligada (configure no activation_config.dart)',
+    'test_details': 'Detalhes:',
     'disclaimer':
-        'McPlayer é apenas um reprodutor de mídia. Não fornece listas, canais ou conteúdos e não se responsabiliza pelo uso indevido do aplicativo.',
+        'McPlayer e apenas um reprodutor de midia. Nao fornece listas, canais ou conteudos e nao se responsabiliza pelo uso indevido do aplicativo.',
   },
   'en': {
     'settings': 'Settings',
@@ -74,6 +88,8 @@ const Map<String, Map<String, String>> _strings = {
     'm_high': 'Home Highlights',
     'm_tmdb': 'Use TMDB API',
     'm_player': 'Player Settings',
+    'm_test': 'Test Connection',
+    'm_admin': 'Admin (Devices)',
     'p_info': 'Device Info',
     'mac': 'Mac Address',
     'appver': 'App version',
@@ -84,8 +100,8 @@ const Map<String, Map<String, String>> _strings = {
     'snack_pt': 'Language: Portuguese',
     'snack_en': 'Language: English',
     'p_format': 'Change Stream Format',
-    'snack_ts': 'Format: mpegts — applies to Xtream channels',
-    'snack_hls': 'Format: m3u8 — applies to Xtream channels',
+    'snack_ts': 'Format: mpegts -- applies to Xtream channels',
+    'snack_hls': 'Format: m3u8 -- applies to Xtream channels',
     'p_pin': 'Change Pin Code',
     'pin_set': 'PIN set',
     'pin_no': 'No PIN',
@@ -111,15 +127,21 @@ const Map<String, Map<String, String>> _strings = {
     'tmdb_desc': 'Fetch posters and synopses (TMDB)',
     'p_player': 'Player Settings',
     'keep_on': 'Keep screen on in player',
+    'p_test': 'Test Dashboard Connection',
+    'test_ok': 'Connection OK',
+    'test_fail': 'Connection failed',
+    'test_pending': 'Testing...',
+    'test_unconfigured': 'Remote activation disabled (configure in activation_config.dart)',
+    'test_details': 'Details:',
     'disclaimer':
         'McPlayer is only a media player. It does not provide lists, channels or content and is not responsible for misuse of the app.',
   },
 };
 
-/// Tela "Settings" conforme modelo: menu à esquerda, painel à direita.
+/// Tela "Settings" conforme modelo: menu a esquerda, painel a direita.
 ///
-/// - General Info: Device Info (MAC, versões, chave)
-/// - Demais itens abrem painéis com a opção correspondente.
+/// - General Info: Device Info (MAC, versoes, chave)
+/// - Demais itens abrem paineis com a opcao correspondente.
 class SettingsScreen extends StatefulWidget {
   final IptvController controller;
 
@@ -129,10 +151,12 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> with BackNavigationMixin {
   int _selected = 0;
   final TextEditingController _pinCtrl = TextEditingController();
   String _appVersion = '';
+  String _testResult = '';
+  bool _testing = false;
 
   StorageService get _storage => widget.controller.storageService;
   bool get _isTv => MediaQuery.of(context).size.width >= 900;
@@ -153,6 +177,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         tr('m_high'),
         tr('m_tmdb'),
         tr('m_player'),
+        tr('m_test'),
+        if (AdminConfig.isEnabled) tr('m_admin'),
       ];
 
   @override
@@ -194,24 +220,90 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// Rebuild após escrita async em prefs. Escritas são rápidas, mas o
-  /// usuário pode ter voltado da tela no meio do await — sem o guard,
-  /// setState em widget desmontado lança exceção.
+  /// Rebuild apos escrita async em prefs. Escritas sao rapidas, mas o
+  /// usuario pode ter voltado da tela no meio do await -- sem o guard,
+  /// setState em widget desmontado lanca excecao.
   void _refresh() {
     if (!mounted) return;
     setState(() {});
   }
 
-  @override
+  Future<void> _testConnection() async {
+    if (_testing) return;
+    setState(() {
+      _testing = true;
+      _testResult = tr('test_pending');
+    });
+
+    try {
+      if (!ActivationConfig.isEnabled) {
+        setState(() {
+          _testResult = tr('test_unconfigured');
+          _testing = false;
+        });
+        return;
+      }
+
+      final deviceId = _storage.getDeviceId();
+      final mac = _storage.getDeviceMac();
+
+      final service = sl.activationService;
+      if (service == null) {
+        setState(() {
+          _testing = false;
+          _testResult = tr('test_unconfigured');
+        });
+        return;
+      }
+      final result = await service.checkIn(deviceId: deviceId, mac: mac);
+
+      if (!mounted) return;
+
+      setState(() {
+        _testing = false;
+        switch (result.status) {
+          case ActivationStatus.approved:
+            _testResult = '${tr('test_ok')} (${result.status.name})';
+            break;
+          case ActivationStatus.pending:
+            _testResult = 'Pendente aprovacao no dashboard';
+            break;
+          case ActivationStatus.rejected:
+            _testResult = 'Rejeitado pelo dashboard';
+            break;
+          case ActivationStatus.notFound:
+            _testResult = 'Dispositivo nao registrado (check-in enviado)';
+            break;
+          case ActivationStatus.disabled:
+            _testResult = tr('test_unconfigured');
+            break;
+        }
+        _testResult += '\n${tr('test_details')} ${result.status.name}';
+        if (result.listData != null) {
+          _testResult += '\nLista vinculada: ${result.listData!.type}';
+        }
+        if (result.approvedAt != null) {
+          _testResult += '\nAprovado em: ${result.approvedAt}';
+        }
+      });
+
+      _snack(_testResult);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _testing = false;
+        _testResult = '${tr('test_fail')}: $e';
+      });
+      _snack(_testResult);
+    }
+  }
+
+@override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
-        return CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.goBack):
-                _onBack,
-          },
+        return buildWithBackGuard(
           child: FocusScope(
             autofocus: true,
             child: Scaffold(
@@ -221,60 +313,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          TvFocusable(
-                            borderRadius:
-                                BorderRadius.circular(10),
-                            onPressed: _onBack,
-                            child: const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Icon(
-                                  Icons.arrow_back_rounded,
-                                  color: Colors.white,
-                                  size: 26),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(tr('settings'),
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 34)),
-                        ],
-                      ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: _isTv
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(width: 380, child: _buildMenu()),
-                              const SizedBox(width: 32),
-                              Expanded(child: _buildPanel()),
-                            ],
-                          )
-                        : ListView(
-                            children: [
-                              _buildMenu(),
-                              const SizedBox(height: 16),
-                              _buildPanel(),
-                            ],
-                          ),
+                      _buildHeader(),
+                      const SizedBox(height: 16),
+                      Expanded(child: _buildContent()),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
-        ),
-      ),
-    );
+        );
       },
     );
   }
 
-  void _onBack() {
-    Navigator.of(context).maybePop();
+  Widget _buildHeader() {
+    return Row(
+      children: [
+        TvFocusable(
+          borderRadius: BorderRadius.circular(10),
+          onPressed: handleBackButton,
+          child: const Padding(
+            padding: EdgeInsets.all(8),
+            child: Icon(Icons.arrow_back_rounded, color: Colors.white, size: 26),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(tr('settings'),
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+                fontSize: 34)),
+      ],
+    );
+  }
+
+  Widget _buildContent() {
+    if (_isTv) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 380, child: _buildMenu()),
+          const SizedBox(width: 32),
+          Expanded(child: _buildPanel()),
+        ],
+      );
+    } else {
+      return ListView(
+        children: [
+          _buildMenu(),
+          const SizedBox(height: 16),
+          _buildPanel(),
+        ],
+      );
+    }
   }
 
   Widget _buildMenu() {
@@ -288,6 +380,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       itemBuilder: (context, i) {
         final selected = i == _selected;
         final isTmdb = i == 8;
+        final isAdmin = AdminConfig.isEnabled && i == menu.length - 1;
         return Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: TvFocusable(
@@ -324,6 +417,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         _refresh();
                       },
                     ),
+                  if (isAdmin)
+                    const Icon(Icons.admin_panel_settings, color: AppColors.accentGreen, size: 20),
                 ],
               ),
             ),
@@ -364,6 +459,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return _highlightsPanel();
       case 8:
         return _tmdbPanel();
+      case 9:
+        return _playerPanel();
+      case 10:
+        return _testConnectionPanel();
+      case 11:
+        return _adminPanel();
       default:
         return _playerPanel();
     }
@@ -469,7 +570,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ---------- painéis ----------
+  // ---------- paineis ----------
 
   Widget _deviceInfoPanel() {
     final mac = _storage.getDeviceMac();
@@ -503,7 +604,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         _panelTitle(tr('p_lang')),
         _optionRow(
-          label: 'Português',
+          label: 'Portugues',
           checked: lang == 'pt',
           onTap: () async {
             await _storage.setLanguage('pt');
@@ -726,6 +827,96 @@ class _SettingsScreenState extends State<SettingsScreen> {
             await _storage.setKeepScreenOn(v);
             _refresh();
           },
+        ),
+      ],
+    );
+  }
+
+  Widget _testConnectionPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _panelTitle(tr('p_test')),
+        const SizedBox(height: 8),
+        _optionRow(
+          label: tr('test_pending'),
+          showCheck: false,
+          onTap: _testConnection,
+        ),
+        const SizedBox(height: 16),
+        if (_testResult.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.cardBorder),
+            ),
+            child: SelectableText(
+              _testResult,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        const SizedBox(height: 16),
+        _panelTitle('Configuracao atual'),
+        _panelTitle(
+          'Supabase URL',
+          value: ActivationConfig.supabaseUrl.isEmpty
+              ? '(nao configurado)'
+              : ActivationConfig.supabaseUrl,
+        ),
+        _panelTitle(
+          'App Name',
+          value: ActivationConfig.appName,
+        ),
+        _panelTitle(
+          'Poll Interval',
+          value: '${ActivationConfig.pollInterval.inSeconds}s',
+        ),
+        const SizedBox(height: 16),
+        _panelTitle('Dispositivo'),
+        _panelTitle('Device ID', value: _storage.getDeviceId()),
+        _panelTitle('MAC', value: _storage.getDeviceMac().toLowerCase()),
+      ],
+    );
+  }
+
+  Widget _adminPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _panelTitle(tr('m_admin')),
+        const SizedBox(height: 8),
+        _optionRow(
+          label: 'Abrir Admin (aprovar dispositivos)',
+          showCheck: false,
+          onTap: () {
+            final service = sl.activationService;
+            if (service == null) {
+              _snack('Ativação remota não configurada');
+              return;
+            }
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => AdminScreen(),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        _panelTitle('Como usar'),
+        const Text(
+          '1. Configure ADMIN_PIN via --dart-define no build\n'
+          '2. Abre tela admin protegida por PIN seguro\n'
+          '3. Lista dispositivos pendentes do Supabase\n'
+          '4. Aprova + insere lista (M3U ou Xtream) em 1 clique\n'
+          '5. Funciona junto com o dashboard web\n',
+          style: TextStyle(color: Colors.white70, fontSize: 13),
         ),
       ],
     );

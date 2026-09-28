@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/back_navigation_mixin.dart';
 import '../../data/models/iptv_category.dart';
 import '../../data/models/stream_item.dart';
 import '../../data/services/epg_service.dart';
@@ -11,6 +11,23 @@ import '../widgets/stream_card.dart';
 import '../widgets/tv_focusable.dart';
 import 'player_screen.dart';
 import 'settings_screen.dart';
+
+/// Rótulos genéricos de seção: quando a categoria do item é só o nome
+/// da seção ("Séries" dentro de Séries), o subtítulo do cartão é
+/// redundante e fica oculto. Categorias reais do provedor (Netflix,
+/// Ação...) continuam visíveis.
+const _redundantSectionLabels = {
+  'Séries',
+  'Series',
+  'Filmes',
+  'Movies',
+  'Geral',
+  'General',
+};
+
+/// Subtítulo do cartão de série: esconde o rótulo redundante da seção.
+String _seriesCardSubtitle(String category) =>
+    _redundantSectionLabels.contains(category.trim()) ? '' : category;
 
 /// Tela de seção.
 ///
@@ -32,7 +49,7 @@ class ContentSectionScreen extends StatefulWidget {
   State<ContentSectionScreen> createState() => _ContentSectionScreenState();
 }
 
-class _ContentSectionScreenState extends State<ContentSectionScreen> {
+class _ContentSectionScreenState extends State<ContentSectionScreen> with BackNavigationMixin {
   final TextEditingController _searchCtrl = TextEditingController();
   Timer? _searchDebounce;
   Timer? _clockTimer;
@@ -46,7 +63,11 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   int _selectedIndex = 0;
 
   bool _showOnlyFavorites = false;
-  bool _sortAZ = false;
+  // Ordem da grade: 0=original do provedor, 1=A–Z, 2=Z–A.
+  // O botão Organizar cicla entre os 3 (antes só ligava/desligava o A–Z).
+  int _sortMode = 0;
+  String get _sortSuffix =>
+      _sortMode == 1 ? ' A–Z ✓' : _sortMode == 2 ? ' Z–A ✓' : '';
   bool _isSearching = false;
   DateTime _now = DateTime.now();
   List<EpgProgram> _epg = const [];
@@ -119,7 +140,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     // Memo: a grade rebuilda a cada setState (relógio, foco, EPG...);
     // revarrer 100k+ itens e reagrupar séries a cada frame travava o Fire.
     final key =
-        '$_selectedCategory|$_showOnlyFavorites|${widget.controller.searchQuery}|$_sortAZ|'
+        '$_selectedCategory|$_showOnlyFavorites|${widget.controller.searchQuery}|$_sortMode|'
         '${widget.controller.totalLiveCount}|${widget.controller.totalMoviesCount}|${widget.controller.totalSeriesCount}';
     final cached = _chCache;
     if (cached != null && _chCacheKey == key) return cached;
@@ -128,11 +149,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       selectedCategory: _selectedCategory,
       onlyFavorites: _showOnlyFavorites,
     );
-    if (_sortAZ) {
-      items = [...items]
-        ..sort((a, b) =>
-            a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    }
+    items = _applySort(items);
     _chCache = items;
     _chCacheKey = key;
     return items;
@@ -232,11 +249,13 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
         );
         continue;
       }
-      final key = _seriesKey(item.name);
-      final g = map[key];
+      // Fast path: evita regex pesado para a maioria dos casos
+      final baseName = _stripSeriesVariantFast(item.name);
+      final sKey = _foldAccents(baseName.toLowerCase());
+      final g = map[sKey];
       if (g == null) {
-        map[key] = _SeriesGroup(
-          name: _seriesDisplayName(item.name),
+        map[sKey] = _SeriesGroup(
+          name: _seriesDisplayNameFast(item.name, baseName),
           logoUrl: item.logoUrl,
           category: item.category,
           seriesId: null,
@@ -261,6 +280,30 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     _grCache = groups;
     _grCacheKey = '${identityHashCode(items)}|${items.length}';
     return groups;
+  }
+
+  /// Versão rápida do _stripSeriesVariant usando apenas o regex principal
+  /// S01E01. Evita as múltiplas passagens do método completo.
+  String _stripSeriesVariantFast(String name) {
+    final cached = _stripCache[name];
+    if (cached != null) return cached;
+    // Só remove o padrão SXXEXX no final - cobre 90%+ dos casos
+    var k = name.replaceAll(_tPrefixRegex, '');
+    final fast = _fastSeRegex.firstMatch(k);
+    if (fast != null) {
+      k = _tidy((fast.group(1) ?? k).replaceAll(_markersRegex, ''));
+    } else {
+      // Uma passagem apenas
+      k = _tidy(k.replaceAll(_markersRegex, ''));
+    }
+    if (_stripCache.length > 50000) _stripCache.clear();
+    _stripCache[name] = k;
+    return k;
+  }
+
+  /// Versão rápida do _seriesDisplayName
+  String _seriesDisplayNameFast(String originalName, String strippedName) {
+    return strippedName.isEmpty ? originalName : strippedName;
   }
 
   static final _seRegex = RegExp(r'[sS](\d{1,2})\s*[eE](\d{1,2})');
@@ -307,40 +350,12 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   /// rebuild; sem cache o custo se repetia. Teto p/ não pesar a RAM.
   static final Map<String, String> _stripCache = {};
 
-  /// Remove marcadores de episódio/temporada/tags para agrupar itens da
-  /// mesma série. Via rápida para "Nome S01 E01" (90%+ da lista) + no
-  /// máx. 2 passagens completas (marcadores podem empilhar).
-  String _stripSeriesVariant(String name) {
-    final cached = _stripCache[name];
-    if (cached != null) return cached;
-    var k = name.replaceAll(_tPrefixRegex, '');
-    final fast = _fastSeRegex.firstMatch(k);
-    if (fast != null) {
-      k = _tidy((fast.group(1) ?? k).replaceAll(_markersRegex, ''));
-    } else {
-      for (var i = 0; i < 2; i++) {
-        final before = k;
-        k = _tidy(k.replaceAll(_markersRegex, ''));
-        if (k == before) break;
-      }
-    }
-    if (_stripCache.length > 50000) _stripCache.clear();
-    _stripCache[name] = k;
-    return k;
-  }
-
-  String _tidy(String s) {
+String _tidy(String s) {
     var k = s.replaceAll(_spacesRegex, ' ').trim();
     return k.replaceAll(_trailSepRegex, '').trim();
   }
 
-  String _seriesKey(String name) {
-    final k = _stripSeriesVariant(name);
-    if (k.isEmpty) return name.toLowerCase();
-    // Dobra acentos só na chave: "esquadrão" junta com "esquadrao".
-    return _foldAccents(k.toLowerCase());
-  }
-
+  /// Dobra acentos só na chave: "esquadrão" junta com "esquadrao".
   static String _foldAccents(String s) {
     const accents = 'áàâãéêíóôõúüç';
     const plain = 'aaaaeeiooouuc';
@@ -351,11 +366,6 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       buf.write(idx == -1 ? ch : plain[idx]);
     }
     return buf.toString();
-  }
-
-  String _seriesDisplayName(String name) {
-    final k = _stripSeriesVariant(name);
-    return k.isEmpty ? name : k;
   }
 
   /// Sufixo de temporada avulso no fim do nome ("Zatch Bell! 9",
@@ -456,41 +466,6 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
         _epNumRegex.hasMatch(name);
   }
 
-  /// Extrai (temporada, episódio) de nomes tipo "Nome S01 E01".
-  /// Também entende "T01 E01", "1x01", avulsos ("EP01", "Cap 3") e o
-  /// sufixo de temporada solto ("Zatch Bell! 9 EP03" -> T9 E3;
-  /// "Fairy Tail 7" sem marcador -> T7).
-  (int, int)? _parseSeasonEpisode(String name, int fallbackEp) {
-    var m = _seRegex.firstMatch(name);
-    if (m != null) {
-      final s = int.tryParse(m.group(1) ?? '') ?? 1;
-      final e = int.tryParse(m.group(2) ?? '') ?? fallbackEp;
-      return (s, e);
-    }
-    m = _tRegex.firstMatch(name);
-    if (m != null) {
-      final s = int.tryParse(m.group(1) ?? '') ?? 1;
-      final e = int.tryParse(m.group(2) ?? '') ?? fallbackEp;
-      return (s, e);
-    }
-    m = _xRegex.firstMatch(name);
-    if (m != null) {
-      final s = int.tryParse(m.group(1) ?? '') ?? 1;
-      final e = int.tryParse(m.group(2) ?? '') ?? fallbackEp;
-      return (s, e);
-    }
-    m = _epNumRegex.firstMatch(name);
-    if (m != null) {
-      final e = int.tryParse(m.group(1) ?? '') ?? fallbackEp;
-      final s =
-          _seasonFromPrefix(name.substring(0, m.start)) ?? 1;
-      return (s, e);
-    }
-    final s = _seasonFromPrefix(name);
-    if (s != null) return (s, fallbackEp);
-    return null;
-  }
-
   /// Toque numa série da grade: Xtream busca na API; M3U agrupa os
   /// episódios da lista. Item único sem padrão de episódio toca direto.
   Future<void> _openSeriesGroup(_SeriesGroup g) async {
@@ -515,10 +490,11 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       return;
     }
     if (g.episodes.length == 1 &&
-        _parseSeasonEpisode(g.episodes.first.name, 1) == null) {
+        _parseSeasonEpisodeFast(g.episodes.first.name, 1) == null) {
       _openPlayer(g.episodes, 0);
       return;
     }
+    // Usa compute para parsing pesado de episódios em listas grandes
     final eps = <StreamItem>[];
     final autoEp = <int>[];
     for (var i = 0; i < g.episodes.length; i++) {
@@ -526,7 +502,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       if (ep.seasonNumber != null) {
         eps.add(ep);
       } else {
-        final se = _parseSeasonEpisode(ep.name, i + 1);
+        final se = _parseSeasonEpisodeFast(ep.name, i + 1);
         if (se == null) {
           eps.add(ep.copyWith(seasonNumber: 1, episodeNumber: i + 1));
           autoEp.add(eps.length - 1);
@@ -559,6 +535,40 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       }
     }
     _showEpisodesSheet(g.rep, eps);
+  }
+
+  /// Versão rápida do _parseSeasonEpisode - cobre os casos principais
+  /// SXXEXX, TXX EXX, número de temporada no sufixo, e EP/Cap no final.
+  (int, int)? _parseSeasonEpisodeFast(String name, int fallbackEp) {
+    var m = _seRegex.firstMatch(name);
+    if (m != null) {
+      final s = int.tryParse(m.group(1) ?? '') ?? 1;
+      final e = int.tryParse(m.group(2) ?? '') ?? fallbackEp;
+      return (s, e);
+    }
+    m = _tRegex.firstMatch(name);
+    if (m != null) {
+      final s = int.tryParse(m.group(1) ?? '') ?? 1;
+      final e = int.tryParse(m.group(2) ?? '') ?? fallbackEp;
+      return (s, e);
+    }
+    m = _xRegex.firstMatch(name);
+    if (m != null) {
+      final s = int.tryParse(m.group(1) ?? '') ?? 1;
+      final e = int.tryParse(m.group(2) ?? '') ?? fallbackEp;
+      return (s, e);
+    }
+    // Verifica EP/Cap no final
+    m = _epNumRegex.firstMatch(name);
+    if (m != null) {
+      final e = int.tryParse(m.group(1) ?? '') ?? fallbackEp;
+      final s = _seasonFromPrefix(name.substring(0, m.start)) ?? 1;
+      return (s, e);
+    }
+    // Fallback: só verifica se tem número de temporada no sufixo
+    final s = _seasonFromPrefix(name);
+    if (s != null) return (s, fallbackEp);
+    return null;
   }
 
   /// Fluxo em 2 níveis: temporadas da série -> episódios da temporada.
@@ -748,10 +758,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       builder: (context, _) {
         if (!_isLive) return _buildVodScaffold();
 
-        return CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.goBack): _onBack,
-          },
+        return buildWithBackGuard(
           child: FocusScope(
             autofocus: true,
             child: Scaffold(
@@ -763,11 +770,6 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
         );
       },
     );
-  }
-
-  void _onBack() {
-    if (!BackGuard.claim()) return;
-    Navigator.of(context).maybePop();
   }
 
   String get _clockLabel =>
@@ -843,7 +845,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                   const Icon(Icons.sort_rounded,
                       color: Colors.white, size: 18),
                   const SizedBox(width: 8),
-                  Text('Sort${_sortAZ ? ' ✓' : ''}',
+                  Text('Sort$_sortSuffix',
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 14,
@@ -863,9 +865,19 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
     );
   }
 
+  /// Aplica a ordem atual sem mexer na lista original.
+  List<StreamItem> _applySort(List<StreamItem> items) {
+    if (_sortMode == 0) return items;
+    final asc = _sortMode == 1;
+    return [...items]
+      ..sort((a, b) => asc
+          ? a.name.toLowerCase().compareTo(b.name.toLowerCase())
+          : b.name.toLowerCase().compareTo(a.name.toLowerCase()));
+  }
+
   void _toggleSort() {
     setState(() {
-      _sortAZ = !_sortAZ;
+      _sortMode = (_sortMode + 1) % 3;
       _selectedIndex = 0;
     });
     _loadEpg();
@@ -877,6 +889,19 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       color: AppColors.surface,
       child: Row(
         children: [
+          // Flechinha voltar p/ controle remoto (D-pad): focável e
+          // clicável — antes só havia o "Menu" e o voltar do controle
+          // pulava 2 telas.
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onPressed: handleBackButton,
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.arrow_back_rounded,
+                  color: Colors.white, size: 24),
+            ),
+          ),
+          const SizedBox(width: 8),
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -884,7 +909,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                 children: [
                   _colorAction(
                     color: Colors.redAccent,
-                    label: 'Organizar${_sortAZ ? ' ✓' : ''}',
+                    label: 'Organizar$_sortSuffix',
                     onTap: _toggleSort,
                   ),
                   const SizedBox(width: 16),
@@ -995,12 +1020,16 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
             itemCount: cats.length + 1,
             itemBuilder: (context, i) {
               if (i == 0) {
+                // Clique-para-selecionar: o foco (D-pad) só destaca a linha.
+                // A categoria/preview/EPG só troca no OK/clique (onTap),
+                // senão cada passo da navegação recarrega tudo e
+                // sobrecarrega o stick.
                 return _categoryRow(
                   name: 'TODOS',
                   count: widget.controller.totalLiveCount,
                   selected: _selectedCategory == 'TODOS',
                   autofocus: true,
-                  onFocus: (_) => _selectCategory('TODOS'),
+                  onFocus: (_) {},
                   onTap: () => _selectCategory('TODOS'),
                 );
               }
@@ -1009,7 +1038,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                 name: cat.name,
                 count: cat.count,
                 selected: _selectedCategory == cat.name,
-                onFocus: (_) => _selectCategory(cat.name),
+                onFocus: (_) {},
                 onTap: () => _selectCategory(cat.name),
               );
             },
@@ -1044,7 +1073,11 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                       number: i + 1,
                       item: item,
                       selected: selected,
-                      onFocus: (_) => _selectChannel(i),
+                      // Clique-para-preview: passar o foco NÃO troca o
+                      // preview nem dispara EPG (era isso que sobrecarregava
+                      // ao descer a lista). 1º clique seleciona (preview +
+                      // EPG); 2º clique no mesmo abre o player.
+                      onFocus: (_) {},
                       // 1º clique seleciona (preview); 2º abre o player.
                       onTap: () {
                         if (_selectedIndex == i) {
@@ -1243,7 +1276,8 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
           ? CachedNetworkImage(
               imageUrl: url,
               fit: BoxFit.contain,
-              memCacheWidth: 160,
+              memCacheWidth: 120,
+              memCacheHeight: 90,
               errorWidget: (_, _, _) => const Icon(
                   Icons.tv_rounded,
                   color: Colors.white70,
@@ -1269,19 +1303,20 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
               border: Border.all(color: AppColors.cardBorder),
             ),
             clipBehavior: Clip.antiAlias,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                if (logo != null && logo.isNotEmpty)
-                  CachedNetworkImage(
-                    imageUrl: logo,
-                    fit: BoxFit.contain,
-                    memCacheWidth: 800,
-                    errorWidget: (_, _, _) =>
-                        _previewPlaceholder(ch),
-                  )
-                else
-                  _previewPlaceholder(ch),
+child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (logo != null && logo.isNotEmpty)
+                    CachedNetworkImage(
+                      imageUrl: logo,
+                      fit: BoxFit.contain,
+                      memCacheWidth: 400,
+                      memCacheHeight: 225,
+                      errorWidget: (_, _, _) =>
+                          _previewPlaceholder(ch),
+                    )
+                  else
+                    _previewPlaceholder(ch),
                 // Faixa inferior: número + nome + categoria
                 Positioned(
                   left: 0,
@@ -1601,7 +1636,9 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
             icon: const Icon(Icons.more_vert, color: Colors.white),
             color: AppColors.surface,
             onSelected: (v) {
-              if (v == 'sort') setState(() => _sortAZ = !_sortAZ);
+              if (v == 'sort_orig') setState(() => _sortMode = 0);
+              if (v == 'sort_az') setState(() => _sortMode = 1);
+              if (v == 'sort_za') setState(() => _sortMode = 2);
               if (v == 'fav') {
                 setState(
                     () => _showOnlyFavorites = !_showOnlyFavorites);
@@ -1617,9 +1654,21 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
             },
             itemBuilder: (_) => [
               CheckedPopupMenuItem(
-                value: 'sort',
-                checked: _sortAZ,
+                value: 'sort_orig',
+                checked: _sortMode == 0,
+                child: const Text('Ordem original',
+                    style: TextStyle(color: Colors.white)),
+              ),
+              CheckedPopupMenuItem(
+                value: 'sort_az',
+                checked: _sortMode == 1,
                 child: const Text('Ordenar A–Z',
+                    style: TextStyle(color: Colors.white)),
+              ),
+              CheckedPopupMenuItem(
+                value: 'sort_za',
+                checked: _sortMode == 2,
+                child: const Text('Ordenar Z–A',
                     style: TextStyle(color: Colors.white)),
               ),
               CheckedPopupMenuItem(
@@ -2026,11 +2075,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
 
   Widget _buildVodScaffold() {
     final content = _isTv ? _buildVodTv() : _buildVodMobile();
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.goBack):
-            _onBack,
-      },
+    return buildWithBackGuard(
       child: FocusScope(
         autofocus: true,
         child: Scaffold(
@@ -2049,11 +2094,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
       selectedCategory: _selectedCategory,
       onlyFavorites: _showOnlyFavorites,
     );
-    if (_sortAZ) {
-      items = [...items]
-        ..sort((a, b) =>
-            a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    }
+    items = _applySort(items);
     final total = _type == StreamType.movie
         ? widget.controller.totalMoviesCount
         : widget.controller.totalSeriesCount;
@@ -2079,6 +2120,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                   onChanged: _onSearchChanged,
                 ),
                 const SizedBox(height: 8),
+                // Clique-para-filtrar: foco só destaca, OK/clique filtra.
                 _categoryRow(
                   name: 'TODOS',
                   count: total,
@@ -2086,14 +2128,14 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                       (_selectedCategory == 'TODOS' ||
                           _selectedCategory == null),
                   autofocus: true,
-                  onFocus: (_) => _selectVodCategory('TODOS'),
+                  onFocus: (_) {},
                   onTap: () => _selectVodCategory('TODOS'),
                 ),
                 _categoryRow(
                   name: 'FAVORITOS ★',
                   count: widget.controller.totalFavoritesCount,
                   selected: _showOnlyFavorites,
-                  onFocus: (_) => _showVodFavorites(),
+                  onFocus: (_) {},
                   onTap: () => _showVodFavorites(),
                 ),
                 Expanded(
@@ -2106,8 +2148,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                         count: cat.count,
                         selected: !_showOnlyFavorites &&
                             _selectedCategory == cat.name,
-                        onFocus: (_) =>
-                            _selectVodCategory(cat.name),
+                        onFocus: (_) {},
                         onTap: () =>
                             _selectVodCategory(cat.name),
                       );
@@ -2172,6 +2213,12 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
             style: TextStyle(color: AppColors.textSecondary)),
       );
     }
+    if (count == 0) {
+      return const Center(
+        child: Text('Nenhum conteúdo encontrado',
+            style: TextStyle(color: AppColors.textSecondary)),
+      );
+    }
     return GridView.builder(
       padding: const EdgeInsets.all(12),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -2190,7 +2237,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
             streamUrl: g.rep.streamUrl,
             logoUrl: g.logoUrl,
             category: g.episodes.length == 1
-                ? g.category
+                ? _seriesCardSubtitle(g.category)
                 : '${g.episodes.length} episódios',
             streamType: StreamType.series,
             seriesId: g.seriesId,
@@ -2297,6 +2344,12 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
             style: TextStyle(color: AppColors.textSecondary)),
       );
     }
+    if (count == 0) {
+      return const Center(
+        child: Text('Nenhum conteúdo encontrado',
+            style: TextStyle(color: AppColors.textSecondary)),
+      );
+    }
     return ListView.builder(
       padding:
           const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
@@ -2312,7 +2365,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
             streamUrl: g.rep.streamUrl,
             logoUrl: g.logoUrl,
             category: g.episodes.length == 1
-                ? g.category
+                ? _seriesCardSubtitle(g.category)
                 : '${g.episodes.length} episódios',
             streamType: StreamType.series,
             seriesId: g.seriesId,
@@ -2338,11 +2391,13 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
                     color: Colors.white,
                     fontSize: 11,
                     fontWeight: FontWeight.w600)),
-            subtitle: Text(item.category,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    color: AppColors.textMuted, fontSize: 9)),
+            subtitle: item.category.isEmpty
+                ? null
+                : Text(item.category,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 9)),
             trailing: InkWell(
               onTap: () =>
                   widget.controller.toggleFavorite(isSeries
@@ -2383,8 +2438,8 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
           ? CachedNetworkImage(
               imageUrl: url,
               fit: BoxFit.cover,
-              memCacheWidth: 96,
-              memCacheHeight: 144,
+              memCacheWidth: 64,
+              memCacheHeight: 96,
               errorWidget: (_, _, _) => const Icon(
                   Icons.movie_rounded,
                   color: Colors.white70,

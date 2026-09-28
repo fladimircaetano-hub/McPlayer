@@ -133,6 +133,18 @@ class IptvController extends ChangeNotifier {
         _loadedListName = 'Lista M3U Online';
       }
 
+      // Diagnóstico temporário: como vêm os grupos das séries no M3U
+      // (group-title). Vai pro logcat p/ leitura via adb.
+      final seriesGroups = <String, int>{};
+      for (final it in items) {
+        if (it.streamType == StreamType.series) {
+          seriesGroups.update(it.category, (v) => v + 1,
+              ifAbsent: () => 1);
+        }
+      }
+      final _ = seriesGroups.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+
       await storageService.saveLastM3uUrl(url);
       // EPG em segundo plano: nunca bloqueia nem derruba o carregamento.
       unawaited(_refreshEpgForM3u(url));

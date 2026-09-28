@@ -99,5 +99,38 @@ http://pro.exemplo.com/s/7002
       expect(items[12].streamType, StreamType.movie);
       expect(items[13].streamType, StreamType.series);
     });
+
+    test('Deve suportar #extinf minúsculo, #EXTGRP, vírgulas no título e atributos variados', () async {
+      const sample = '''
+#extm3u
+#extinf:-1 tvg-id="globo.sp" TVG-NAME="Globo SP" LOGO="http://img.com/globo.png",Globo SP, Canal 5
+#EXTGRP:Canais Abertos
+http://stream.com/live/101.m3u8
+
+#extinf:-1 group-title="Filmes, Ação e Aventura",Missão Impossível 2, O Retorno
+http://stream.com/movie/mi2.mp4
+
+#EXTINF -1 GROUP-TITLE=Séries,Breaking Bad S01 E01
+http://stream.com/series/bb_s01e01.mp4
+''';
+      final items = await M3uParser.parseM3u(sample);
+      expect(items.length, 3);
+
+      // 1. #extinf minúsculo + #EXTGRP + vírgula no título preservada + LOGO maiúsculo
+      expect(items[0].name, 'Globo SP, Canal 5');
+      expect(items[0].category, 'Canais Abertos');
+      expect(items[0].logoUrl, 'http://img.com/globo.png');
+      expect(items[0].streamType, StreamType.live);
+
+      // 2. group-title com vírgula dentro de aspas + título com vírgula preservada
+      expect(items[1].name, 'Missão Impossível 2, O Retorno');
+      expect(items[1].category, 'Filmes, Ação e Aventura');
+      expect(items[1].streamType, StreamType.movie);
+
+      // 3. #EXTINF sem dois-pontos + GROUP-TITLE sem aspas
+      expect(items[2].name, 'Breaking Bad S01 E01');
+      expect(items[2].category, 'Séries');
+      expect(items[2].streamType, StreamType.series);
+    });
   });
 }

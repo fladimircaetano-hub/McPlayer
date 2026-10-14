@@ -345,8 +345,12 @@
 <!-- ============================================================== -->
 <div id="tabDevices">
   <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-    <input id="searchDevices" placeholder="🔍 Buscar por Chave (Device ID) ou MAC..." style="max-width:320px;" oninput="renderDevices()">
-    <div style="display:flex; gap:6px;">
+    <input id="searchDevices" placeholder="🔍 Buscar por Chave (Device ID), MAC ou App..." style="max-width:320px;" oninput="renderDevices()">
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <button class="btn-outline btn-sm" onclick="filterApp('all')" id="appBtnAll">Todos Apps</button>
+      <button class="btn-outline btn-sm" onclick="filterApp('McPlayer')" id="appBtnMc">McPlayer</button>
+      <button class="btn-outline btn-sm" onclick="filterApp('NexPlay')" id="appBtnNex">NexPlay</button>
+      <span style="width:1px; background:var(--border); margin:0 4px;"></span>
       <button class="btn-outline btn-sm" onclick="filterDevicesStatus('all')">Todos</button>
       <button class="btn-outline btn-sm" style="color:#fbbf24" onclick="filterDevicesStatus('pending')">Pendentes</button>
       <button class="btn-outline btn-sm" style="color:#4ade80" onclick="filterDevicesStatus('approved')">Aprovados</button>
@@ -383,11 +387,11 @@
     <div class="grid2">
       <div>
         <label>Supabase URL</label>
-        <input id="sbUrl" value="https://jtytonknduyllkbmsgys.supabase.co">
+        <input id="sbUrl" value="https://pfpmizermpxhwaekoylq.supabase.co">
       </div>
       <div>
         <label>Anon Key</label>
-        <input id="sbKey" value="sb_publishable_rdGe_pXvpA6wdOsmglwj8g_UOPeD7DE">
+        <input id="sbKey" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmcG1pemVybXB4aHdhZWtveWxxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNDk3ODIsImV4cCI6MjEwNDgyNTc4Mn0.Bu9cr3bhTFhc92Ilbz0UVWEPiD55Yi3TBU2VvI_sw70">
       </div>
     </div>
     <div style="margin-top:12px;">
@@ -486,6 +490,10 @@ create policy "Permitir tudo em clients" on public.clients for all using (true);
       </p>
     </div>
     <div class="modal-footer">
+      <button class="btn-danger btn-sm" id="btnClearList" onclick="clearDeviceList()" title="Apaga apenas a lista vinculada, mantendo o aparelho cadastrado">
+        🗑️ Apagar lista
+      </button>
+      <span style="flex:1"></span>
       <button class="btn-outline" onclick="closeModal('modalEditList')">Cancelar</button>
       <button class="btn-success" id="btnSaveList" onclick="submitSaveList()">
         Salvar e Enviar ao Aparelho
@@ -552,6 +560,12 @@ create policy "Permitir tudo em clients" on public.clients for all using (true);
 let DEVICES = [];
 let CLIENTS = [];
 let DEVICE_FILTER = 'all';
+let APP_FILTER = 'all';
+
+function filterApp(app) {
+  APP_FILTER = app;
+  renderDevices();
+}
 
 function cfg() {
   return {
@@ -655,9 +669,11 @@ function renderDevices() {
   const q = (document.getElementById('searchDevices').value || '').trim().toLowerCase();
   const list = DEVICES.filter(d => {
     const st = (d.status || 'pending').toLowerCase();
+    const app = (d.app_name || 'McPlayer');
     const matchesSt = (DEVICE_FILTER === 'all') || (st === DEVICE_FILTER);
-    const matchesQ = !q || String(d.device_id).toLowerCase().includes(q) || String(d.mac).toLowerCase().includes(q);
-    return matchesSt && matchesQ;
+    const matchesApp = (APP_FILTER === 'all') || (app === APP_FILTER);
+    const matchesQ = !q || String(d.device_id).toLowerCase().includes(q) || String(d.mac).toLowerCase().includes(q) || app.toLowerCase().includes(q);
+    return matchesSt && matchesApp && matchesQ;
   });
 
   const el = document.getElementById('devicesList');
@@ -668,6 +684,12 @@ function renderDevices() {
 
   el.innerHTML = list.map(d => {
     const st = (d.status || 'pending').toLowerCase();
+    const appName = (d.app_name || 'McPlayer');
+    // Convenção de transição: McPlayer = 6 dígitos; NexPlay = alfanumérico (≥1 letra).
+    const idStr = String(d.device_id || '');
+    const isMcFormat = /^[0-9]{6}$/.test(idStr);
+    const isNexFormat = /[A-Za-z]/.test(idStr);
+    const fmtTag = isMcFormat ? '6 dígitos' : (isNexFormat ? 'alfanumérico' : 'formato livre');
     const ld = d.list_data || {};
     const isXtream = ld && (ld.type === 'xtream');
     const isM3u = ld && (ld.type === 'm3u');
@@ -694,7 +716,7 @@ function renderDevices() {
         listHtml = '<div class="details-box"><span style="color:var(--text-muted)">Aparelho aprovado sem lista vinculada.</span></div>';
       }
     } else {
-      listHtml = '<div class="details-box" style="color:#fbbf24">⏳ Aguardando aprovação e envio de lista no McPlayer.</div>';
+      listHtml = `<div class="details-box" style="color:#fbbf24">⏳ Aguardando aprovação e envio de lista (${esc(d.app_name || 'McPlayer')}).</div>`;
     }
 
     const dt = d.request_date ? new Date(d.request_date).toLocaleString('pt-BR') : '';
@@ -705,8 +727,10 @@ function renderDevices() {
           <div>
             <span class="key-chip">${esc(d.device_id)}</span>
             <span class="status-badge status-${st}">${st === 'approved' ? '✓ Aprovado' : (st === 'pending' ? '● Pendente' : '✕ Rejeitado')}</span>
+            <span class="status-badge" style="background:#1e293b; color:#7dd3fc; margin-left:6px;">${esc(d.app_name || 'McPlayer')}</span>
+            <span class="status-badge" style="background:#0f172a; color:#94a3b8; margin-left:6px;" title="Formato do código do aparelho">${esc(fmtTag)}</span>
             <div class="mono" style="margin-top:4px;">
-              MAC: <b>${esc(d.mac || 'N/A')}</b> · Data: ${esc(dt)}
+              MAC: <b>${esc(d.mac || 'N/A')}</b> · App: <b>${esc(d.app_name || 'McPlayer')}</b> · Data: ${esc(dt)}
             </div>
           </div>
 
@@ -826,7 +850,52 @@ async function submitSaveList() {
 }
 
 // -------------------------------------------------------------
+// APAGAR APENAS A LISTA (mantém o aparelho cadastrado)
+// Permite limpar a lista atual para inserir outra em seguida.
+// -------------------------------------------------------------
+async function clearDeviceList() {
+  const id = document.getElementById('editDevId').value;
+  if (!id) return;
+  if (!confirm(`Apagar a lista vinculada ao aparelho ${id}?\n\nO aparelho continua cadastrado, mas ficará sem conteúdo até você inserir outra lista.`)) {
+    return;
+  }
+  const c = cfg();
+  const btn = document.getElementById('btnClearList');
+  const oldTxt = btn.textContent;
+  btn.textContent = 'Apagando...';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify({ list_data: null })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    // Limpa os campos do modal para inserir outra lista em seguida
+    document.getElementById('editServer').value = '';
+    document.getElementById('editUser').value = '';
+    document.getElementById('editPass').value = '';
+    document.getElementById('editM3uUrl').value = '';
+    showToast(`Lista do aparelho ${id} apagada. Insira outra e clique em Salvar.`, true);
+    await loadDevices();
+    // Reabre/atualiza o modal com o estado sem lista
+    const d = DEVICES.find(x => String(x.device_id) === String(id));
+    if (d) {
+      d.list_data = null;
+      document.getElementById('editDevId').value = d.device_id;
+    }
+  } catch (e) {
+    alert('Erro ao apagar lista: ' + e.message);
+  } finally {
+    btn.textContent = oldTxt;
+    btn.disabled = false;
+  }
+}
+
+// -------------------------------------------------------------
 // EXCLUIR APARELHO (COM SUPORTE A RLS)
+// Remove o aparelho do banco. Igual ao "Excluir" de Clientes,
+// serve para limpar aparelhos que não estão mais em uso.
 // -------------------------------------------------------------
 async function deleteDevice(id) {
   if (!confirm(`Deseja realmente EXCLUIR o aparelho ${id}?\n\nEle perderá o acesso e a lista será desvinculada.`)) {
@@ -841,23 +910,32 @@ async function deleteDevice(id) {
       headers: { ...headers(), 'Prefer': 'return=representation' }
     });
 
-    const deletedRows = await res.json().catch(() => []);
+    let deletedRows = null;
+    try { deletedRows = await res.json(); } catch (_) { deletedRows = null; }
 
-    // Se o Supabase bloqueou o DELETE por falta de política RLS:
-    if (Array.isArray(deletedRows) && deletedRows.length === 0) {
-      // Bloqueia e limpa o aparelho para não funcionar mais no McPlayer
-      const blockRes = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: headers(),
-        body: JSON.stringify({ status: 'rejected', list_data: null })
-      });
+    if (res.ok && Array.isArray(deletedRows) && deletedRows.length > 0) {
+      // Exclusão real funcionou: remove da lista local na hora
+      DEVICES = DEVICES.filter(x => String(x.device_id) !== String(id));
+      document.getElementById('countDevices').textContent = DEVICES.length;
+      renderDevices();
+      updateDeviceSuggestions();
+      showToast(`Aparelho ${id} excluído com sucesso!`, true);
+      return;
+    }
+
+    // Se o Supabase bloqueou o DELETE (RLS ou 0 linhas afetadas):
+    // Bloqueia e limpa o aparelho para não funcionar mais no McPlayer
+    const blockRes = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: headers(),
+      body: JSON.stringify({ status: 'rejected', list_data: null })
+    });
 
       if (blockRes.ok) {
         showToast(`Aparelho ${id} bloqueado/rejeitado (o acesso foi cancelado). Para apagar da tabela, ative a regra DELETE no SQL do Supabase (Aba Config).`, false);
         await loadDevices();
         return;
       }
-    }
 
     showToast(`Aparelho ${id} excluído com sucesso!`, true);
     await loadDevices();
@@ -888,7 +966,7 @@ function saveClientsLocal() {
 
 function updateDeviceSuggestions() {
   const dl = document.getElementById('deviceSuggestions');
-  dl.innerHTML = DEVICES.map(d => `<option value="${esc(d.device_id)}">${esc(d.device_id)} (${esc(d.status)})</option>`).join('');
+  dl.innerHTML = DEVICES.map(d => `<option value="${esc(d.device_id)}">${esc(d.device_id)} (${esc(d.app_name || 'McPlayer')} · ${esc(d.status)})</option>`).join('');
 }
 
 function openClientModal(id = null) {

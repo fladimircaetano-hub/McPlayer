@@ -48,7 +48,8 @@ class _StreamCardState extends State<StreamCard> {
       borderRadius: BorderRadius.circular(14),
       child: Container(
         decoration: BoxDecoration(
-          color: AppColors.surfaceCard,
+          // Grade translúcida; categorias (sidebar) seguem opacas.
+          color: AppColors.surfaceCard.withValues(alpha: 0.55),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppColors.cardBorder, width: 1),
         ),

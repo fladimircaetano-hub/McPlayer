@@ -61,6 +61,10 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> with BackNa
   // Navegação do guia (ao vivo): categorias filtram, canais dão preview.
   String? _selectedCategory;
   int _selectedIndex = 0;
+  // Prévia só após escolha explícita: categorias filtram, mas o centro
+  // (preview + EPG) fica vazio/translúcido até o 1º clique no canal.
+  // 1º clique = seleciona (mostra prévia); 2º clique no mesmo = abre player.
+  bool _channelChosen = false;
 
   bool _showOnlyFavorites = false;
   // Ordem da grade: 0=original do provedor, 1=A–Z, 2=Z–A.
@@ -105,7 +109,10 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> with BackNa
     if (_isLive) {
       final cats = widget.controller.getCategories(_type);
       _selectedCategory = cats.isNotEmpty ? cats.first.name : 'TODOS';
-      _loadEpg();
+      // Sem prévia inicial: o usuário escolhe o canal primeiro.
+      _selectedIndex = 0;
+      _channelChosen = false;
+      _epg = const [];
     }
   }
 
@@ -126,8 +133,12 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> with BackNa
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
       widget.controller.setSearchQuery(val);
       if (_isLive && mounted) {
-        setState(() => _selectedIndex = 0);
-        _loadEpg();
+        // Nova busca limpa a prévia: só mostra após nova escolha.
+        setState(() {
+          _selectedIndex = 0;
+          _channelChosen = false;
+          _epg = const [];
+        });
       }
     });
   }
@@ -156,6 +167,7 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> with BackNa
   }
 
   StreamItem? get _selectedChannel {
+    if (!_channelChosen) return null;
     final list = _channels();
     if (list.isEmpty) return null;
     return list[_selectedIndex.clamp(0, list.length - 1)];
@@ -177,6 +189,11 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> with BackNa
   }
 
   Future<void> _loadEpg() async {
+    // Prévia/EPG só após escolha explícita do canal.
+    if (!_channelChosen) {
+      if (mounted) setState(() => _epg = const []);
+      return;
+    }
     final ch = _selectedChannel;
     if (ch == null) {
       if (mounted) setState(() => _epg = const []);
@@ -200,14 +217,18 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> with BackNa
     setState(() {
       _selectedCategory = name;
       _selectedIndex = 0;
+      _channelChosen = false;
       _epgDayOffset = 0;
+      _epg = const [];
     });
-    _loadEpg();
   }
 
   void _selectChannel(int i) {
-    if (_selectedIndex == i) return;
-    setState(() => _selectedIndex = i);
+    if (_selectedIndex == i && _channelChosen) return;
+    setState(() {
+      _selectedIndex = i;
+      _channelChosen = true;
+    });
     _loadEpg();
   }
 
@@ -778,27 +799,54 @@ String _tidy(String s) {
   // ----- TV: guia 3 colunas -----
 
   Widget _buildTvGuide() {
-    return Column(
+    // Categorias 100% opacas; o resto (canais + preview + EPG + dias)
+    // fica translúcido sobre o fundo. Sem BackdropFilter (pesa no Stick):
+    // só opacidade, com a logo do canal escolhido como marca d'água.
+    final chosenLogo = _selectedChannel?.logoUrl;
+    return Stack(
       children: [
-        _buildTvTopBar(),
-        if (_isSearching) _buildSearchRow(),
-        _buildGuideHeader(),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(width: 250, child: _buildCategoryCol()),
-                const SizedBox(width: 12),
-                SizedBox(width: 300, child: _buildChannelCol()),
-                const SizedBox(width: 12),
-                Expanded(child: _buildCenter()),
-                const SizedBox(width: 12),
-                SizedBox(width: 120, child: _buildRightRail()),
-              ],
+        if (_channelChosen &&
+            chosenLogo != null &&
+            chosenLogo.isNotEmpty)
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.14,
+              child: CachedNetworkImage(
+                imageUrl: chosenLogo,
+                fit: BoxFit.cover,
+                errorWidget: (_, _, _) => const SizedBox.shrink(),
+              ),
             ),
           ),
+        if (_channelChosen)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.45),
+            ),
+          ),
+        Column(
+          children: [
+            _buildTvTopBar(),
+            if (_isSearching) _buildSearchRow(),
+            _buildGuideHeader(),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(width: 250, child: _buildCategoryCol()),
+                    const SizedBox(width: 12),
+                    SizedBox(width: 300, child: _buildChannelCol()),
+                    const SizedBox(width: 12),
+                    Expanded(child: _buildCenter()),
+                    const SizedBox(width: 12),
+                    SizedBox(width: 120, child: _buildRightRail()),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -879,8 +927,9 @@ String _tidy(String s) {
     setState(() {
       _sortMode = (_sortMode + 1) % 3;
       _selectedIndex = 0;
+      _channelChosen = false;
+      _epg = const [];
     });
-    _loadEpg();
   }
 
   Widget _buildTvTopBar() {
@@ -922,8 +971,12 @@ String _tidy(String s) {
                   _colorAction(
                     color: AppColors.accentOrange,
                     label: 'Favoritos${_showOnlyFavorites ? ' ✓' : ''}',
-                    onTap: () => setState(
-                        () => _showOnlyFavorites = !_showOnlyFavorites),
+                    onTap: () => setState(() {
+                      _showOnlyFavorites = !_showOnlyFavorites;
+                      _selectedIndex = 0;
+                      _channelChosen = false;
+                      _epg = const [];
+                    }),
                   ),
                   const SizedBox(width: 16),
                   _colorAction(
@@ -1068,7 +1121,8 @@ String _tidy(String s) {
                   itemCount: list.length,
                   itemBuilder: (context, i) {
                     final item = list[i];
-                    final selected = i == _selectedIndex;
+                    final selected =
+                        _channelChosen && i == _selectedIndex;
                     return _channelRow(
                       number: i + 1,
                       item: item,
@@ -1080,7 +1134,7 @@ String _tidy(String s) {
                       onFocus: (_) {},
                       // 1º clique seleciona (preview); 2º abre o player.
                       onTap: () {
-                        if (_selectedIndex == i) {
+                        if (_channelChosen && _selectedIndex == i) {
                           _openPlayer(list, i);
                         } else {
                           _selectChannel(i);
@@ -1211,7 +1265,11 @@ String _tidy(String s) {
           padding:
               const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: selected ? Colors.white : AppColors.surface,
+            // Categorias ficam opacas; canais ficam translúcidos.
+            // Selecionado continua branco sólido para leitura no D-pad.
+            color: selected
+                ? Colors.white
+                : AppColors.surface.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
                 color: selected ? Colors.white : AppColors.cardBorder),
@@ -1293,12 +1351,12 @@ String _tidy(String s) {
     final logo = ch?.logoUrl;
     return Column(
       children: [
-        // Preview 16:9
+        // Preview 16:9 (só após escolha; antes fica translúcido vazio)
         AspectRatio(
           aspectRatio: 16 / 9,
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.black,
+              color: Colors.black.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: AppColors.cardBorder),
             ),
@@ -1336,7 +1394,9 @@ child: Stack(
                       ),
                     ),
                     child: ch == null
-                        ? const Text('Nenhum canal selecionado',
+                        ? const Text(
+                            'Nenhum canal escolhido — toque num canal para ver a prévia',
+                            textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.white70))
                         : Row(
                             children: [
@@ -1389,11 +1449,12 @@ child: Stack(
                                   ],
                                 ),
                               ),
-                              TvFocusable(
-                                borderRadius:
-                                    BorderRadius.circular(10),
-                                onPressed: () => _openPlayer(
-                                    _channels(), _selectedIndex),
+                              if (_channelChosen)
+                                TvFocusable(
+                                  borderRadius:
+                                      BorderRadius.circular(10),
+                                  onPressed: () => _openPlayer(
+                                      _channels(), _selectedIndex),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 16, vertical: 8),
@@ -1432,7 +1493,8 @@ child: Stack(
               color: AppColors.textMuted, size: 56),
           const SizedBox(height: 8),
           Text(
-            ch?.name ?? 'Selecione um canal',
+            ch?.name ?? 'Toque num canal para ver a prévia',
+            textAlign: TextAlign.center,
             style: const TextStyle(color: AppColors.textSecondary),
           ),
         ],
@@ -1444,7 +1506,7 @@ child: Stack(
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: 0.85),
+        color: AppColors.surface.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.cardBorder),
       ),
@@ -1470,9 +1532,11 @@ child: Stack(
                     ),
                   )
                 : _epg.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text(
-                          'Guia de programação indisponível para esta lista.\nSelecione um canal e pressione OK para assistir.',
+                          _channelChosen
+                              ? 'Guia de programação indisponível para esta lista.\nSelecione um canal e pressione OK para assistir.'
+                              : 'Escolha um canal para ver a programação.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               color: AppColors.textMuted,
@@ -1555,7 +1619,7 @@ child: Stack(
                     decoration: BoxDecoration(
                       color: selected
                           ? Colors.white
-                          : AppColors.surface,
+                          : AppColors.surface.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                           color: selected
@@ -1636,12 +1700,37 @@ child: Stack(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             color: AppColors.surface,
             onSelected: (v) {
-              if (v == 'sort_orig') setState(() => _sortMode = 0);
-              if (v == 'sort_az') setState(() => _sortMode = 1);
-              if (v == 'sort_za') setState(() => _sortMode = 2);
+              if (v == 'sort_orig') {
+                setState(() {
+                  _sortMode = 0;
+                  _selectedIndex = 0;
+                  _channelChosen = false;
+                  _epg = const [];
+                });
+              }
+              if (v == 'sort_az') {
+                setState(() {
+                  _sortMode = 1;
+                  _selectedIndex = 0;
+                  _channelChosen = false;
+                  _epg = const [];
+                });
+              }
+              if (v == 'sort_za') {
+                setState(() {
+                  _sortMode = 2;
+                  _selectedIndex = 0;
+                  _channelChosen = false;
+                  _epg = const [];
+                });
+              }
               if (v == 'fav') {
-                setState(
-                    () => _showOnlyFavorites = !_showOnlyFavorites);
+                setState(() {
+                  _showOnlyFavorites = !_showOnlyFavorites;
+                  _selectedIndex = 0;
+                  _channelChosen = false;
+                  _epg = const [];
+                });
               }
               if (v == 'settings') {
                 Navigator.of(context).push(
@@ -1732,17 +1821,15 @@ child: Stack(
               onChanged: _onSearchChanged,
             ),
           ),
-          // Faixa compacta do canal em destaque (altura fixa ~72px):
-          // identifica número + nome + programa atual mesmo sem logo,
-          // e nunca estoura a coluna (era um preview 16:9 + ficha que
-          // causava BOTTOM OVERFLOWED em telas menores).
+          // Faixa compacta da prévia: SÓ aparece após escolha explícita.
+          // Translúcida; categorias (sidebar) seguem opacas.
           if (ch != null)
             Container(
               margin: const EdgeInsets.fromLTRB(8, 6, 8, 4),
               padding: const EdgeInsets.symmetric(
                   horizontal: 8, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.black,
+                color: Colors.black.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppColors.cardBorder),
               ),
@@ -1821,6 +1908,8 @@ child: Stack(
                   setState(() {
                     _showOnlyFavorites = false;
                     _selectedIndex = 0;
+                    _channelChosen = false;
+                    _epg = const [];
                   });
                 })),
                 Container(
@@ -1833,6 +1922,8 @@ child: Stack(
                   setState(() {
                     _showOnlyFavorites = true;
                     _selectedIndex = 0;
+                    _channelChosen = false;
+                    _epg = const [];
                   });
                 })),
               ],
@@ -1857,7 +1948,7 @@ child: Stack(
                           itemCount: list.length,
                           itemBuilder: (context, i) {
                             final item = list[i];
-                            final selected =
+                            final selected = _channelChosen &&
                                 i == _selectedIndex;
                             final nowTitle = _epgService
                                 .liveNow(item.id, _now)
@@ -1871,8 +1962,13 @@ child: Stack(
                                   ? nowTitle
                                   : item.category,
                               onTap: () {
-                                _selectChannel(i);
-                                _openPlayer(list, i);
+                                // 1º toque = só mostra a prévia; 2º no mesmo = abre.
+                                if (_channelChosen &&
+                                    _selectedIndex == i) {
+                                  _openPlayer(list, i);
+                                } else {
+                                  _selectChannel(i);
+                                }
                               },
                             );
                           },
@@ -1950,6 +2046,8 @@ child: Stack(
             setState(() {
               _showOnlyFavorites = true;
               _selectedIndex = 0;
+              _channelChosen = false;
+              _epg = const [];
             });
           }),
           ..._cats.map((c) => catItem(
@@ -1982,7 +2080,10 @@ child: Stack(
                 ],
               )
             : null,
-        color: selected ? null : AppColors.surfaceCard,
+        // Não selecionado = translúcido; categorias (sidebar) opacas.
+        color: selected
+            ? null
+            : AppColors.surfaceCard.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: AppColors.cardBorder),
       ),
@@ -2160,24 +2261,32 @@ child: Stack(
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 4, vertical: 8),
-                  child: Text(
-                    _showOnlyFavorites
-                        ? 'Favoritos (${items.length})'
-                        : 'All',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 28),
+            child: Container(
+              decoration: BoxDecoration(
+                // Grade translúcida; categorias à esquerda seguem opacas.
+                color: Colors.black.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.cardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    child: Text(
+                      _showOnlyFavorites
+                          ? 'Favoritos (${items.length})'
+                          : 'All',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 28),
+                    ),
                   ),
-                ),
-                Expanded(child: _vodPosterGrid(items, 4)),
-              ],
+                  Expanded(child: _vodPosterGrid(items, 4)),
+                ],
+              ),
             ),
           ),
         ],
@@ -2378,6 +2487,7 @@ child: Stack(
         }
         return Card(
           margin: const EdgeInsets.only(bottom: 4),
+          color: AppColors.surfaceCard.withValues(alpha: 0.55),
           child: ListTile(
             dense: true,
             visualDensity: VisualDensity.compact,

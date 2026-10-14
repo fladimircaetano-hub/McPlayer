@@ -21,6 +21,18 @@ v1.0.3+12 (aviso legal: apenas reprodutor, sem listas):
 - Celular 64-bit (arm64-v8a, 31,6 MB): código 3061680
   https://files.catbox.moe/pna0bz.apk
 
+v1.0.3+15 (11/10/2026 - exclusão de aparelho e limpar lista no painel admin):
+- Stick/TV 32-bit (armeabi-v7a, 28,7 MB): código (gerar no go.aftvnews.com)
+  https://files.catbox.moe/5854ig.apk
+- Celular 64-bit (arm64-v8a, 31,8 MB): código (gerar no go.aftvnews.com)
+  https://files.catbox.moe/ble5ji.apk
+
+v1.0.3+15-PFPMIZ (projeto Supabase novo pfpmizermpxhwaekoylq, painel McPlayer/NexPlay):
+- Stick/TV 32-bit (armeabi-v7a, 28,8 MB): código 8936983
+  https://files.catbox.moe/xarry7.apk
+- Celular 64-bit (arm64-v8a, 31,9 MB): código 8096219
+  https://files.catbox.moe/c82kjj.apk
+
 v1.0.3+15 (corrige voltar travado da +14 + clique-para-preview + voltar 1 tela + flechinha na TV):
 - Stick/TV 32-bit (armeabi-v7a, 28,8 MB): código (gerar)
   https://files.catbox.moe/zsv5wa.apk

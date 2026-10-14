@@ -226,6 +226,49 @@ import 'activation_models.dart';
     }
   }
 
+  /// Exclui um dispositivo (para admin remover aparelhos fora de uso).
+  /// Retorna true se o DELETE afetou ao menos 1 linha.
+  Future<bool> deleteDevice({required String deviceId}) async {
+    if (!isEnabled) return false;
+    _log('deleteDevice: deviceId=$deviceId');
+    try {
+      final res = await _dio.delete(
+        '$_base/rest/v1/devices',
+        options: Options(headers: {
+          ..._headers,
+          'Prefer': 'return=representation',
+        }),
+        queryParameters: {'device_id': 'eq.$deviceId'},
+      );
+      _log('deleteDevice: DELETE status=${res.statusCode}, data=${res.data}');
+      if (res.data is List) return (res.data as List).isNotEmpty;
+      return res.statusCode != null && res.statusCode! < 400;
+    } catch (e) {
+      _log('deleteDevice: error=$e');
+      return false;
+    }
+  }
+
+  /// Apaga apenas a lista vinculada (mantém o aparelho cadastrado).
+  /// Permite limpar a lista atual para inserir outra em seguida.
+  Future<bool> clearDeviceList({required String deviceId}) async {
+    if (!isEnabled) return false;
+    _log('clearDeviceList: deviceId=$deviceId');
+    try {
+      final res = await _dio.patch(
+        '$_base/rest/v1/devices',
+        options: Options(headers: _headers),
+        queryParameters: {'device_id': 'eq.$deviceId'},
+        data: {'list_data': null},
+      );
+      _log('clearDeviceList: PATCH status=${res.statusCode}');
+      return res.statusCode != null && res.statusCode! < 400;
+    } catch (e) {
+      _log('clearDeviceList: error=$e');
+      return false;
+    }
+  }
+
   /// Busca playlists cadastradas no dashboard (tabela playlists).
   Future<List<Map<String, dynamic>>> fetchPlaylists() async {
     if (!isEnabled) return [];

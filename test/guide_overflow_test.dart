@@ -71,11 +71,31 @@ void main() {
 
   group('Guia mobile sem overflow', () {
     testWidgets('portrait pequeno 360x640', (tester) async {
-      await pumpGuide(tester, const Size(360, 640), () {
-        expect(tester.takeException(), isNull);
-        expect(find.textContaining('TV Globo HD'), findsWidgets);
-        expect(find.text('Assistir'), findsWidgets);
-      });
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ContentSectionScreen(
+            controller: controller,
+            type: StreamType.live,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('TV Globo HD'), findsWidgets);
+      // Prévia só após escolha: sem escolha não há faixa Assistir.
+      expect(find.text('Assistir'), findsNothing);
+      // 1º toque = mostra prévia translúcida (sem navegar).
+      await tester.tap(find.textContaining('TV Globo HD').first);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Assistir'), findsWidgets);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
     });
 
     testWidgets('portrait curto 360x500', (tester) async {

@@ -154,6 +154,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
   void _showApproveDialog(_DeviceRow device) {
     final isApproved = device.status == 'approved';
+    final hasList = device.listData != null && device.listData!.isNotEmpty;
     String initialType = 'm3u';
     if (device.listData != null) {
       initialType = device.listData!['type']?.toString().toLowerCase() ?? 'm3u';
@@ -194,6 +195,14 @@ class _AdminScreenState extends State<AdminScreen> {
             ),
           ),
           actions: [
+            if (hasList)
+              TextButton(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await _clearDeviceList(device);
+                },
+                child: const Text('Apagar lista', style: TextStyle(color: Colors.redAccent)),
+              ),
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancelar', style: TextStyle(color: Colors.white70)),
@@ -233,6 +242,74 @@ class _AdminScreenState extends State<AdminScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _clearDeviceList(_DeviceRow device) async {
+    try {
+      final service = sl.activationService!;
+      final ok = await service.clearDeviceList(deviceId: device.deviceId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok
+                ? 'Lista de ${device.deviceId} apagada! Abra o lápis para inserir outra.'
+                : 'Falha ao apagar lista de ${device.deviceId}'),
+            backgroundColor: ok ? AppColors.accentGreen : Colors.redAccent,
+          ),
+        );
+        if (ok) _loadDevices();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteDevice(_DeviceRow device) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Excluir aparelho', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Excluir ${device.deviceId}? Ele perderá o acesso e a lista será desvinculada.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Excluir', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      final service = sl.activationService!;
+      final ok = await service.deleteDevice(deviceId: device.deviceId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok ? '${device.deviceId} excluído!' : 'Falha ao excluir ${device.deviceId}'),
+            backgroundColor: ok ? AppColors.accentGreen : Colors.redAccent,
+          ),
+        );
+        if (ok) _loadDevices();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
   }
 
   void _showAddClientDialog() {
@@ -533,15 +610,28 @@ class _AdminScreenState extends State<AdminScreen> {
                                     Text('Lista: ${d.listData!['type']}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
                                 ],
                               ),
-                              trailing: isPending
-                                  ? IconButton(
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (isPending)
+                                    IconButton(
                                       icon: const Icon(Icons.check_circle, color: AppColors.accentGreen, size: 28),
                                       onPressed: () => _showApproveDialog(d),
+                                      tooltip: 'Aprovar / inserir lista',
                                     )
-                                  : IconButton(
+                                  else
+                                    IconButton(
                                       icon: const Icon(Icons.edit, color: AppColors.primary, size: 28),
                                       onPressed: () => _showApproveDialog(d),
+                                      tooltip: 'Editar / trocar / apagar lista',
                                     ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete, color: Colors.redAccent, size: 26),
+                                    onPressed: () => _deleteDevice(d),
+                                    tooltip: 'Excluir aparelho',
+                                  ),
+                                ],
+                              ),
                               onTap: () => _showApproveDialog(d),
                             ),
                           );

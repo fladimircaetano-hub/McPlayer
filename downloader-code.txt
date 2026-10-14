@@ -3,6 +3,12 @@ McPlayer — códigos Downloader (Firestick / Android TV / celular)
 Código atual (arm64, v1.0.1+2): 4827653
 Uso: app Downloader > digitar o código > Go
 
+v1.0.3+16 (14/10/2026 - guia translúcido com prévia só após escolha, sem coluna de datas, seek -10s/+10s no player VOD):
+- Stick/TV 32-bit (armeabi-v7a): código (gerar no go.aftvnews.com)
+  (subir no catbox e colar o link aqui)
+- Celular 64-bit (arm64-v8a): código (gerar no go.aftvnews.com)
+  (subir no catbox e colar o link aqui)
+
 v1.0.2+10 (parser estrutural: EXTINF quebrado, live numérica, [L]/dual):
 - Stick/TV 32-bit (armeabi-v7a, 28,5 MB):
   https://files.catbox.moe/ca8ttk.apk

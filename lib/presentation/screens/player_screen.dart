@@ -953,7 +953,24 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                             color: Colors.white, size: 30),
                       ),
                     ),
-                  const SizedBox(width: 20),
+                  if (_hasPlaylist) const SizedBox(width: 20),
+                  // Voltar 10s (só VOD: filme/série). No ao vivo não há
+                  // timeline para retroceder.
+                  if (!_isLive)
+                    TvFocusable(
+                      borderRadius: BorderRadius.circular(30),
+                      onPressed: () => _seekBy(-10),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.replay_10,
+                            color: Colors.white, size: 30),
+                      ),
+                    ),
+                  if (!_isLive) const SizedBox(width: 20),
                   TvFocusable(
                     focusNode: _playPauseNode,
                     autofocus: true,
@@ -974,7 +991,23 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 20),
+                  if (!_isLive) const SizedBox(width: 20),
+                  // Avançar 10s (só VOD: filme/série).
+                  if (!_isLive)
+                    TvFocusable(
+                      borderRadius: BorderRadius.circular(30),
+                      onPressed: () => _seekBy(10),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.forward_10,
+                            color: Colors.white, size: 30),
+                      ),
+                    ),
+                  if (_hasPlaylist) const SizedBox(width: 20),
                   if (_hasPlaylist)
                     TvFocusable(
                       borderRadius: BorderRadius.circular(30),

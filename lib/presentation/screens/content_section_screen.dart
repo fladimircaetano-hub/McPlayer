@@ -799,9 +799,10 @@ String _tidy(String s) {
   // ----- TV: guia 3 colunas -----
 
   Widget _buildTvGuide() {
-    // Categorias 100% opacas; o resto (canais + preview + EPG + dias)
+    // Categorias 100% opacas; o resto (canais + preview + EPG)
     // fica translúcido sobre o fundo. Sem BackdropFilter (pesa no Stick):
     // só opacidade, com a logo do canal escolhido como marca d'água.
+    // Sem coluna de datas: só a data de hoje no alto (_buildGuideHeader).
     final chosenLogo = _selectedChannel?.logoUrl;
     return Stack(
       children: [
@@ -840,8 +841,6 @@ String _tidy(String s) {
                     SizedBox(width: 300, child: _buildChannelCol()),
                     const SizedBox(width: 12),
                     Expanded(child: _buildCenter()),
-                    const SizedBox(width: 12),
-                    SizedBox(width: 120, child: _buildRightRail()),
                   ],
                 ),
               ),
@@ -1595,63 +1594,9 @@ child: Stack(
     );
   }
 
-  Widget _buildRightRail() {
-    const days = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-    return Column(
-      children: [
-        Expanded(
-          child: ListView.builder(
-            itemCount: 10,
-            itemBuilder: (context, i) {
-              final day = DateTime(_now.year, _now.month, _now.day)
-                  .add(Duration(days: i));
-              final selected = i == _epgDayOffset;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: TvFocusable(
-                  borderRadius: BorderRadius.circular(10),
-                  onPressed: () {
-                    setState(() => _epgDayOffset = i);
-                    _loadEpg();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? Colors.white
-                          : AppColors.surface.withValues(alpha: 0.55),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: selected
-                              ? Colors.white
-                              : AppColors.cardBorder),
-                    ),
-                    child: Column(
-                      children: [
-                        Text('${day.day}',
-                            style: TextStyle(
-                                color: selected
-                                    ? Colors.black
-                                    : Colors.white,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 18)),
-                        Text(days[day.weekday - 1],
-                            style: TextStyle(
-                                color: selected
-                                    ? Colors.black
-                                    : AppColors.textSecondary,
-                                fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
+  // Coluna de datas removida: só a data de hoje no alto
+  // (_buildGuideHeader). O EPG carrega sempre o dia atual
+  // (_epgDayOffset fixo em 0).
 
   // ----- Mobile: empilhado -----
 

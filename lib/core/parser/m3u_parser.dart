@@ -10,6 +10,21 @@ class M3uParser {
 
   static final RegExp _numericStreamUrl = RegExp(r'/\d+/\d+/\d+\s*$');
 
+  // Suporte a extensões de vídeo menos comuns.
+  // NOTA: '.ts' fica SÓ no _liveExtensions (transporte ao vivo tem
+  // prioridade — checagem VOD roda antes da live).
+  static const _vodExtensions = [
+    '.mp4', '.mkv', '.avi', '.mov', '.mpg', '.mpeg',
+    '.flv', '.webm', '.wmv', '.m4v', '.3gp', '.ogv',
+    '.m2ts', '.vob', '.divx', '.xvid', '.rmvb',
+    '.asf', '.qt', '.f4v', '.m2v', '.mpv', '.mpe',
+  ];
+  
+  // Extensões de playlist/transporte ao vivo
+  static const _liveExtensions = [
+    '.m3u8', '.m3u', '.ts', '.mpd', '.ism', '.isml',
+  ];
+
   /// Grupos que são canais ao vivo (estrutura do provedor). Só vale quando
   /// a URL não tem cara de VOD (/movie/, /series/, .mp4...) nem o nome tem
   /// marcador de episódio — nesses casos as regras 1 e 2 já decidiram.
@@ -19,7 +34,25 @@ class M3uParser {
         lowerGroup.contains('tv aberta') ||
         lowerGroup.contains('tv fechada') ||
         lowerGroup.contains('24/7') ||
-        lowerGroup.contains('24h');
+        lowerGroup.contains('24h') ||
+        lowerGroup.contains('live tv') ||
+        lowerGroup.contains('canal') ||
+        lowerGroup.contains('esporte') ||
+        lowerGroup.contains('esportes') ||
+        lowerGroup.contains('news') ||
+        lowerGroup.contains('notícias') ||
+        lowerGroup.contains('noticias') ||
+        lowerGroup.contains('infantil') ||
+        lowerGroup.contains('kids') ||
+        lowerGroup.contains('document') ||
+        lowerGroup.contains('docu') ||
+        lowerGroup.contains('variedades') ||
+        lowerGroup.contains('entretenimento') ||
+        lowerGroup.contains('geral') ||
+        lowerGroup.contains('abertos') ||
+        lowerGroup.contains('fechados') ||
+        lowerGroup.contains('basico') ||
+        lowerGroup.contains('básico');
   }
   static final _tvgIdRegex =
       RegExp(r'(?:tvg-id|id)="([^"]*)"', caseSensitive: false);
@@ -213,24 +246,13 @@ class M3uParser {
       return StreamType.live;
     }
 
-    // 3. Arquivo de vídeo (VOD).
-    if (path.endsWith('.mp4') ||
-        path.endsWith('.mkv') ||
-        path.endsWith('.avi') ||
-        path.endsWith('.mov') ||
-        path.endsWith('.mpg') ||
-        path.endsWith('.mpeg') ||
-        path.endsWith('.flv') ||
-        path.endsWith('.webm') ||
-        path.endsWith('.wmv')) {
+    // 3. Arquivo de vídeo (VOD) - usa constante para manutenibilidade.
+    if (_vodExtensions.any(path.endsWith)) {
       return StreamType.movie;
     }
 
-    // 4. Transporte de transmissão ao vivo.
-    if (path.endsWith('.m3u8') ||
-        path.endsWith('.m3u') ||
-        path.endsWith('.ts') ||
-        path.endsWith('.mpd')) {
+    // 4. Transporte de transmissão ao vivo - usa constante.
+    if (_liveExtensions.any(path.endsWith)) {
       return StreamType.live;
     }
 

@@ -76,6 +76,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   static const _bufferTimeout = Duration(seconds: 25);
   static const _stallTimeout = Duration(seconds: 20);
   bool _watchdogActive = false;
+  
+  // Para detectar "frame congelado" em live streams com timestamp parado
+  int _lastKnownPosition = -1;
+  int _stallPositionCount = 0;
 
   PlayerAspect _currentAspect = PlayerAspect.original;
 
@@ -147,29 +151,65 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       final platform = _player!.platform;
       if (platform != null) {
         final dyn = platform as dynamic;
-        // Tenta habilitar decodificação por hardware com fallback automático
+        
+        // ========== DECODIFICAÇÃO DE HARDWARE ==========
+        // auto-safe: tenta hwdec, cai para software se falhar
         await dyn
             .setProperty('hwdec', 'auto-safe')
             .timeout(const Duration(seconds: 5));
-        // Stick de 1 GB: o padrão do mpv (250 MB de buffer + 100 MB para
-        // trás) estoura a RAM em filmes e o sistema mata o app (LMK).
+        
+        // ========== BUFFER/MEMÓRIA (OTIMIZADO P/ 1 GB RAM) ==========
+        // Stick de 1 GB: o padrão do mpv (250 MB + 100 MB back) estoura a RAM
+        // e o sistema mata o app (LMK). Valores reduzidos com margem de segurança.
         await dyn
-            .setProperty('demuxer-max-bytes', '64MiB')
+            .setProperty('demuxer-max-bytes', '48MiB')     // era 64MiB
             .timeout(const Duration(seconds: 5));
         await dyn
-            .setProperty('demuxer-max-back-bytes', '16MiB')
+            .setProperty('demuxer-max-back-bytes', '8MiB')  // era 16MiB
             .timeout(const Duration(seconds: 5));
-        // Configurações adicionais para estabilidade
+        
+        // Cache de rede: menor = menos RAM, mas pode travar em rede instável
+        // 8s é equilíbrio para HLS live; VOD busca sob demanda
         await dyn
-            .setProperty('cache-secs', '10')
+            .setProperty('cache-secs', '8')                 // era 10
             .timeout(const Duration(seconds: 3));
         await dyn
-            .setProperty('cache-pause', 'yes')
+            .setProperty('cache-pause', 'yes')              // pausa download quando pausado
             .timeout(const Duration(seconds: 3));
+        
+        // ========== ESTABILIDADE DE REDE ==========
+        // Reconexão automática em falhas de rede transitórias
+        await dyn
+            .setProperty('network-timeout', '20')           // timeout de rede (segundos)
+            .timeout(const Duration(seconds: 3));
+        await dyn
+            .setProperty('reconnect-streamed', 'yes')       // reconecta streams ao vivo
+            .timeout(const Duration(seconds: 3));
+        await dyn
+            .setProperty('reconnect-delay-max', '5')        // max delay entre retries
+            .timeout(const Duration(seconds: 3));
+        
+        // ========== HLS ESPECÍFICO ==========
+        // Melhora robustez de HLS (muito usado em IPTV)
+        await dyn
+            .setProperty('hls-bitrate', 'auto')             // seleção adaptativa
+            .timeout(const Duration(seconds: 3));
+        await dyn
+            .setProperty('hls-max-bitrate', '5000000')      // limite 5 Mbps p/ sticks
+            .timeout(const Duration(seconds: 3));
+        
+        // ========== BAIXA LATÊNCIA (LIVE) ==========
+        // Reduz buffer para canais ao vivo (zapping mais rápido)
+        await dyn
+            .setProperty('cache-pause-initial', 'yes')      // não bufferiza antes do play
+            .timeout(const Duration(seconds: 3));
+        
+        // ========== LOGGING DEBUG (DESABILITADO EM PRODUÇÃO) ==========
+        // await dyn.setProperty('msg-level', 'all=warn');   // reduz logs verbosos
       }
     } catch (e) {
       // Aparelho sem suporte: segue em software.
-      debugPrint('[Player] hwdec setup failed (fallback to software): $e');
+      debugPrint('[Player] hwdec/setup failed (fallback to software): $e');
     }
     if (!mounted) return;
     _videoController = VideoController(
@@ -240,6 +280,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _stallTimer?.cancel();
     _lastProgressAt = DateTime.now();
     _bufferingSince = DateTime.now();
+    _lastKnownPosition = -1;
+    _stallPositionCount = 0;
     _watchdogActive = true;
     _stallTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (!mounted || _isWebPreview || _hasError || _player == null || !_watchdogActive) return;
@@ -262,6 +304,25 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         if (!atEnd && now.difference(_lastProgressAt) >= _stallTimeout) {
           _lastProgressAt = now;
           _autoReconnect('imagem congelada');
+        }
+        return;
+      }
+      
+      // 3) Live stream com timestamp parado (às vezes HLS para de atualizar posição)
+      // Detecta se a posição não muda por muito tempo em stream ao vivo
+      if (_isLive && _isPlaying && !_isBuffering) {
+        final currentPos = _position.inSeconds;
+        if (currentPos == _lastKnownPosition) {
+          _stallPositionCount++;
+          // Se posição não muda por 30s em live, pode ser stream travado
+          if (_stallPositionCount >= 15) { // 15 * 2s = 30s
+            _stallPositionCount = 0;
+            _lastKnownPosition = -1;
+            _autoReconnect('stream ao vivo sem progresso');
+          }
+        } else {
+          _stallPositionCount = 0;
+          _lastKnownPosition = currentPos;
         }
       }
     });
@@ -353,12 +414,24 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     } catch (e) {
       if (!mounted || gen != _openGeneration) return;
       final msg = e.toString().replaceAll('Exception:', '').trim();
-      // Erro definitivo (DNS, servidor fora, bloqueio): repetir não
+      
+      // Erro definitivo (DNS, servidor fora, bloqueio, auth): repetir não
       // adianta — mostra a falha na hora em vez de enrolar no retry.
       if (_isFatalError(msg)) {
         if (mounted) _fail('Falha ao conectar: $msg');
         return;
       }
+      
+      // Erro transitório (timeout, 5xx, rede instável): tenta retry com backoff
+      if (_isTransientError(msg) && _retryCount < _maxRetries && mounted) {
+        _retryCount++;
+        final delay = Duration(seconds: _retryCount * 2); // backoff exponencial simples: 2s, 4s, 6s
+        debugPrint('[Player] Transient error, retry $_retryCount/$_maxRetries in ${delay.inSeconds}s: $msg');
+        await Future.delayed(delay);
+        if (mounted) return _open(url, isRetry: true);
+      }
+      
+      // Outros erros: tenta retry simples uma vez
       if (_retryCount < _maxRetries && mounted) {
         _retryCount++;
         await Future.delayed(Duration(seconds: _retryCount));
@@ -382,7 +455,24 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         m.contains('no route to host') ||
         m.contains('http error 401') ||
         m.contains('http error 403') ||
-        m.contains('http error 404');
+        m.contains('http error 404') ||
+        m.contains('http error 410') ||    // Gone
+        m.contains('http error 503') ||    // Service Unavailable
+        m.contains('ssl handshake') ||     // SSL/TLS falhou
+        m.contains('certificate verify');  // Certificado inválido
+  }
+
+  /// Verifica se o erro é temporário e vale retry (rede instável, timeout)
+  bool _isTransientError(String message) {
+    final m = message.toLowerCase();
+    return m.contains('timeout') ||
+        m.contains('timed out') ||
+        m.contains('connection reset') ||
+        m.contains('broken pipe') ||
+        m.contains('eof') ||
+        m.contains('http error 500') ||    // Internal server error
+        m.contains('http error 502') ||    // Bad gateway
+        m.contains('http error 504');      // Gateway timeout
   }
 
   void _onPlayerError(String error) {
@@ -391,6 +481,19 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       _fail(error.length > 220 ? '${error.substring(0, 220)}...' : error);
       return;
     }
+    
+    // Erro transitório: usa backoff exponencial
+    if (_isTransientError(error) && _retryCount < _maxRetries) {
+      _retryCount++;
+      final delay = Duration(seconds: _retryCount * 2);
+      debugPrint('[Player] Stream error (transient), retry $_retryCount/$_maxRetries in ${delay.inSeconds}s: $error');
+      Future.delayed(delay, () {
+        if (mounted && _watchdogActive) _open(_currentItem.streamUrl, isRetry: true);
+      });
+      return;
+    }
+    
+    // Outros erros: retry simples
     if (_retryCount < _maxRetries) {
       _retryCount++;
       Future.delayed(Duration(seconds: _retryCount), () {

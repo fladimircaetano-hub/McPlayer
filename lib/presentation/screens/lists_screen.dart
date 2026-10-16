@@ -31,8 +31,18 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   // Ativação remota via Dashboard (Supabase), silenciosa: sem aviso
   // visível — a lista aprovada no painel entra sozinha.
   final ActivationService? _activation = sl.activationService;
+
+  /// True quando o APK foi compilado sem SUPABASE_URL/ANON_KEY.
+  /// Nesse caso o aparelho nunca chega ao dashboard — mostra aviso
+  /// visível em vez de falhar em silêncio.
+  bool get _activationDisabled => _activation == null;
   Timer? _pollTimer;
   bool _autoActivating = false;
+  
+  // Exponential backoff para polling: 10s -> 20s -> 30s -> 30s (max)
+  int _pollAttempt = 0;
+  static const int _maxPollInterval = 30; // segundos
+  static const int _basePollInterval = 10; // segundos
 
   late final String _deviceId;
   late final String _deviceMac;
@@ -51,11 +61,27 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
     super.dispose();
   }
 
+  /// Calcula o intervalo de polling com exponential backoff
+  int _getPollInterval() {
+    final interval = _basePollInterval * (1 << (_pollAttempt.clamp(0, 3))); // 10, 20, 30, 30...
+    return interval.clamp(_basePollInterval, _maxPollInterval);
+  }
+
+  /// Agenda o próximo polling com backoff
+  void _scheduleNextPoll() {
+    _pollTimer?.cancel();
+    final interval = _getPollInterval();
+    _pollTimer = Timer(Duration(seconds: interval), () {
+      if (mounted) _pollActivation();
+    });
+  }
+
   /// Ativação remota: registra a chave no Dashboard e observa aprovação
   /// em silêncio. Sem configuração no ActivationConfig, não faz nada.
   Future<void> _setupActivation() async {
     final activation = _activation;
     if (activation == null || !activation.isEnabled) return;
+    _pollAttempt = 0; // reset no início
     final result = await activation.checkIn(
       deviceId: _deviceId,
       mac: _deviceMac,
@@ -66,11 +92,7 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
       _applyRemoteApproval(result.listData!);
       return;
     }
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => _pollActivation(),
-    );
+    _scheduleNextPoll();
   }
 
   Future<void> _pollActivation() async {
@@ -84,6 +106,12 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
       _applyRemoteApproval(result.listData!);
     } else if (result.status == ActivationStatus.rejected) {
       _pollTimer?.cancel();
+      // Dispositivo rejeitado: para de fazer polling permanentemente
+      // (o usuário terá que adicionar lista manualmente)
+    } else {
+      // Ainda pendente: agenda próximo polling com backoff
+      _pollAttempt++;
+      _scheduleNextPoll();
     }
   }
 
@@ -379,6 +407,27 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
                           );
                         }),
                       const Spacer(),
+                      if (_activationDisabled)
+                        Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: Colors.orange.withValues(alpha: 0.6)),
+                          ),
+                          child: const Text(
+                            'Ativação remota DESLIGADA: este aparelho não aparece no dashboard. '
+                            'Reinstale o APK compilado com SUPABASE_URL e SUPABASE_ANON_KEY.',
+                            style: TextStyle(
+                                color: Colors.orange,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12),
+                          ),
+                        ),
                       Row(
                         children: [
                           const Expanded(

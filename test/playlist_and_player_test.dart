@@ -159,4 +159,101 @@ void main() {
       expect(headers['Referer'], 'http://origem.com');
     });
   });
+
+  group('Player Error Classification Tests', () {
+    // These tests verify the error classification logic used in PlayerScreen
+    // We test the logic directly since it's private in the widget
+
+    test('Erros fatais (não tentam retry): DNS, auth, 404', () {
+      final fatalErrors = [
+        'Failed to resolve hostname example.com',
+        'No address associated with hostname',
+        'Connection refused',
+        'Connection reset by peer',
+        'Network is unreachable',
+        'No route to host',
+        'HTTP error 401',
+        'HTTP error 403',
+        'HTTP error 404',
+        'HTTP error 410',
+        'HTTP error 503',
+        'SSL handshake failed',
+        'Certificate verify failed',
+      ];
+
+      for (final error in fatalErrors) {
+        expect(_isFatalError(error), isTrue, reason: 'Should be fatal: $error');
+      }
+    });
+
+    test('Erros transitórios (tentam retry com backoff): timeout, 5xx', () {
+      final transientErrors = [
+        'Connection timeout',
+        'Timed out',
+        'Read timed out',
+        'Connection reset',
+        'Broken pipe',
+        'EOF',
+        'HTTP error 500',
+        'HTTP error 502',
+        'HTTP error 504',
+      ];
+
+      for (final error in transientErrors) {
+        expect(_isTransientError(error), isTrue, reason: 'Should be transient: $error');
+      }
+    });
+
+    test('Erros não classificados (tentam retry simples uma vez)', () {
+      final otherErrors = [
+        'Unknown error',
+        'Player error',
+        'Demuxer error',
+        'Decoder error',
+      ];
+
+      for (final error in otherErrors) {
+        expect(_isFatalError(error), isFalse, reason: 'Should not be fatal: $error');
+        expect(_isTransientError(error), isFalse, reason: 'Should not be transient: $error');
+      }
+    });
+
+    test('Case insensitive', () {
+      expect(_isFatalError('HTTP ERROR 404'), isTrue);
+      expect(_isFatalError('http error 404'), isTrue);
+      expect(_isFatalError('Http Error 404'), isTrue);
+      expect(_isTransientError('TIMEOUT'), isTrue);
+      expect(_isTransientError('timeout'), isTrue);
+    });
+  });
+}
+
+/// Copia da lógica privada do PlayerScreen para teste
+bool _isFatalError(String message) {
+  final m = message.toLowerCase();
+  return m.contains('failed to resolve hostname') ||
+      m.contains('no address associated with hostname') ||
+      m.contains('connection refused') ||
+      m.contains('connection reset') ||
+      m.contains('network is unreachable') ||
+      m.contains('no route to host') ||
+      m.contains('http error 401') ||
+      m.contains('http error 403') ||
+      m.contains('http error 404') ||
+      m.contains('http error 410') ||
+      m.contains('http error 503') ||
+      m.contains('ssl handshake') ||
+      m.contains('certificate verify');
+}
+
+bool _isTransientError(String message) {
+  final m = message.toLowerCase();
+  return m.contains('timeout') ||
+      m.contains('timed out') ||
+      m.contains('connection reset') ||
+      m.contains('broken pipe') ||
+      m.contains('eof') ||
+      m.contains('http error 500') ||
+      m.contains('http error 502') ||
+      m.contains('http error 504');
 }

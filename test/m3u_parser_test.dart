@@ -132,5 +132,93 @@ http://stream.com/series/bb_s01e01.mp4
       expect(items[2].category, 'Séries');
       expect(items[2].streamType, StreamType.series);
     });
+
+    test('Novas extensões VOD menos comuns são reconhecidas', () async {
+      const sample = '''
+#EXTM3U
+#EXTINF:-1 group-title="Filmes",Teste MKV
+http://stream.com/video.mkv
+#EXTINF:-1 group-title="Filmes",Teste AVI
+http://stream.com/video.avi
+#EXTINF:-1 group-title="Filmes",Teste MOV
+http://stream.com/video.mov
+#EXTINF:-1 group-title="Filmes",Teste WEBM
+http://stream.com/video.webm
+#EXTINF:-1 group-title="Filmes",Teste M4V
+http://stream.com/video.m4v
+#EXTINF:-1 group-title="Filmes",Teste 3GP
+http://stream.com/video.3gp
+#EXTINF:-1 group-title="Filmes",Teste OGV
+http://stream.com/video.ogv
+#EXTINF:-1 group-title="Filmes",Teste FLV
+http://stream.com/video.flv
+#EXTINF:-1 group-title="Filmes",Teste TS (VOD)
+http://stream.com/video.ts?vod=1
+''';
+      final items = await M3uParser.parseM3u(sample);
+      expect(items.length, 9);
+      for (final item in items) {
+        expect(item.streamType, StreamType.movie,
+            reason: '${item.name} (${item.streamUrl})');
+      }
+    });
+
+    test('Extensões de live streaming adicionais são reconhecidas', () async {
+      const sample = '''
+#EXTM3U
+#EXTINF:-1 group-title="Canais",Teste MPD
+http://stream.com/live.mpd
+#EXTINF:-1 group-title="Canais",Teste ISM
+http://stream.com/live.ism
+#EXTINF:-1 group-title="Canais",Teste ISML
+http://stream.com/live.isml
+''';
+      final items = await M3uParser.parseM3u(sample);
+      expect(items.length, 3);
+      for (final item in items) {
+        expect(item.streamType, StreamType.live,
+            reason: '${item.name} (${item.streamUrl})');
+      }
+    });
+
+    test('Grupos de canais ao vivo expandidos (esportes, news, infantil, etc)', () async {
+      const sample = '''
+#EXTM3U
+#EXTINF:-1 group-title="ESPORTES HD",ESPN
+http://stream.com/espn
+#EXTINF:-1 group-title="NOTÍCIAS 24H",CNN
+http://stream.com/cnn
+#EXTINF:-1 group-title="INFANTIL DESENHOS",Cartoon Network
+http://stream.com/cn
+#EXTINF:-1 group-title="DOCUMENTÁRIOS",Discovery
+http://stream.com/disc
+#EXTINF:-1 group-title="VARIEDADES",TLC
+http://stream.com/tlc
+#EXTINF:-1 group-title="CANAIS ABERTOS",Globo
+http://stream.com/globo
+#EXTINF:-1 group-title="BÁSICO",SBT
+http://stream.com/sbt
+''';
+      final items = await M3uParser.parseM3u(sample);
+      expect(items.length, 7);
+      for (final item in items) {
+        expect(item.streamType, StreamType.live,
+            reason: '${item.name} [${item.category}] -> ${item.streamUrl}');
+      }
+    });
+
+    test('URL com query string preserva classificação por extensão', () async {
+      const sample = '''
+#EXTM3U
+#EXTINF:-1 group-title="Filmes",Movie with token
+http://stream.com/movie.mp4?token=abc123&expires=123456
+#EXTINF:-1 group-title="Canais",Live with token
+http://stream.com/live.m3u8?token=xyz789
+''';
+      final items = await M3uParser.parseM3u(sample);
+      expect(items.length, 2);
+      expect(items[0].streamType, StreamType.movie);
+      expect(items[1].streamType, StreamType.live);
+    });
   });
 }

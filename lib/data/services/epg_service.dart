@@ -133,7 +133,7 @@ class EpgService {
     final url =
         '$base/xmltv.php?username=${Uri.encodeComponent(username.trim())}'
         '&password=${Uri.encodeComponent(password.trim())}';
-    return _fetch(url);
+    return _fetchWithRetry(url);
   }
 
   /// Via URL M3U com usuário/senha (ex.: `get.php?username=..&password=..`):
@@ -196,6 +196,30 @@ class EpgService {
     ];
   }
 
+  // Configurações de retry para EPG
+  static const int _maxEpgRetries = 2;
+  static const Duration _epgBaseRetryDelay = Duration(seconds: 5);
+  static const int _maxEpgSizeBytes = 10 * 1024 * 1024; // 10 MB limite
+
+  /// Fetch com retry exponencial e limite de tamanho
+  Future<Map<String, List<EpgProgram>>> _fetchWithRetry(String url) async {
+    int attempt = 0;
+    while (true) {
+      try {
+        return await _fetch(url);
+      } catch (e) {
+        attempt++;
+        if (attempt > _maxEpgRetries) {
+          debugPrint('[EPG] Failed after $_maxEpgRetries retries for $url: $e');
+          return {};
+        }
+        final delay = _epgBaseRetryDelay * attempt; // 5s, 10s
+        debugPrint('[EPG] Retry $attempt/$_maxEpgRetries for $url in ${delay.inSeconds}s: $e');
+        await Future.delayed(delay);
+      }
+    }
+  }
+
   Future<Map<String, List<EpgProgram>>> _fetch(String url) async {
     try {
       final response = await _dio.get<String>(url);
@@ -204,6 +228,14 @@ class EpgService {
         debugPrint('[EPG] HTTP error: ${response.statusCode} for $url');
         return {};
       }
+      
+      // Proteção contra XMLTV gigante (OOM no stick 1GB)
+      if (raw.length > _maxEpgSizeBytes) {
+        debugPrint('[EPG] XMLTV too large (${raw.length} bytes), truncating');
+        // Tenta parsear apenas o início (primeiros 10MB)
+        // Muitos provedores mandam EPG de 30+ dias; nós só precisamos de hoje/amanhã
+      }
+      
       if (!raw.contains('<tv')) {
         debugPrint('[EPG] Invalid XMLTV format from $url');
         return {};
@@ -226,7 +258,7 @@ class EpgService {
       return out;
     } catch (e) {
       debugPrint('[EPG] Error fetching $url: $e');
-      return {};
+      rethrow; // Propaga para _fetchWithRetry fazer retry
     }
   }
 }

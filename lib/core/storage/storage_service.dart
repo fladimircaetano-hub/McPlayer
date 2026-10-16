@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/xtream_account.dart';
+import '../activation/activation_config.dart';
 
 class StorageService {
   static const String _keyFavorites = 'iptv_favorites';
@@ -23,6 +24,9 @@ class StorageService {
   static const String _keyLanguage = 'pref_language';
 
   final SharedPreferences _prefs;
+  
+  // Lock para operações atômicas em chaves críticas
+  final Map<String, Completer<void>> _writeLocks = {};
 
   /// Idioma atual ('pt'/'en'). Notifica ouvintes para troca imediata
   /// sem reiniciar o app.
@@ -37,6 +41,22 @@ class StorageService {
     return StorageService(prefs);
   }
 
+  /// Garante que escritas concorrentes na mesma chave não corrompam dados
+  Future<T> _atomicWrite<T>(String key, Future<T> Function() write) async {
+    // Espera qualquer escrita anterior na mesma chave terminar
+    while (_writeLocks[key] != null) {
+      await _writeLocks[key]!.future;
+    }
+    final completer = Completer<void>();
+    _writeLocks[key] = completer;
+    try {
+      return await write();
+    } finally {
+      _writeLocks.remove(key);
+      completer.complete();
+    }
+  }
+
   // --- Favoritos ---
   Set<String> getFavorites() {
     final list = _prefs.getStringList(_keyFavorites) ?? [];
@@ -44,13 +64,15 @@ class StorageService {
   }
 
   Future<void> toggleFavorite(String streamId) async {
-    final current = getFavorites();
-    if (current.contains(streamId)) {
-      current.remove(streamId);
-    } else {
-      current.add(streamId);
-    }
-    await _prefs.setStringList(_keyFavorites, current.toList());
+    await _atomicWrite(_keyFavorites, () async {
+      final current = getFavorites();
+      if (current.contains(streamId)) {
+        current.remove(streamId);
+      } else {
+        current.add(streamId);
+      }
+      await _prefs.setStringList(_keyFavorites, current.toList());
+    });
   }
 
   bool isFavorite(String streamId) {
@@ -62,8 +84,10 @@ class StorageService {
   String? getLastM3uUrl() => _prefs.getString(_keyLastM3uUrl);
 
   Future<void> saveLastM3uUrl(String url) async {
-    await _prefs.setString(_keyLastM3uUrl, url);
-    await addRecentUrl(url);
+    await _atomicWrite(_keyLastM3uUrl, () async {
+      await _prefs.setString(_keyLastM3uUrl, url);
+      await addRecentUrl(url);
+    });
   }
 
   String? getLastM3uPath() => _prefs.getString(_keyLastM3uPath);
@@ -78,19 +102,23 @@ class StorageService {
   }
 
   Future<void> addRecentUrl(String url) async {
-    final recents = getRecentUrls();
-    recents.remove(url);
-    recents.insert(0, url);
-    if (recents.length > 5) {
-      recents.removeRange(5, recents.length);
-    }
-    await _prefs.setStringList(_keyRecentUrls, recents);
+    await _atomicWrite(_keyRecentUrls, () async {
+      final recents = getRecentUrls();
+      recents.remove(url);
+      recents.insert(0, url);
+      if (recents.length > 5) {
+        recents.removeRange(5, recents.length);
+      }
+      await _prefs.setStringList(_keyRecentUrls, recents);
+    });
   }
 
   Future<void> removeRecentUrl(String url) async {
-    final recents = getRecentUrls();
-    recents.remove(url);
-    await _prefs.setStringList(_keyRecentUrls, recents);
+    await _atomicWrite(_keyRecentUrls, () async {
+      final recents = getRecentUrls();
+      recents.remove(url);
+      await _prefs.setStringList(_keyRecentUrls, recents);
+    });
   }
 
   // --- Xtream Codes Account ---
@@ -106,18 +134,20 @@ class StorageService {
   }
 
   Future<void> saveXtreamAccount(XtreamAccount account) async {
-    final raw = jsonEncode(account.toJson());
-    await _prefs.setString(_keyXtreamAccount, raw);
-    // Multi-listas: mantém a conta na lista de salvas (sem duplicar).
-    final saved = getXtreamAccounts().toList();
-    saved.removeWhere((a) =>
-        a.serverUrl == account.serverUrl &&
-        a.username == account.username);
-    saved.insert(0, account);
-    await _prefs.setStringList(
-      _keyXtreamAccounts,
-      saved.map((a) => jsonEncode(a.toJson())).toList(),
-    );
+    await _atomicWrite(_keyXtreamAccount, () async {
+      final raw = jsonEncode(account.toJson());
+      await _prefs.setString(_keyXtreamAccount, raw);
+      // Multi-listas: mantém a conta na lista de salvas (sem duplicar).
+      final saved = getXtreamAccounts().toList();
+      saved.removeWhere((a) =>
+          a.serverUrl == account.serverUrl &&
+          a.username == account.username);
+      saved.insert(0, account);
+      await _prefs.setStringList(
+        _keyXtreamAccounts,
+        saved.map((a) => jsonEncode(a.toJson())).toList(),
+      );
+    });
   }
 
   /// Todas as contas Xtream já usadas (p/ trocar de lista sem redigitar).
@@ -141,21 +171,23 @@ class StorageService {
   }
 
   Future<void> removeXtreamAccount(XtreamAccount account) async {
-    final saved = getXtreamAccounts().toList()
-      ..removeWhere((a) =>
-          a.serverUrl == account.serverUrl &&
-          a.username == account.username);
-    await _prefs.setStringList(
-      _keyXtreamAccounts,
-      saved.map((a) => jsonEncode(a.toJson())).toList(),
-    );
-    // Se removeu a conta ativa, limpa o atalho de sessão também.
-    final current = getXtreamAccount();
-    if (current != null &&
-        current.serverUrl == account.serverUrl &&
-        current.username == account.username) {
-      await _prefs.remove(_keyXtreamAccount);
-    }
+    await _atomicWrite(_keyXtreamAccounts, () async {
+      final saved = getXtreamAccounts().toList()
+        ..removeWhere((a) =>
+            a.serverUrl == account.serverUrl &&
+            a.username == account.username);
+      await _prefs.setStringList(
+        _keyXtreamAccounts,
+        saved.map((a) => jsonEncode(a.toJson())).toList(),
+      );
+      // Se removeu a conta ativa, limpa o atalho de sessão também.
+      final current = getXtreamAccount();
+      if (current != null &&
+          current.serverUrl == account.serverUrl &&
+          current.username == account.username) {
+        await _prefs.remove(_keyXtreamAccount);
+      }
+    });
   }
 
   Future<void> clearAll() async {
@@ -171,14 +203,27 @@ class StorageService {
   }
 
   // --- Identificação do aparelho (para ativação no provedor) ---
-  // ID numérico de 6 dígitos + MAC virtual persistentes (gerados 1x, nunca no logout).
-  static final _idRegex = RegExp(r'^\d{6}$');
+  // McPlayer: ID numérico de 6 dígitos (ex.: 123456)
+  // NexPlayer: ID alfanumérico de 6 caracteres (ex.: A1B2C3)
+  // MAC virtual persistente (gerado 1x, nunca no logout).
+  static final _idRegexMcPlayer = RegExp(r'^\d{6}$');
+  static final _idRegexNexPlayer = RegExp(r'^[A-Za-z0-9]{6}$');
 
   String getDeviceId() {
     var id = _prefs.getString(_keyDeviceId);
-    if (id == null || !_idRegex.hasMatch(id)) {
+    final isNexPlayer = ActivationConfig.appName == 'NexPlayer';
+    final regex = isNexPlayer ? _idRegexNexPlayer : _idRegexMcPlayer;
+    
+    if (id == null || !regex.hasMatch(id)) {
       final rnd = Random.secure();
-      id = List.generate(6, (_) => rnd.nextInt(10).toString()).join();
+      if (isNexPlayer) {
+        // Alfanumérico: 0-9 + A-Z (36 possibilidades por caractere)
+        const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        id = List.generate(6, (_) => chars[rnd.nextInt(chars.length)]).join();
+      } else {
+        // McPlayer: apenas numérico (6 dígitos)
+        id = List.generate(6, (_) => rnd.nextInt(10).toString()).join();
+      }
       unawaited(_prefs.setString(_keyDeviceId, id));
     }
     return id;

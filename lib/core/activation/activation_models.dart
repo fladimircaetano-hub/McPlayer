@@ -42,15 +42,18 @@ class ActivationResult {
   final ActivationStatus status;
   final ActivationListData? listData;
   final String? approvedAt;
+  final String appName;
 
   const ActivationResult({
     required this.status,
     this.listData,
     this.approvedAt,
+    this.appName = '',
   });
 
   const ActivationResult.disabled()
       : status = ActivationStatus.disabled,
         listData = null,
-        approvedAt = null;
+        approvedAt = null,
+        appName = '';
 }

@@ -54,41 +54,75 @@ import 'activation_models.dart';
 
   /// Registra este aparelho como pendente. Idempotente e seguro:
   /// se a chave já existe (inclusive aprovada), não altera nada.
+  /// Se existe com outro app_name, atualiza o app_name mantendo o status.
   Future<ActivationResult> checkIn({
     required String deviceId,
     required String mac,
   }) async {
     if (!isEnabled) return const ActivationResult.disabled();
-    _log('checkIn: deviceId=$deviceId, mac=$mac');
+    _log('checkIn: deviceId=$deviceId, mac=$mac, appName=${ActivationConfig.appName}');
     _log('base URL: $_base');
     _log('headers: ${_headers.keys.join(', ')}');
     try {
       final current = await fetchStatus(deviceId);
-      _log('checkIn: current status=${current.status}');
-      if (current.status != ActivationStatus.notFound) return current;
-
-      final res = await _dio.post(
-        '$_base/rest/v1/devices',
-        options: Options(headers: _headers),
-        data: {
-          'device_id': deviceId,
-          'mac': mac,
-          'app_name': ActivationConfig.appName,
-          'status': 'pending',
-        },
-      );
-      _log('checkIn: POST status=${res.statusCode}, data=${res.data}');
-      if ((res.statusCode ?? 500) >= 400) {
-        _log('checkIn: HTTP error ${res.statusCode}');
-        return const ActivationResult(status: ActivationStatus.notFound);
+      _log('checkIn: current status=${current.status}, appName=${current.appName}');
+      
+      // Se dispositivo não existe, cria novo
+      if (current.status == ActivationStatus.notFound) {
+        return await _createDevice(deviceId, mac);
       }
-      _log('checkIn: success, status=pending');
-      return const ActivationResult(status: ActivationStatus.pending);
+      
+      // Se dispositivo existe mas com outro app_name, atualiza
+      if (current.appName != ActivationConfig.appName) {
+        _log('checkIn: appName mismatch (existing=${current.appName}, current=${ActivationConfig.appName}), updating...');
+        return await _updateAppName(deviceId, mac);
+      }
+      
+      // Mesmo app_name: retorna status atual (não sobrescreve aprovação)
+      return current;
     } catch (e) {
       _log('checkIn: error=$e');
-      // Sem rede / backend fora: o app segue no modo manual.
       return const ActivationResult(status: ActivationStatus.notFound);
     }
+  }
+
+  Future<ActivationResult> _createDevice(String deviceId, String mac) async {
+    final res = await _dio.post(
+      '$_base/rest/v1/devices',
+      options: Options(headers: _headers),
+      data: {
+        'device_id': deviceId,
+        'mac': mac,
+        'app_name': ActivationConfig.appName,
+        'status': 'pending',
+      },
+    );
+    _log('checkIn: POST status=${res.statusCode}, data=${res.data}');
+    if ((res.statusCode ?? 500) >= 400) {
+      _log('checkIn: HTTP error ${res.statusCode}');
+      return const ActivationResult(status: ActivationStatus.notFound);
+    }
+    _log('checkIn: success, status=pending');
+    return const ActivationResult(status: ActivationStatus.pending);
+  }
+
+  Future<ActivationResult> _updateAppName(String deviceId, String mac) async {
+    final res = await _dio.patch(
+      '$_base/rest/v1/devices',
+      options: Options(headers: _headers),
+      queryParameters: {'device_id': 'eq.$deviceId'},
+      data: {
+        'app_name': ActivationConfig.appName,
+        'mac': mac,
+      },
+    );
+    _log('checkIn: PATCH app_name status=${res.statusCode}');
+    if ((res.statusCode ?? 500) >= 400) {
+      _log('checkIn: PATCH HTTP error ${res.statusCode}');
+      return const ActivationResult(status: ActivationStatus.notFound);
+    }
+    // Re-fetch para pegar status atualizado
+    return await fetchStatus(deviceId);
   }
 
   /// Busca o estado atual da chave para polling.
@@ -101,18 +135,19 @@ import 'activation_models.dart';
         options: Options(headers: _headers),
         queryParameters: {
           'device_id': 'eq.$deviceId',
-          'select': 'status,list_data,approved_at',
+          'select': 'status,list_data,approved_at,app_name',
         },
       );
       _log('fetchStatus: GET status=${res.statusCode}, data=${res.data}');
       final data = res.data;
       if (data is! List || data.isEmpty) {
         _log('fetchStatus: no data found');
-        return const ActivationResult(status: ActivationStatus.notFound);
+        return const ActivationResult(status: ActivationStatus.notFound, appName: '');
       }
       final row = Map<String, dynamic>.from(data.first as Map);
       final status = (row['status'] as String? ?? 'pending').toLowerCase();
-      _log('fetchStatus: row status=$status, approved_at=${row['approved_at']}');
+      final appName = row['app_name'] as String? ?? '';
+      _log('fetchStatus: row status=$status, appName=$appName, approved_at=${row['approved_at']}');
       if (status == 'approved') {
         final rawList = row['list_data'];
         _log('fetchStatus: list_data=$rawList');
@@ -123,17 +158,18 @@ import 'activation_models.dart';
                   Map<String, dynamic>.from(rawList))
               : null,
           approvedAt: row['approved_at'] as String?,
+          appName: appName,
         );
       }
       if (status == 'rejected') {
         _log('fetchStatus: rejected');
-        return const ActivationResult(status: ActivationStatus.rejected);
+        return ActivationResult(status: ActivationStatus.rejected, appName: appName);
       }
       _log('fetchStatus: pending');
-      return const ActivationResult(status: ActivationStatus.pending);
+      return ActivationResult(status: ActivationStatus.pending, appName: appName);
     } catch (e) {
       _log('fetchStatus: error=$e');
-      return const ActivationResult(status: ActivationStatus.notFound);
+      return const ActivationResult(status: ActivationStatus.notFound, appName: '');
     }
   }
 

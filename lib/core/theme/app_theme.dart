@@ -86,14 +86,33 @@ class AppTheme {
           textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
         ),
       ),
-      textTheme: GoogleFonts.outfitTextTheme(
-        const TextTheme(
-          displayLarge: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold),
-          titleLarge: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w700),
-          titleMedium: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600),
-          bodyLarge: TextStyle(color: AppColors.textPrimary),
-          bodyMedium: TextStyle(color: AppColors.textSecondary),
+      // Use individual font getters to avoid material_ui TextTheme conflict
+      textTheme: TextTheme(
+        displayLarge: GoogleFonts.outfit(
+          color: AppColors.textPrimary,
+          fontWeight: FontWeight.bold,
         ),
+        titleLarge: GoogleFonts.outfit(
+          color: AppColors.textPrimary,
+          fontWeight: FontWeight.w700,
+        ),
+        titleMedium: GoogleFonts.outfit(
+          color: AppColors.textPrimary,
+          fontWeight: FontWeight.w600,
+        ),
+        bodyLarge: GoogleFonts.outfit(color: AppColors.textPrimary),
+        bodyMedium: GoogleFonts.outfit(color: AppColors.textSecondary),
+        // Add other required styles with defaults
+        displayMedium: GoogleFonts.outfit(color: AppColors.textPrimary),
+        displaySmall: GoogleFonts.outfit(color: AppColors.textPrimary),
+        headlineLarge: GoogleFonts.outfit(color: AppColors.textPrimary),
+        headlineMedium: GoogleFonts.outfit(color: AppColors.textPrimary),
+        headlineSmall: GoogleFonts.outfit(color: AppColors.textPrimary),
+        titleSmall: GoogleFonts.outfit(color: AppColors.textPrimary),
+        bodySmall: GoogleFonts.outfit(color: AppColors.textSecondary),
+        labelLarge: GoogleFonts.outfit(color: AppColors.textPrimary),
+        labelMedium: GoogleFonts.outfit(color: AppColors.textSecondary),
+        labelSmall: GoogleFonts.outfit(color: AppColors.textMuted),
       ),
     );
   }

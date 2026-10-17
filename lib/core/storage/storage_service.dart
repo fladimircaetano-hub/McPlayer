@@ -203,29 +203,48 @@ class StorageService {
   }
 
   // --- Identificação do aparelho (para ativação no provedor) ---
-  // McPlayer: ID numérico de 6 dígitos (ex.: 123456)
-  // NexPlayer: ID alfanumérico de 6 caracteres (ex.: A1B2C3)
+  // A `device_id` é a CHAVE PRIMÁRIA da tabela `devices` do Dashboard, então
+  // McPlayer e NexPlay dividem um único espaço de nomes. Por isso os formatos
+  // são propositalmente disjuntos (nunca colidem nem se misturam):
+  //   - McPlayer: 6 dígitos             -> [0-9]{6}          (ex.: 123456)
+  //   - NexPlay : 1 letra + 5 alfanum.  -> [A-Z][A-Z0-9]{5}  (ex.: K7F2Q9)
+  // A 1ª posição ser letra garante que um ID NexPlay NUNCA seja só dígitos,
+  // então não há como colidir com um ID do McPlayer.
   // MAC virtual persistente (gerado 1x, nunca no logout).
   static final _idRegexMcPlayer = RegExp(r'^\d{6}$');
-  static final _idRegexNexPlayer = RegExp(r'^[A-Za-z0-9]{6}$');
+  static final _idRegexNexPlay = RegExp(r'^[A-Z][A-Z0-9]{5}$');
+
+  static const String _idLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  static const String _idAlnum = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  String _generateDeviceId() {
+    final rnd = Random.secure();
+    if (ActivationConfig.idIsAlphanumeric) {
+      // NexPlay: 1ª posição sempre letra (não casa com o formato numérico).
+      return _idLetters[rnd.nextInt(_idLetters.length)] +
+          List.generate(5, (_) => _idAlnum[rnd.nextInt(_idAlnum.length)]).join();
+    }
+    // McPlayer: apenas numérico (6 dígitos).
+    return List.generate(6, (_) => rnd.nextInt(10).toString()).join();
+  }
 
   String getDeviceId() {
-    var id = _prefs.getString(_keyDeviceId);
-    final isNexPlayer = ActivationConfig.appName == 'NexPlayer';
-    final regex = isNexPlayer ? _idRegexNexPlayer : _idRegexMcPlayer;
-    
-    if (id == null || !regex.hasMatch(id)) {
-      final rnd = Random.secure();
-      if (isNexPlayer) {
-        // Alfanumérico: 0-9 + A-Z (36 possibilidades por caractere)
-        const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        id = List.generate(6, (_) => chars[rnd.nextInt(chars.length)]).join();
-      } else {
-        // McPlayer: apenas numérico (6 dígitos)
-        id = List.generate(6, (_) => rnd.nextInt(10).toString()).join();
-      }
-      unawaited(_prefs.setString(_keyDeviceId, id));
-    }
+    final id = _prefs.getString(_keyDeviceId);
+    final regex = ActivationConfig.idIsAlphanumeric
+        ? _idRegexNexPlay
+        : _idRegexMcPlayer;
+    if (id != null && regex.hasMatch(id)) return id;
+    return _storeNewDeviceId();
+  }
+
+  /// Gera e persiste uma chave NOVA, substituindo a anterior.
+  /// Usada pelo check-in quando o Dashboard recusa por colisão de `device_id`
+  /// (`409 duplicate key`).
+  String newDeviceId() => _storeNewDeviceId();
+
+  String _storeNewDeviceId() {
+    final id = _generateDeviceId();
+    unawaited(_prefs.setString(_keyDeviceId, id));
     return id;
   }
 

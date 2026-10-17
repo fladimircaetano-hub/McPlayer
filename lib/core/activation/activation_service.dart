@@ -21,6 +21,9 @@ import 'activation_models.dart';
     @visibleForTesting
     static bool debugLog = false;
 
+    /// Tentativas de criação de chave em caso de colisão de `device_id` (409).
+    static const int _maxCreateAttempts = 3;
+
     ActivationService({ Dio? dio })
         : _dio = dio ??
               Dio(
@@ -55,38 +58,64 @@ import 'activation_models.dart';
   /// Registra este aparelho como pendente. Idempotente e seguro:
   /// se a chave já existe (inclusive aprovada), não altera nada.
   /// Se existe com outro app_name, atualiza o app_name mantendo o status.
+  ///
+  /// [regenerateDeviceId] é chamado quando o `device_id` colide com outro
+  /// aparelho já cadastrado (`409 duplicate key`). Como os formatos de chave
+  /// são disjuntos (McPlayer numérico x NexPlay com letra), isso não deveria
+  /// acontecer — é só uma rede de segurança. Tenta no máximo
+  /// [_maxCreateAttempts] chaves.
   Future<ActivationResult> checkIn({
     required String deviceId,
     required String mac,
+    String Function()? regenerateDeviceId,
   }) async {
     if (!isEnabled) return const ActivationResult.disabled();
     _log('checkIn: deviceId=$deviceId, mac=$mac, appName=${ActivationConfig.appName}');
     _log('base URL: $_base');
     _log('headers: ${_headers.keys.join(', ')}');
+    var id = deviceId;
     try {
-      final current = await fetchStatus(deviceId);
-      _log('checkIn: current status=${current.status}, appName=${current.appName}');
-      
-      // Se dispositivo não existe, cria novo
-      if (current.status == ActivationStatus.notFound) {
-        return await _createDevice(deviceId, mac);
+      for (var attempt = 1; attempt <= _maxCreateAttempts; attempt++) {
+        final current = await fetchStatus(id);
+        _log('checkIn: current status=${current.status}, appName=${current.appName}');
+
+        // Se dispositivo não existe, cria novo
+        if (current.status == ActivationStatus.notFound) {
+          final statusCode = await _createDevice(id, mac);
+          if (statusCode != null && statusCode < 400) {
+            return const ActivationResult(status: ActivationStatus.pending);
+          }
+          // Colisão de chave (409): sorteia outra chave e tenta de novo.
+          if (statusCode == 409 &&
+              regenerateDeviceId != null &&
+              attempt < _maxCreateAttempts) {
+            id = regenerateDeviceId();
+            _log('checkIn: deviceId collision, retrying with $id (attempt ${attempt + 1})');
+            continue;
+          }
+          return const ActivationResult(status: ActivationStatus.notFound);
+        }
+
+        // Se dispositivo existe mas com outro app_name, atualiza
+        if (current.appName != ActivationConfig.appName) {
+          _log('checkIn: appName mismatch (existing=${current.appName}, current=${ActivationConfig.appName}), updating...');
+          return await _updateAppName(id, mac);
+        }
+
+        // Mesmo app_name: retorna status atual (não sobrescreve aprovação)
+        return current;
       }
-      
-      // Se dispositivo existe mas com outro app_name, atualiza
-      if (current.appName != ActivationConfig.appName) {
-        _log('checkIn: appName mismatch (existing=${current.appName}, current=${ActivationConfig.appName}), updating...');
-        return await _updateAppName(deviceId, mac);
-      }
-      
-      // Mesmo app_name: retorna status atual (não sobrescreve aprovação)
-      return current;
+      return const ActivationResult(status: ActivationStatus.notFound);
     } catch (e) {
       _log('checkIn: error=$e');
       return const ActivationResult(status: ActivationStatus.notFound);
     }
   }
 
-  Future<ActivationResult> _createDevice(String deviceId, String mac) async {
+  /// Cria o aparelho como `pending`.
+  /// Retorna o HTTP status (ex.: 201 criado, 409 chave já usada por outro
+  /// aparelho) ou `null` em caso de erro de rede.
+  Future<int?> _createDevice(String deviceId, String mac) async {
     final res = await _dio.post(
       '$_base/rest/v1/devices',
       options: Options(headers: _headers),
@@ -98,12 +127,7 @@ import 'activation_models.dart';
       },
     );
     _log('checkIn: POST status=${res.statusCode}, data=${res.data}');
-    if ((res.statusCode ?? 500) >= 400) {
-      _log('checkIn: HTTP error ${res.statusCode}');
-      return const ActivationResult(status: ActivationStatus.notFound);
-    }
-    _log('checkIn: success, status=pending');
-    return const ActivationResult(status: ActivationStatus.pending);
+    return res.statusCode;
   }
 
   Future<ActivationResult> _updateAppName(String deviceId, String mac) async {

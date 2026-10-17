@@ -255,7 +255,11 @@ class _SettingsScreenState extends State<SettingsScreen> with BackNavigationMixi
         });
         return;
       }
-      final result = await service.checkIn(deviceId: deviceId, mac: mac);
+      final result = await service.checkIn(
+        deviceId: deviceId,
+        mac: mac,
+        regenerateDeviceId: _storage.newDeviceId,
+      );
 
       if (!mounted) return;
 

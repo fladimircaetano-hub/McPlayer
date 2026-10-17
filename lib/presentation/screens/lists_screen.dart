@@ -45,14 +45,14 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   static const int _maxPollInterval = 30; // segundos
   static const int _basePollInterval = 10; // segundos
 
-  late final String _deviceId;
-  late final String _deviceMac;
+  /// Sempre lê a chave atual do storage: se o Dashboard recusar por colisão,
+  /// o `checkIn` gera uma chave nova (persistida) e o polling já usa a nova.
+  String get _deviceId => controller.storageService.getDeviceId();
+  String get _deviceMac => controller.storageService.getDeviceMac();
 
   @override
   void initState() {
     super.initState();
-    _deviceId = controller.storageService.getDeviceId();
-    _deviceMac = controller.storageService.getDeviceMac();
     _setupActivation();
   }
 
@@ -86,6 +86,7 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
     final result = await activation.checkIn(
       deviceId: _deviceId,
       mac: _deviceMac,
+      regenerateDeviceId: controller.storageService.newDeviceId,
     );
     if (!mounted) return;
     if (result.status == ActivationStatus.approved &&

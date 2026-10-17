@@ -54,7 +54,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     if (ActivationConfig.isEnabled) {
       final activation = sl.activationService;
       if (activation == null) return;
-      final result = await activation.checkIn(deviceId: deviceId, mac: mac);
+      final result = await activation.checkIn(
+        deviceId: deviceId,
+        mac: mac,
+        regenerateDeviceId: storage.newDeviceId,
+      );
       if (!mounted) return;
 
       if (result.status == ActivationStatus.approved && result.listData != null) {

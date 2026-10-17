@@ -67,12 +67,6 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   }
 
   @override
-  void initState() {
-    super.initState();
-    widget.controller.setSearchQuery('');
-  }
-
-  @override
   void dispose() {
     _searchDebounce?.cancel();
     _searchCtrl.dispose();
@@ -127,17 +121,42 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     );
   }
 
-  void _onSeriesTap(SeriesGroup group) {
+  Future<void> _onSeriesTap(SeriesGroup group) async {
+    // Xtream: a lista traz 1 item por série; os episódios vêm da API
+    // (get_series_info). Sem isso o toque tentaria tocar a URL da série.
+    if (group.seriesId != null && widget.controller.currentAccount != null) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+      );
+      final episodes =
+          await widget.controller.getSeriesEpisodes(group.seriesId!);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      if (episodes.isEmpty) {
+        _openPlayer(group.episodes, 0);
+      } else {
+        _showEpisodes(group.rep, episodes);
+      }
+      return;
+    }
     if (group.episodes.length == 1 &&
         parseSeasonEpisodeFast(group.episodes.first.name, 1) == null) {
       _openPlayer(group.episodes, 0);
       return;
     }
+    _showEpisodes(group.rep, normalizeSeriesEpisodes(group.episodes));
+  }
+
+  void _showEpisodes(StreamItem series, List<StreamItem> episodes) {
     showEpisodesSheet(
       context: context,
-      series: group.rep,
-      episodes: group.episodes,
-      onOpenPlayer: () => _openPlayer(group.episodes, 0),
+      series: series,
+      episodes: episodes,
+      onOpenPlayer: (playlist, index) => _openPlayer(playlist, index),
     );
   }
 
@@ -309,9 +328,13 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     int crossAxisCount;
     if (_isTv) {
       final width = MediaQuery.of(context).size.width;
-      if (width >= 1200) crossAxisCount = 6;
-      else if (width >= 900) crossAxisCount = 5;
-      else crossAxisCount = 4;
+      if (width >= 1200) {
+        crossAxisCount = 6;
+      } else if (width >= 900) {
+        crossAxisCount = 5;
+      } else {
+        crossAxisCount = 4;
+      }
     } else {
       crossAxisCount = 3;
     }
@@ -346,9 +369,13 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     int crossAxisCount;
     if (_isTv) {
       final width = MediaQuery.of(context).size.width;
-      if (width >= 1200) crossAxisCount = 6;
-      else if (width >= 900) crossAxisCount = 5;
-      else crossAxisCount = 4;
+      if (width >= 1200) {
+        crossAxisCount = 6;
+      } else if (width >= 900) {
+        crossAxisCount = 5;
+      } else {
+        crossAxisCount = 4;
+      }
     } else {
       crossAxisCount = 3;
     }
@@ -364,9 +391,16 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       itemCount: groups.length,
       itemBuilder: (context, i) {
         final group = groups[i];
-        final displayItem = group.episodes.length == 1
-            ? group.rep.copyWith(category: _seriesCardSubtitle(group.category))
-            : group.rep.copyWith(category: '${group.episodes.length} episódios');
+        // O cartão mostra o nome da SÉRIE (group.name), não do episódio
+        // representativo: no M3U o rep é "Nome S01 E01" e sem isso a grade
+        // exibiria "Zatch Bell! EP01" em vez de "Zatch Bell".
+        final displayItem = group.rep.copyWith(
+          name: group.name,
+          logoUrl: group.logoUrl ?? group.rep.logoUrl,
+          category: group.episodes.length == 1
+              ? _seriesCardSubtitle(group.category)
+              : '${group.episodes.length} episódios',
+        );
         return TvFocusable(
           borderRadius: BorderRadius.circular(8),
           onPressed: () => _onSeriesTap(group),

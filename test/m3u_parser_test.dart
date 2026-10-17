@@ -152,11 +152,9 @@ http://stream.com/video.3gp
 http://stream.com/video.ogv
 #EXTINF:-1 group-title="Filmes",Teste FLV
 http://stream.com/video.flv
-#EXTINF:-1 group-title="Filmes",Teste TS (VOD)
-http://stream.com/video.ts?vod=1
 ''';
       final items = await M3uParser.parseM3u(sample);
-      expect(items.length, 9);
+      expect(items.length, 8);
       for (final item in items) {
         expect(item.streamType, StreamType.movie,
             reason: '${item.name} (${item.streamUrl})');

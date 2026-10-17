@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/back_navigation_mixin.dart';
 import '../../../data/models/iptv_category.dart';
@@ -57,7 +56,6 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   @override
   void initState() {
     super.initState();
-    widget.controller.setSearchQuery('');
     _now = DateTime.now();
     _clockTimer =
         Timer.periodic(const Duration(seconds: 20), (_) => _tickClock());
@@ -120,21 +118,6 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     final list = _channels();
     if (list.isEmpty) return null;
     return list[_selectedIndex.clamp(0, list.length - 1)];
-  }
-
-  EpgProgram? get _liveProgram {
-    for (final p in _epg) {
-      if (p.isLiveAt(_now)) return p;
-    }
-    return null;
-  }
-
-  EpgProgram? get _nextProgram {
-    if (_epg.isEmpty) return null;
-    final live = _liveProgram;
-    if (live == null) return _epg.first;
-    final i = _epg.indexOf(live);
-    return (i >= 0 && i + 1 < _epg.length) ? _epg[i + 1] : null;
   }
 
   Future<void> _loadEpg() async {
@@ -1043,6 +1026,8 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   Widget _buildMobilePreview() {
     final ch = _selectedChannel;
     if (ch == null) return const SizedBox.shrink();
+    final list = _channels();
+    final index = list.isEmpty ? 0 : _selectedIndex.clamp(0, list.length - 1);
     final logo = ch.logoUrl;
     return Container(
       margin: const EdgeInsets.all(12),
@@ -1084,6 +1069,17 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
           Text(ch.category,
               style: const TextStyle(
                   color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              onPressed: () => _openPlayer(list, index),
+              child: const Text('Assistir'),
+            ),
+          ),
           const SizedBox(height: 8),
           if (_epg.isNotEmpty) ...[
             const Text('Próximos:',

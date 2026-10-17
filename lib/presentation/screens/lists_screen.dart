@@ -7,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/back_navigation_mixin.dart';
 import '../../data/models/xtream_account.dart';
 import '../controllers/iptv_controller.dart';
+import '../widgets/double_back_to_exit.dart';
 import '../widgets/tv_focusable.dart';
 import 'add_playlist_screen.dart';
 import 'home_screen.dart';
@@ -116,25 +117,49 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   }
 
   /// Aplica a lista vinculada pelo operador e entra direto, sem aviso.
+  /// Se falhar (lista inválida / login Xtream recusado / sem rede),
+  /// reagenda o polling em vez de parar — senão o app trava na Playlist
+  /// mesmo com o Dashboard mostrando "aprovado".
   Future<void> _applyRemoteApproval(ActivationListData list) async {
     _autoActivating = true;
     bool success = false;
-    if (list.isXtream &&
-        list.serverUrl != null &&
-        list.username != null &&
-        list.password != null) {
-      success = await controller.loginXtream(
-        serverUrl: list.serverUrl!,
-        username: list.username!,
-        password: list.password!,
-      );
-    } else if (list.isM3u && list.url != null && list.url!.isNotEmpty) {
-      success = await controller.loadFromM3uUrl(list.url!);
+    try {
+      if (list.isXtream &&
+          list.serverUrl != null &&
+          list.username != null &&
+          list.password != null) {
+        success = await controller.loginXtream(
+          serverUrl: list.serverUrl!,
+          username: list.username!,
+          password: list.password!,
+        );
+      } else if (list.isM3u && list.url != null && list.url!.isNotEmpty) {
+        success = await controller.loadFromM3uUrl(list.url!);
+      }
+    } catch (_) {
+      success = false;
     }
     if (success && mounted) {
       _openActive();
     } else {
       _autoActivating = false;
+      // Falhou: continua observando o Dashboard (operador pode corrigir
+      // a lista). Mostra o motivo uma vez para não deixar em silêncio.
+      if (mounted) {
+        final msg = controller.errorMessage;
+        if (msg != null && msg.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Lista aprovada mas falhou: $msg. Aguardando correção no painel...'),
+              backgroundColor: Colors.orange.shade800,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
+      _pollAttempt++;
+      _scheduleNextPoll();
     }
   }
 
@@ -186,8 +211,15 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   }
 
   /// Botão voltar visível: retorna à Home se veio de lá (botão Listas);
-  /// se a Playlist é a raiz, exige 2 toques para sair (via BackGuard).
-  void _onBackButton() => handleBackButton();
+  /// se a Playlist é a raiz, NÃO dá pop (dava tela preta) — mostra o
+  /// aviso de "voltar 2x para sair", a saída fica com o voltar do sistema.
+  void _onBackButton() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      showExitHint(context, 'Pressione voltar novamente para sair');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

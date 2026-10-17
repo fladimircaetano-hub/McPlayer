@@ -31,12 +31,14 @@ mixin BackNavigationMixin<T extends StatefulWidget> on State<T> {
   }
 
   /// Handler para botão "voltar" visível na UI (AppBar, toolbar, etc).
-  /// Dá pop direto se puder, senão usa a mesma lógica de debounce.
+  /// Dá pop direto se puder. Se é tela raiz (canPop == false), NÃO dá
+  /// pop — dar pop na última rota deixa a tela preta. Só consome o
+  /// debounce para o DoubleBackToExit decidir (aviso/saída).
   void handleBackButton() {
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     } else {
-      onSystemBack(false, null);
+      BackGuard.claim();
     }
   }
 

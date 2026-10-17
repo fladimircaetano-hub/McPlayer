@@ -28,6 +28,15 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   bool get _isLive => _type == StreamType.live;
 
   @override
+  void initState() {
+    super.initState();
+    // Limpa a busca aqui (e não no initState dos filhos): os filhos são
+    // construídos dentro do ListenableBuilder abaixo, então notificar o
+    // controller durante o build deles dispara a asserção "!_dirty".
+    widget.controller.setSearchQuery('');
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.controller,

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import '../../../data/models/stream_item.dart';
 
 /// Agrupa itens avulsos (ex.: "Nome S01 E01") por série.
@@ -219,15 +218,6 @@ void _mergeSeasonSplits(Map<String, SeriesGroup> map) {
   }
 }
 
-/// Tem número de episódio explícito (S01E01, T01 E01, 1x01, EP01...)?
-/// Usado para renumerar por temporada só os episódios sem número próprio.
-bool _hasExplicitEpNumber(String name) {
-  return _seRegex.hasMatch(name) ||
-      _tRegex.hasMatch(name) ||
-      _xRegex.hasMatch(name) ||
-      _epNumRegex.hasMatch(name);
-}
-
 /// Versão rápida do _stripSeriesVariant usando apenas o regex principal
 /// S01E01. Evita as múltiplas passagens do método completo.
 String _stripSeriesVariantFast(String name) {
@@ -285,4 +275,53 @@ String _seriesDisplayNameFast(String originalName, String strippedName) {
   final s = _seasonFromPrefix(name);
   if (s != null) return (s, fallbackEp);
   return null;
+}
+
+/// Tem número de episódio explícito (S01E01, T01 E01, 1x01, EP01...)?
+/// Usado para renumerar por temporada só os episódios sem número próprio.
+bool _hasExplicitEpNumber(String name) {
+  return _seRegex.hasMatch(name) ||
+      _tRegex.hasMatch(name) ||
+      _xRegex.hasMatch(name) ||
+      _epNumRegex.hasMatch(name);
+}
+
+/// Normaliza temporada/episódio antes de abrir o sheet de episódios:
+/// infere a temporada pelo nome ("Zatch Bell! 2 EP01" -> T2 E1) e
+/// renumera os episódios sem número próprio dentro da própria temporada
+/// (senão o grupo fundido mostraria E46..E50). Sem isso, itens M3U sem
+/// `seasonNumber` caem todos em "Temporada 1".
+List<StreamItem> normalizeSeriesEpisodes(List<StreamItem> episodes) {
+  final eps = <StreamItem>[];
+  final autoEp = <int>[];
+  for (var i = 0; i < episodes.length; i++) {
+    final ep = episodes[i];
+    if (ep.seasonNumber != null) {
+      eps.add(ep);
+      continue;
+    }
+    final se = parseSeasonEpisodeFast(ep.name, i + 1);
+    if (se == null) {
+      eps.add(ep.copyWith(seasonNumber: 1, episodeNumber: i + 1));
+      autoEp.add(eps.length - 1);
+    } else {
+      eps.add(ep.copyWith(seasonNumber: se.$1, episodeNumber: se.$2));
+      if (!_hasExplicitEpNumber(ep.name)) autoEp.add(eps.length - 1);
+    }
+  }
+  if (autoEp.isNotEmpty) {
+    final bySeasonIdx = <int, List<int>>{};
+    for (final idx in autoEp) {
+      bySeasonIdx.putIfAbsent(eps[idx].seasonNumber ?? 1, () => []).add(idx);
+    }
+    for (final idxs in bySeasonIdx.values) {
+      idxs.sort((a, b) =>
+          (eps[a].episodeNumber ?? 0).compareTo(eps[b].episodeNumber ?? 0));
+      for (var n = 0; n < idxs.length; n++) {
+        final idx = idxs[n];
+        eps[idx] = eps[idx].copyWith(episodeNumber: n + 1);
+      }
+    }
+  }
+  return eps;
 }

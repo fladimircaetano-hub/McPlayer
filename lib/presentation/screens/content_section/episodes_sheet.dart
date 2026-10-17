@@ -2,14 +2,15 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/stream_item.dart';
 import '../../widgets/tv_focusable.dart';
-import '../player_screen.dart';
 
 /// Bottom sheet em 2 níveis: temporadas da série -> episódios da temporada.
+/// [onOpenPlayer] recebe a lista de episódios e o índice do item tocado
+/// (não pode ser um VoidCallback fixo: senão qualquer episódio abriria o 1º).
 void showEpisodesSheet({
   required BuildContext context,
   required StreamItem series,
   required List<StreamItem> episodes,
-  required VoidCallback onOpenPlayer,
+  required void Function(List<StreamItem> playlist, int index) onOpenPlayer,
 }) {
   final bySeason = <int, List<StreamItem>>{};
   for (final ep in episodes) {
@@ -139,8 +140,13 @@ void showEpisodesSheet({
                               return TvFocusable(
                                 borderRadius: BorderRadius.circular(8),
                                 onPressed: () {
+                                  final globalIndex =
+                                      episodes.indexOf(ep);
                                   Navigator.pop(context);
-                                  onOpenPlayer();
+                                  onOpenPlayer(
+                                    episodes,
+                                    globalIndex < 0 ? 0 : globalIndex,
+                                  );
                                 },
                                 child: ListTile(
                                   leading: Container(

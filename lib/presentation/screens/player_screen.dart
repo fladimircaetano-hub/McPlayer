@@ -212,12 +212,14 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       debugPrint('[Player] hwdec/setup failed (fallback to software): $e');
     }
     if (!mounted) return;
-    _videoController = VideoController(
-      _player!,
-      configuration: const VideoControllerConfiguration(
-        enableHardwareAcceleration: true,
-      ),
-    );
+    setState(() {
+      _videoController = VideoController(
+        _player!,
+        configuration: const VideoControllerConfiguration(
+          enableHardwareAcceleration: true,
+        ),
+      );
+    });
     _subscribe();
     _open(_currentItem.streamUrl);
     _startStallWatchdog();
@@ -899,11 +901,20 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     }
     const fallbackRatio = 16 / 9;
     final ratio = _currentAspect.ratio ?? fallbackRatio;
+    final controller = _videoController;
+    if (controller == null) {
+      // O VideoController só existe depois da configuração assíncrona do
+      // mpv; no 1º frame ele ainda é nulo e `_videoController!` quebraria
+      // o build (flash de "Oops" ao entrar no player).
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 3),
+      );
+    }
     return Center(
       child: AspectRatio(
         aspectRatio: ratio,
         child: Video(
-          controller: _videoController!,
+          controller: controller,
           fit: _currentAspect.fit,
           controls: NoVideoControls,
         ),

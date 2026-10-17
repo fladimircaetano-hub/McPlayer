@@ -4,9 +4,9 @@ Código atual (arm64, v1.0.1+2): 4827653
 Uso: app Downloader > digitar o código > Go
 
 v1.0.4+2017 (17/10/2026 - chave do aparelho com formatos disjuntos McPlayer/NexPlay + retry em colisao 409; BUILD COM SUPABASE NOVO + ADMIN_PIN):
-- Stick/TV 32-bit (armeabi-v7a, 28,5 MB): código (gerar no go.aftvnews.com)
+- Stick/TV 32-bit (armeabi-v7a, 28,5 MB): código 4678413
   https://files.catbox.moe/eokxpd.apk
-- Celular 64-bit (arm64-v8a, 31,5 MB): código (gerar no go.aftvnews.com)
+- Celular 64-bit (arm64-v8a, 31,5 MB): código 5556322
   https://files.catbox.moe/3005fu.apk
 
 v1.0.4+2016 (15/10/2026 - refactor content_section split, polling com backoff, checkIn atualiza app_name, escrita atomica; BUILD COM SUPABASE NOVO + ADMIN_PIN):

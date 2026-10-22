@@ -1,19 +1,9 @@
 McPlayer — códigos Downloader (Firestick / Android TV / celular)
 ================================================================
-Código público atual (arm64, v1.0.4+2018): 9524469
+Código público atual (arm64, v1.0.7+2022): 1022923
 Uso: app Downloader > digitar o código > Go
 
-=== PREENCHER: códigos da v1.0.7+2022 ============================
-Gerar em https://go.aftvnews.com/ colando o atalho (exige reCAPTCHA).
-  arm64  atalho https://tinyurl.com/2xpzl434  -> codigo: ______  (verificado em __/__/____)
-  arm32  atalho https://tinyurl.com/24zozz2n  -> codigo: ______  (verificado em __/__/____)
-Depois de preencher:
-  1. Trocar a linha "Código público atual" acima pelo codigo arm64 novo.
-  2. Apagar as 2 linhas "PENDENTE" dentro do bloco v1.0.7+2022.
-  3. Apagar este bloco "PREENCHER".
-================================================================
-
-v1.0.7+2022 (22/10/2026 — PUBLICADO no GitHub Releases; códigos Downloader pendentes):
+v1.0.7+2022 (22/10/2026 — PUBLICADO no GitHub Releases; códigos verificados):
 - Filmes na TV: linha "FILMES" oculta; subcategorias aparecem primeiro; grade só carrega após a escolha.
 - TV ao vivo no celular: Categorias -> Subcategorias -> Canais; prévia em 1/3 no retrato e à esquerda no paisagem.
 - Busca e ordenação nos canais; toque atualiza a prévia, novo toque abre o player.
@@ -22,13 +12,14 @@ v1.0.7+2022 (22/10/2026 — PUBLICADO no GitHub Releases; códigos Downloader pe
 - arm64-v8a (celular/TV box novo, 31,5 MB):
   https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.7/mcplayer_v1.0.7_2022_arm64.apk
   atalho: https://tinyurl.com/2xpzl434
-  código Downloader: ______ (PENDENTE — preencher no bloco PREENCHER, no topo do arquivo)
+  código Downloader: 1022923  (http://aftv.news/1022923)
 - armeabi-v7a / arm32 (TV box/stick antigo, 28,5 MB):
   https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.7/mcplayer_v1.0.7_2022_arm32.apk
   atalho: https://tinyurl.com/24zozz2n
-  código Downloader: ______ (PENDENTE — preencher no bloco PREENCHER, no topo do arquivo)
+  código Downloader: 1228173  (http://aftv.news/1228173)
 - Espelho arm32 no catbox: https://files.catbox.moe/934n7g.apk
 - SHA-256 em dist/2026-10-22_v1.0.7+2022/SHA256.txt (conferido com os digests do GitHub)
+- Códigos verificados em 22/10/2026: 1022923 -> tinyurl.com/2xpzl434 (arm64); 1228173 -> tinyurl.com/24zozz2n (arm32).
 
 v1.0.4+2018 (19/10/2026 - VOD no TV Box: CATEGORIAS + SUBCATEGORIAS (split "|", ex.: "Filmes | Lancamentos") + versão visível v1.0.4+2018 no topo de Filmes/Séries; prévia do canal mantida na 3ª coluna do guia ao vivo):
 - arm64-v8a (TV Box/Fire TV recente e celular, 31,5 MB): código 9524469

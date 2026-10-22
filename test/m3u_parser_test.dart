@@ -205,6 +205,24 @@ http://stream.com/sbt
       }
     });
 
+    test('Normaliza /play/<token>/ts. para o endpoint /play/<token>', () async {
+      const sample = '''
+#EXTM3U
+#EXTINF:-1 group-title="ABERTOS",Canal com sufixo ts
+http://fibers.top/play/abc123/ts.
+#EXTINF:-1 group-title="ABERTOS",Canal com sufixo ts sem ponto
+http://fibers.top/play/def456/ts
+#EXTINF:-1 group-title="ABERTOS",Canal normal
+http://fibers.top/play/ghi789
+''';
+      final items = await M3uParser.parseM3u(sample);
+      expect(items.length, 3);
+      expect(items[0].streamUrl, 'http://fibers.top/play/abc123');
+      expect(items[1].streamUrl, 'http://fibers.top/play/def456');
+      expect(items[2].streamUrl, 'http://fibers.top/play/ghi789');
+      expect(items[0].streamType, StreamType.live);
+    });
+
     test('URL com query string preserva classificação por extensão', () async {
       const sample = '''
 #EXTM3U

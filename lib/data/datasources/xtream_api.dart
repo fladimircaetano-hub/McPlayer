@@ -204,6 +204,7 @@ class XtreamApi {
         final streamId = raw['stream_id']?.toString() ?? '';
         final name = raw['name']?.toString() ?? 'Canal';
         final logo = raw['stream_icon']?.toString();
+        final epgId = raw['epg_channel_id']?.toString();
         final categoryId = raw['category_id']?.toString();
         final category = raw['category_name']?.toString() ??
             (categoryId != null ? categoryMap[categoryId] : null) ??
@@ -222,6 +223,7 @@ class XtreamApi {
             category: category,
             streamType: StreamType.live,
             rating: raw['rating']?.toString(),
+            epgId: (epgId != null && epgId.isNotEmpty) ? epgId : null,
           ),
         );
       }

@@ -13,6 +13,10 @@ class StreamItem {
   final StreamType streamType;
   final String? rating;
   final String? releaseDate;
+  /// Id do canal na grade XMLTV (tvg-id / epg_channel_id). Separado de [id]
+  /// porque no Xtream o [id] é `xtream_live_<stream_id>`, que nunca casa
+  /// com o `programme@channel` do XMLTV.
+  final String? epgId;
   final int? seriesId;
   final int? seasonNumber;
   final int? episodeNumber;
@@ -27,6 +31,7 @@ class StreamItem {
     required this.streamType,
     this.rating,
     this.releaseDate,
+    this.epgId,
     this.seriesId,
     this.seasonNumber,
     this.episodeNumber,
@@ -43,6 +48,7 @@ class StreamItem {
       'streamType': streamType.name,
       'rating': rating,
       'releaseDate': releaseDate,
+      'epgId': epgId,
       'seriesId': seriesId,
       'seasonNumber': seasonNumber,
       'episodeNumber': episodeNumber,
@@ -63,6 +69,7 @@ class StreamItem {
       ),
       rating: json['rating'] as String?,
       releaseDate: json['releaseDate'] as String?,
+      epgId: json['epgId'] as String?,
       seriesId: json['seriesId'] as int?,
       seasonNumber: json['seasonNumber'] as int?,
       episodeNumber: json['episodeNumber'] as int?,
@@ -79,6 +86,7 @@ class StreamItem {
     StreamType? streamType,
     String? rating,
     String? releaseDate,
+    String? epgId,
     int? seriesId,
     int? seasonNumber,
     int? episodeNumber,
@@ -93,6 +101,7 @@ class StreamItem {
       streamType: streamType ?? this.streamType,
       rating: rating ?? this.rating,
       releaseDate: releaseDate ?? this.releaseDate,
+      epgId: epgId ?? this.epgId,
       seriesId: seriesId ?? this.seriesId,
       seasonNumber: seasonNumber ?? this.seasonNumber,
       episodeNumber: episodeNumber ?? this.episodeNumber,

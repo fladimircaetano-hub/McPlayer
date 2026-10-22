@@ -86,6 +86,16 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      // Tela inicial: somente categorias, nunca o catálogo inteiro.
+      expect(find.text('Categorias'), findsOneWidget);
+      expect(find.text('Abertos'), findsOneWidget);
+      expect(find.textContaining('TV Globo HD'), findsNothing);
+      expect(find.text('Assistir'), findsNothing);
+
+      // Categoria -> canais.
+      await tester.tap(find.text('Abertos'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
       expect(find.textContaining('TV Globo HD'), findsWidgets);
       // Prévia só após escolha: sem escolha não há faixa Assistir.
       expect(find.text('Assistir'), findsNothing);

@@ -1,7 +1,26 @@
 McPlayer — códigos Downloader (Firestick / Android TV / celular)
 ================================================================
-Código atual (arm64, v1.0.1+2): 4827653
+Código público atual (arm64, v1.0.4+2018): 9524469
 Uso: app Downloader > digitar o código > Go
+
+v1.0.6+2021 (22/10/2026 — build local, ainda sem upload público):
+- Filmes na TV: linha "FILMES" oculta; subcategorias aparecem primeiro; grade só carrega após a escolha.
+- TV ao vivo no celular: Categorias -> Subcategorias -> Canais; prévia em 1/3 no retrato e à esquerda no paisagem.
+- Busca e ordenação nos canais; toque atualiza a prévia, novo toque abre o player.
+- TV ao vivo e Séries na TV mantêm o comportamento anterior.
+- APKs em dist/2026-10-22_v1.0.6+2021_tv_mobile/ (arm32 e arm64) e em apk-serve/.
+- Servidor local (enquanto ativo): http://192.168.15.9:8000
+- SHA-256 em dist/2026-10-22_v1.0.6+2021_tv_mobile/SHA256.txt
+
+v1.0.4+2018 (19/10/2026 - VOD no TV Box: CATEGORIAS + SUBCATEGORIAS (split "|", ex.: "Filmes | Lancamentos") + versão visível v1.0.4+2018 no topo de Filmes/Séries; prévia do canal mantida na 3ª coluna do guia ao vivo):
+- arm64-v8a (TV Box/Fire TV recente e celular, 31,5 MB): código 9524469
+  https://files.catbox.moe/p0wrhk.apk
+  atalho p/ digitar no Downloader: https://tinyurl.com/242tqpnu
+- armeabi-v7a / arm32 (TV Box/Fire TV antigo, 28,5 MB): código 8264150
+  https://files.catbox.moe/k03q38.apk
+  atalho p/ digitar no Downloader: https://tinyurl.com/2db4fhb4
+- Códigos verificados em 19/10/2026: 9524469 -> p0wrhk.apk (arm64); 8264150 -> k03q38.apk (arm32).
+- Uploads conferidos por SHA-256 em 19/10/2026 (idênticos aos APKs de dist/2026-10-19_v1.0.4+2018_cat_subcat/).
 
 v1.0.4+2017 (17/10/2026 - chave do aparelho com formatos disjuntos McPlayer/NexPlay + retry em colisao 409; BUILD COM SUPABASE NOVO + ADMIN_PIN):
 - Stick/TV 32-bit (armeabi-v7a, 28,5 MB): código 4678413

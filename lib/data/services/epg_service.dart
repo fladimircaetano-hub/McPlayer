@@ -163,9 +163,22 @@ class EpgService {
 
   bool get hasData => _cache.isNotEmpty;
 
+  /// Quantidade de canais distintos presentes no XMLTV carregado.
+  int get channelCount => _cache.length;
+
+  /// Quantidade total de programas no cache (todos os canais/dias).
+  int get programCount =>
+      _cache.values.fold(0, (sum, list) => sum + list.length);
+
   void setCache(Map<String, List<EpgProgram>> data) => _cache = data;
 
   void clear() => _cache = {};
+
+  /// True quando existe pelo menos um programa para o canal (via epgId/id).
+  bool hasProgramsFor(StreamItem channel) {
+    final all = _programsFor(channel);
+    return all != null && all.isNotEmpty;
+  }
 
   /// Programa no ar agora para o canal ([StreamItem.id] == tvg-id).
   /// Síncrono sobre o cache: barato para chamar por linha de lista.
@@ -181,12 +194,14 @@ class EpgService {
   }
 
   /// Programas do canal no dia local informado (00h–24h).
-  /// A chave é o [StreamItem.id] (tvg-id no M3U). Nunca lança: sem cache
-  /// ou sem chave retorna lista vazia. Síncrono por cima do cache, mas
-  /// exposto como Future para a tela poder awaitar sem travar.
+  ///
+  /// A chave do XMLTV é o `tvg-id`/`epg_channel_id`, não o id interno do
+  /// app: no Xtream o id é `xtream_live_<stream_id>` e por isso o
+  /// [StreamItem.epgId] é consultado primeiro, com fallback para [id]
+  /// (M3U antigo, em que os dois coincidem).
   Future<List<EpgProgram>> getPrograms(StreamItem channel,
       {required DateTime day}) async {
-    final all = _cache[channel.id];
+    final all = _programsFor(channel);
     if (all == null || all.isEmpty) return const [];
     final start = DateTime(day.year, day.month, day.day);
     final end = start.add(const Duration(days: 1));
@@ -194,6 +209,15 @@ class EpgService {
       for (final p in all)
         if (p.endLocal.isAfter(start) && p.startLocal.isBefore(end)) p,
     ];
+  }
+
+  List<EpgProgram>? _programsFor(StreamItem channel) {
+    final epgId = channel.epgId;
+    if (epgId != null && epgId.isNotEmpty) {
+      final byEpgId = _cache[epgId];
+      if (byEpgId != null && byEpgId.isNotEmpty) return byEpgId;
+    }
+    return _cache[channel.id];
   }
 
   // Configurações de retry para EPG

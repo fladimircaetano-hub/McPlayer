@@ -46,3 +46,13 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Artefatos locais de build/distribuicao
+/apk-serve/
+/McPayer.apk
+/McPayer_copy.apk
+/McPayer_full.apk
+/McPayer_extracted/
+/test_out.txt
+/*.log
+/tv_*.png

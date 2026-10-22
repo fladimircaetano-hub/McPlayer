@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../core/network/api_client.dart';
 import '../../core/parser/m3u_parser.dart';
 import '../../core/storage/storage_service.dart';
@@ -60,6 +60,35 @@ class IptvController extends ChangeNotifier {
   int get totalMoviesCount => _movieItems.length;
   int get totalSeriesCount => _seriesItems.length;
   int get totalFavoritesCount => _favorites.length;
+
+  // ---------- diagnóstico EPG ----------
+
+  /// Canais ao vivo que têm chave de EPG (tvg-id no M3U, epg_channel_id
+  /// no Xtream). Se for 0, o provedor não entrega a chave e o guia não
+  /// tem como casar canal x programação.
+  int get liveChannelsWithEpgId => _liveItems
+      .where((c) => (c.epgId ?? '').trim().isNotEmpty)
+      .length;
+
+  /// Canais cujo id/epgId existe no XMLTV carregado.
+  int get liveChannelsMatchedEpg =>
+      _liveItems.where(epgService.hasProgramsFor).length;
+
+  int get epgChannelCount => epgService.channelCount;
+  int get epgProgramCount => epgService.programCount;
+
+  /// Recarrega o XMLTV sem refazer login (útil para validar o provedor).
+  Future<void> refreshEpg() async {
+    final account = _currentAccount;
+    if (account != null) {
+      await _refreshEpgForXtream(account);
+      return;
+    }
+    final url = storageService.getLastM3uUrl();
+    if (url != null && url.isNotEmpty) {
+      await _refreshEpgForM3u(url);
+    }
+  }
 
   List<IptvCategory> getCategories(StreamType type) => _categoriesMap[type] ?? [];
 
@@ -282,6 +311,7 @@ class IptvController extends ChangeNotifier {
     try {
       final data = await epgService.tryFromM3uUrl(m3uUrl);
       epgService.setCache(data);
+      _logEpgDiagnostics('M3U');
       notifyListeners();
     } catch (_) {
       // EPG é opcional: guia funciona sem programação.
@@ -296,10 +326,23 @@ class IptvController extends ChangeNotifier {
         password: account.password,
       );
       epgService.setCache(data);
+      _logEpgDiagnostics('Xtream');
       notifyListeners();
     } catch (_) {
       // EPG é opcional: guia funciona sem programação.
     }
+  }
+
+  /// Loga no logcat o funil de casamento do EPG. Serve para diagnosticar
+  /// provedores que não enviam epg_channel_id sem expor credenciais.
+  void _logEpgDiagnostics(String source) {
+    if (!kDebugMode) return;
+    debugPrint(
+      '[EPG] $source: canais no XMLTV=${epgService.channelCount}, '
+      'programas=${epgService.programCount}, '
+      'canais com chave de EPG=$liveChannelsWithEpgId/$totalLiveCount, '
+      'casados=$liveChannelsMatchedEpg/$totalLiveCount',
+    );
   }
 
   /// Injeta itens direto, sem rede (testes de widget).

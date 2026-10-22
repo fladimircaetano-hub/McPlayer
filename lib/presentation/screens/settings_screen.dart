@@ -348,7 +348,123 @@ class _SettingsScreenState extends State<SettingsScreen> with BackNavigationMixi
                 color: Colors.white,
                 fontWeight: FontWeight.w900,
                 fontSize: 34)),
+        const Spacer(),
+        if (widget.controller.totalLiveCount > 0)
+          TvFocusable(
+            borderRadius: BorderRadius.circular(10),
+            onPressed: _showEpgDiagnostics,
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.query_stats_rounded,
+                  color: AppColors.accentGreen, size: 26),
+            ),
+          ),
       ],
+    );
+  }
+
+  Widget _diagRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    color: Colors.white70, fontSize: 13)),
+          ),
+          const SizedBox(width: 12),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+
+  /// Diagnóstico do casamento EPG x canais. Mostra o funil completo para
+  /// descobrir se o problema é o provedor (sem epg_channel_id), o XMLTV
+  /// (não baixou) ou a chave (não casa com o programme@channel).
+  Future<void> _showEpgDiagnostics() async {
+    var refreshing = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final c = widget.controller;
+            final total = c.totalLiveCount;
+            final withKey = c.liveChannelsWithEpgId;
+            final xmltv = c.epgChannelCount;
+            final matched = c.liveChannelsMatchedEpg;
+
+            String hint;
+            if (total == 0) {
+              hint = 'Nenhuma lista carregada. Abra uma lista primeiro.';
+            } else if (xmltv == 0) {
+              hint = 'O XMLTV não foi carregado. O provedor pode não expor '
+                  'xmltv.php ou a resposta foi inválida/grande demais.';
+            } else if (withKey == 0) {
+              hint = 'O provedor não envia epg_channel_id (Xtream) nem '
+                  'tvg-id (M3U). Sem chave não há como casar a grade.';
+            } else if (matched == 0) {
+              hint = 'As chaves existem, mas não casam com nenhum '
+                  'programme@channel do XMLTV.';
+            } else {
+              hint = 'EPG funcionando: $matched de $total canais têm '
+                  'programação.';
+            }
+
+            return AlertDialog(
+              backgroundColor: AppColors.surface,
+              title: const Text(
+                'Diagnóstico EPG',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w800),
+              ),
+              content: SizedBox(
+                width: 430,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _diagRow('Canais ao vivo', '$total'),
+                    _diagRow('Com chave de EPG', '$withKey'),
+                    _diagRow('Canais no XMLTV', '$xmltv'),
+                    _diagRow('Programas no XMLTV', '${c.epgProgramCount}'),
+                    _diagRow('Canais com EPG casado', '$matched'),
+                    const Divider(color: AppColors.cardBorder, height: 20),
+                    Text(hint,
+                        style: const TextStyle(
+                            color: AppColors.textSecondary, fontSize: 12)),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: refreshing
+                      ? null
+                      : () async {
+                          setDialogState(() => refreshing = true);
+                          await c.refreshEpg();
+                          if (dialogContext.mounted) {
+                            setDialogState(() => refreshing = false);
+                          }
+                        },
+                  child: Text(refreshing ? 'Atualizando...' : 'Atualizar EPG'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Fechar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 

@@ -57,9 +57,9 @@ void main() {
   /// depois desmonta (cancela timers da tela).
   Future<void> pumpSeries(
     WidgetTester tester,
-    Size size,
-    void Function() checks,
-  ) async {
+    Size size, [
+    Future<void> Function()? checks,
+  ]) async {
     controller.setSearchQuery('');
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -74,15 +74,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    checks();
+    if (checks != null) await checks();
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   }
 
   group('Séries compactadas', () {
     testWidgets('celular retrato: 1 linha por série', (tester) async {
-      await pumpSeries(tester, const Size(360, 640), () {
+      await pumpSeries(tester, const Size(360, 640), () async {
         expect(tester.takeException(), isNull);
+        // Toca no card de categoria 'TODOS' para navegar até o catálogo
+        await tester.tap(find.text('TODOS').first);
+        await tester.pumpAndSettle();
         // 11 episódios viram 3 séries (antes: 6 cartões).
         expect(find.text('Zatch Bell'), findsOneWidget);
         expect(find.text('6 episódios'), findsOneWidget);
@@ -92,41 +95,33 @@ void main() {
         // Nenhuma temporada avulsa na lista.
         expect(find.textContaining('Zatch Bell!'), findsNothing);
         expect(find.textContaining('[LEG]'), findsNothing);
+
+        // Busca mostra só a série (sem temporadas/episódios).
+        controller.setSearchQuery('zatch');
+        await tester.pumpAndSettle();
+        expect(find.text('Zatch Bell'), findsOneWidget);
+        expect(find.textContaining('Zatch Bell!'), findsNothing);
+        controller.setSearchQuery('');
+        await tester.pumpAndSettle();
+
+        // Clique abre temporadas, depois episódios.
+        await tester.tap(find.text('Zatch Bell'));
+        await tester.pumpAndSettle();
+        expect(find.text('Temporada 1'), findsOneWidget);
+        expect(find.text('Temporada 2'), findsOneWidget);
+        await tester.tap(find.text('Temporada 2'));
+        await tester.pumpAndSettle();
+        expect(find.text('Zatch Bell! 2 EP01'), findsOneWidget);
+        expect(find.text('Zatch Bell! 2 EP02'), findsOneWidget);
       });
-
-      // Busca mostra só a série (sem temporadas/episódios).
-      await tester.pumpWidget(
-        MaterialApp(
-          home: ContentSectionScreen(
-            controller: controller,
-            type: StreamType.series,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      controller.setSearchQuery('zatch');
-      await tester.pumpAndSettle();
-      expect(find.text('Zatch Bell'), findsOneWidget);
-      expect(find.textContaining('Zatch Bell!'), findsNothing);
-      controller.setSearchQuery('');
-      await tester.pumpAndSettle();
-
-      // Clique abre temporadas, depois episódios.
-      await tester.tap(find.text('Zatch Bell'));
-      await tester.pumpAndSettle();
-      expect(find.text('Temporada 1'), findsOneWidget);
-      expect(find.text('Temporada 2'), findsOneWidget);
-      await tester.tap(find.text('Temporada 2'));
-      await tester.pumpAndSettle();
-      expect(find.text('Zatch Bell! 2 EP01'), findsOneWidget);
-      expect(find.text('Zatch Bell! 2 EP02'), findsOneWidget);
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump();
     });
 
     testWidgets('TV (grade de pôsteres): 1 cartão por série', (tester) async {
-      await pumpSeries(tester, const Size(1280, 720), () {
+      await pumpSeries(tester, const Size(1280, 720), () async {
         expect(tester.takeException(), isNull);
+        // Seleciona a categoria 'TODOS' à esquerda para renderizar os cartões
+        await tester.tap(find.text('TODOS').first);
+        await tester.pumpAndSettle();
         expect(find.text('Zatch Bell'), findsOneWidget);
         expect(find.text('Fairy Tail'), findsOneWidget);
         expect(find.text('Ben 10'), findsOneWidget);

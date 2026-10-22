@@ -10,6 +10,19 @@ class M3uParser {
 
   static final RegExp _numericStreamUrl = RegExp(r'/\d+/\d+/\d+\s*$');
 
+  /// Alguns painéis geram links `.../play/<token>/ts.` no M3U, mas o
+  /// endpoint real do provedor é `.../play/<token>` (responde 302 para o
+  /// stream). Sem isso o player tenta abrir `/ts.` e recebe 404.
+  static final RegExp _playTsSuffix =
+      RegExp(r'^(https?://[^/]+/play/[^/?#]+)/ts\.?$',
+          caseSensitive: false);
+
+  static String normalizeStreamUrl(String url) {
+    final trimmed = url.trim();
+    final match = _playTsSuffix.firstMatch(trimmed);
+    return match != null ? match.group(1)! : trimmed;
+  }
+
   // Suporte a extensões de vídeo menos comuns.
   // NOTA: '.ts' fica SÓ no _liveExtensions (transporte ao vivo tem
   // prioridade — checagem VOD roda antes da live).
@@ -159,7 +172,7 @@ class M3uParser {
           }
           continue;
         }
-        final streamUrl = line;
+        final streamUrl = normalizeStreamUrl(line);
         final name = currentName ?? currentTvgName ?? 'Canal ${items.length + 1}';
         final logo = currentLogo;
         final grp = currentGroup;
@@ -181,6 +194,7 @@ class M3uParser {
             logoUrl: (logo != null && logo.isNotEmpty) ? logo : null,
             category: group,
             streamType: streamType,
+            epgId: currentTvgId,
           ),
         );
 

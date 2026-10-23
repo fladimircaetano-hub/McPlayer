@@ -1,9 +1,9 @@
 McPlayer — códigos Downloader (Firestick / Android TV / celular)
 ================================================================
-Código público atual (arm64, v1.0.8+2023): PREENCHER
+Código público atual (arm64, v1.0.8+2023): 7647060  (http://aftv.news/7647060)
 Uso: app Downloader > digitar o código > Go
 
-v1.0.8+2023 (22/10/2026 — PUBLICADO no GitHub Releases; códigos PENDENTES):
+v1.0.8+2023 (22/10/2026 — PUBLICADO no GitHub Releases; códigos verificados):
 - Player de FILMES/SÉRIES: voltar/adiantar 10s, anterior/próximo (segue temporada e
   episódio, troca de temporada inclusive), barra de progresso clicável e arrastável,
   foco navegável no controle remoto, limites desativados no 1º/último item.
@@ -13,14 +13,15 @@ v1.0.8+2023 (22/10/2026 — PUBLICADO no GitHub Releases; códigos PENDENTES):
 - arm64-v8a (celular/TV box novo, 31,6 MB):
   https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.8/mcplayer_v1.0.8_2023_arm64.apk
   atalho: https://tinyurl.com/28zzqdk4
-  código Downloader: PREENCHER  (http://aftv.news/__________)
+  código Downloader: 7647060  (http://aftv.news/7647060)
 - armeabi-v7a / arm32 (TV box/stick antigo, 28,5 MB):
   https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.8/mcplayer_v1.0.8_2023_arm32.apk
   atalho: https://tinyurl.com/2axj8nye
-  código Downloader: PREENCHER  (http://aftv.news/__________)
+  código Downloader: 3650998  (http://aftv.news/3650998)
 - SHA-256 em dist/2026-10-22_v1.0.8+2023/SHA256.txt (conferido com os digests do GitHub):
   arm32 1F3DC3F22CC0BE4269E1D8E75852D1439510BDB89CA5DABFC1D97EAEBE953F9E
   arm64 2C49729AEA5309213680FB73B5C1072D93E3CD74E0A4EE67B211F827EFE00AF7
+- Códigos verificados em 22/10/2026: 7647060 -> tinyurl.com/28zzqdk4 (arm64); 3650998 -> tinyurl.com/2axj8nye (arm32).
 
 v1.0.7+2022 (22/10/2026 — PUBLICADO no GitHub Releases; códigos verificados):
 - Filmes na TV: linha "FILMES" oculta; subcategorias aparecem primeiro; grade só carrega após a escolha.

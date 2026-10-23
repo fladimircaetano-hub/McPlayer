@@ -3,1124 +3,567 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>McPlayer — Painel de Gestão</title>
+<meta name="referrer" content="no-referrer">
+<title>McPlayer / NexPlay — Painel Administrativo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg-main: #0c0f17;
-    --bg-card: #151a24;
-    --bg-card-hover: #1c2230;
-    --bg-input: #0e121a;
-    --border: #232b3d;
-    --border-focus: #3b82f6;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --success: #10b981;
-    --success-bg: rgba(16, 185, 129, 0.15);
-    --warning: #f59e0b;
-    --warning-bg: rgba(245, 158, 11, 0.15);
-    --danger: #ef4444;
-    --danger-bg: rgba(239, 68, 68, 0.15);
-    --whatsapp: #22c55e;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Inter', system-ui, sans-serif;
-    background: var(--bg-main);
-    color: var(--text-primary);
-    line-height: 1.5;
-    padding: 20px;
-    max-width: 1100px;
-    margin: 0 auto;
-    min-height: 100vh;
-  }
-
-  /* Header */
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 16px;
-    padding-bottom: 18px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 20px;
-  }
-
-  .logo-title {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .logo-badge {
-    width: 42px;
-    height: 42px;
-    background: linear-gradient(135deg, #2563eb, #7c3aed);
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 800;
-    font-size: 20px;
-    color: #fff;
-    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
-  }
-
-  h1 { font-size: 20px; font-weight: 700; }
-  .subtitle { font-size: 13px; color: var(--text-secondary); }
-
-  /* Navigation Tabs */
-  .nav-tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 12px;
-  }
-
-  .nav-btn {
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--text-secondary);
-    padding: 8px 18px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    transition: all 0.2s;
-  }
-
-  .nav-btn:hover { background: var(--bg-card); color: var(--text-primary); }
-  .nav-btn.active {
-    background: var(--accent);
-    color: #fff;
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-  }
-
-  .count-tag {
-    font-size: 11px;
-    padding: 2px 7px;
-    border-radius: 12px;
-    background: rgba(0,0,0,0.3);
-    font-weight: 700;
-  }
-
-  /* Cards & Grid */
-  .card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 20px;
-    margin-bottom: 16px;
-  }
-
-  /* Buttons */
-  button {
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 8px 14px;
-    border-radius: 8px;
-    border: 1px solid transparent;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    transition: all 0.15s ease;
-  }
-
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: var(--accent-hover); }
-  .btn-success { background: var(--success); color: #000; }
-  .btn-success:hover { opacity: 0.9; }
-  .btn-danger { background: var(--danger-bg); color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
-  .btn-danger:hover { background: var(--danger); color: #fff; }
-  .btn-outline { background: var(--bg-input); color: var(--text-primary); border-color: var(--border); }
-  .btn-outline:hover { background: var(--bg-card-hover); border-color: var(--border-focus); }
-  .btn-wa { background: #15803d; color: #fff; }
-  .btn-wa:hover { background: #16a34a; }
-  .btn-sm { padding: 5px 10px; font-size: 12px; }
-
-  /* Inputs */
-  label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 8px 0 4px; }
-  input, select, textarea {
-    width: 100%;
-    padding: 9px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--bg-input);
-    color: var(--text-primary);
-    font-size: 13px;
-    font-family: inherit;
-    outline: none;
-  }
-  input:focus, select:focus, textarea:focus {
-    border-color: var(--border-focus);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-  }
-
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-  @media (max-width: 700px) { .grid2, .grid3 { grid-template-columns: 1fr; } body { padding: 12px; } }
-
-  /* Device / Client Item */
-  .item-row {
-    border-top: 1px solid var(--border);
-    padding: 14px 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .item-row:first-child { border-top: 0; }
-
-  .item-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-secondary); word-break: break-all; }
-  .key-chip {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 16px;
-    font-weight: 700;
-    color: #fff;
-    background: #0e121a;
-    padding: 3px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .status-badge {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    padding: 3px 9px;
-    border-radius: 20px;
-    display: inline-block;
-  }
-  .status-pending { background: var(--warning-bg); color: #fbbf24; }
-  .status-approved { background: var(--success-bg); color: #34d399; }
-  .status-rejected { background: var(--danger-bg); color: #f87171; }
-  .status-expired { background: #7f1d1d; color: #fca5a5; }
-
-  .details-box {
-    background: #0e121a;
-    border: 1px solid #232b3d;
-    border-radius: 6px;
-    padding: 8px 12px;
-    font-size: 12px;
-    color: #cbd5e1;
-  }
-
-  /* Modals */
-  .modal-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.78);
-    backdrop-filter: blur(4px);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-    z-index: 1000;
-  }
-  .modal-overlay.open { display: flex; }
-
-  .modal-window {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    width: 100%;
-    max-width: 520px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.6);
-    overflow: hidden;
-    animation: popIn 0.2s ease-out;
-  }
-  @keyframes popIn {
-    from { opacity: 0; transform: scale(0.96) translateY(8px); }
-    to { opacity: 1; transform: scale(1) translateY(0); }
-  }
-
-  .modal-header {
-    padding: 16px 20px;
-    background: #11151f;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .modal-header h2 { font-size: 16px; font-weight: 700; }
-  .modal-close { background: none; border: 0; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 2px 6px; }
-  .modal-close:hover { color: #fff; }
-
-  .modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; max-height: 80vh; overflow-y: auto; }
-  .modal-footer {
-    padding: 14px 20px;
-    background: #11151f;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  /* Notifications / Toast */
-  #toast {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    padding: 12px 18px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-    display: none;
-    z-index: 2000;
-  }
-  #toast.show { display: block; animation: toastIn 0.2s ease-out; }
-  .toast-ok { background: #065f46; color: #a7f3d0; border: 1px solid #10b981; }
-  .toast-err { background: #7f1d1d; color: #fecaca; border: 1px solid #ef4444; }
-
-  @keyframes toastIn { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
-  .pwd-wrapper { position: relative; }
-  .pwd-toggle {
-    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-    background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 2px 6px;
-  }
-  .pwd-toggle:hover { color: #fff; }
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-<!-- Header -->
-<header>
-  <div class="logo-title">
-    <div class="logo-badge">M</div>
-    <div>
-      <h1>McPlayer — Painel de Gestão</h1>
-      <div class="subtitle">Aprovações, troca de listas por aparelho e cadastro completo de clientes</div>
-    </div>
-  </div>
-  <div style="display:flex; gap:8px;">
-    <button class="btn-outline" onclick="loadAll()" title="Atualizar dados do Supabase">
-      🔄 Atualizar
-    </button>
-  </div>
-</header>
-
-<!-- Navegação por Abas -->
-<div class="nav-tabs">
-  <button class="nav-btn active" id="tabBtnDevices" onclick="switchTab('devices')">
-    📱 Aparelhos / Dispositivos
-    <span class="count-tag" id="countDevices">0</span>
-  </button>
-  <button class="nav-btn" id="tabBtnClients" onclick="switchTab('clients')">
-    👥 Gestão de Clientes
-    <span class="count-tag" id="countClients">0</span>
-  </button>
-  <button class="nav-btn" id="tabBtnConfig" onclick="switchTab('config')">
-    ⚙️ Config / Banco
-  </button>
-</div>
-
-<!-- ============================================================== -->
-<!-- ABA 1: DISPOSITIVOS (MCPLAYER)                                  -->
-<!-- ============================================================== -->
-<div id="tabDevices">
-  <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-    <input id="searchDevices" placeholder="🔍 Buscar por Chave (Device ID), MAC ou App..." style="max-width:320px;" oninput="renderDevices()">
-    <div style="display:flex; gap:6px; flex-wrap:wrap;">
-      <button class="btn-outline btn-sm" onclick="filterApp('all')" id="appBtnAll">Todos Apps</button>
-      <button class="btn-outline btn-sm" onclick="filterApp('McPlayer')" id="appBtnMc">McPlayer</button>
-      <button class="btn-outline btn-sm" onclick="filterApp('NexPlay')" id="appBtnNex">NexPlay</button>
-      <span style="width:1px; background:var(--border); margin:0 4px;"></span>
-      <button class="btn-outline btn-sm" onclick="filterDevicesStatus('all')">Todos</button>
-      <button class="btn-outline btn-sm" style="color:#fbbf24" onclick="filterDevicesStatus('pending')">Pendentes</button>
-      <button class="btn-outline btn-sm" style="color:#4ade80" onclick="filterDevicesStatus('approved')">Aprovados</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <div id="devicesList"><span class="mono">Carregando dispositivos...</span></div>
-  </div>
-</div>
-
-<!-- ============================================================== -->
-<!-- ABA 2: GESTÃO DE CLIENTES                                       -->
-<!-- ============================================================== -->
-<div id="tabClients" style="display:none;">
-  <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-    <input id="searchClients" placeholder="🔍 Buscar por Nome, Telefone ou Chave..." style="max-width:320px;" oninput="renderClients()">
-    <button class="btn-primary" onclick="openClientModal()">
-      + Novo Cliente
-    </button>
-  </div>
-
-  <div class="card">
-    <div id="clientsList"><span class="mono">Nenhum cliente cadastrado. Clique em "+ Novo Cliente" acima.</span></div>
-  </div>
-</div>
-
-<!-- ============================================================== -->
-<!-- ABA 3: CONFIGURAÇÃO / SUPABASE & SQL                           -->
-<!-- ============================================================== -->
-<div id="tabConfig" style="display:none;">
-  <div class="card">
-    <h2 style="font-size:16px; margin-bottom:12px;">Conexão Supabase</h2>
-    <div class="grid2">
+<!-- ============================= LOGIN ============================= -->
+<div id="loginView" class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <div class="logo-badge">M</div>
       <div>
-        <label>Supabase URL</label>
-        <input id="sbUrl" value="https://pfpmizermpxhwaekoylq.supabase.co">
-      </div>
-      <div>
-        <label>Anon Key</label>
-        <input id="sbKey" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmcG1pemVybXB4aHdhZWtveWxxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNDk3ODIsImV4cCI6MjEwNDgyNTc4Mn0.Bu9cr3bhTFhc92Ilbz0UVWEPiD55Yi3TBU2VvI_sw70">
+        <h1>McPlayer / NexPlay</h1>
+        <p>Painel administrativo</p>
       </div>
     </div>
-    <div style="margin-top:12px;">
-      <button class="btn-primary" onclick="loadAll()">Testar & Salvar Conexão</button>
+
+    <h2 id="loginTitle">Entrar como administrador</h2>
+    <p class="auth-sub">Acesso restrito a contas com permissão de admin.</p>
+
+    <div id="loginMsg" class="auth-msg hidden"></div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="loginEmail">E-mail</label>
+        <input type="email" id="loginEmail" autocomplete="username" placeholder="voce@exemplo.com" required>
+      </div>
+      <div class="field">
+        <label for="loginPassword">Senha</label>
+        <input type="password" id="loginPassword" autocomplete="current-password" placeholder="sua senha" required>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Entrar</button>
+    </form>
+
+    <div id="signupBox" class="hidden" style="margin-top:14px;">
+      <div id="signupMsg" class="auth-msg hidden"></div>
+      <form id="signupForm">
+        <div class="field">
+          <label for="signupEmail">E-mail da conta</label>
+          <input type="email" id="signupEmail" autocomplete="username" placeholder="voce@exemplo.com" required>
+        </div>
+        <div class="field">
+          <label for="signupPassword">Senha (mín. 6 caracteres)</label>
+          <input type="password" id="signupPassword" autocomplete="new-password" minlength="6" required>
+        </div>
+        <button type="submit" class="btn-outline" id="signupBtn">Criar conta</button>
+      </form>
     </div>
-  </div>
 
-  <div class="card">
-    <h2 style="font-size:16px; margin-bottom:8px;">Liberar Exclusão (DELETE) no Supabase</h2>
-    <p style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">
-      Se o botão de excluir não apagar os aparelhos, é porque o Supabase bloqueia a exclusão por segurança (RLS).
-      Para liberar a exclusão completa, copie o código abaixo e execute no <b>SQL Editor</b> do Supabase:
-    </p>
-    <textarea readonly rows="6" style="font-family:'JetBrains Mono', monospace; font-size:12px; color:#4ade80;" onclick="this.select()">
--- 1. Libera exclusão de aparelhos para o painel
-create policy "Permitir exclusao de devices" on public.devices for delete using (true);
+    <div class="auth-links">
+      <button type="button" id="btnShowSignup">Primeiro acesso / criar conta</button>
+      <button type="button" id="btnBackLogin" class="hidden">Já tenho conta</button>
+    </div>
 
--- 2. Tabela de clientes (opcional, para sincronizar nuvem)
-create table if not exists public.clients (
-  id uuid default gen_random_uuid() primary key,
-  name text not null,
-  phone text,
-  device_id text,
-  expiration_date date,
-  notes text,
-  status text default 'active',
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-alter table public.clients enable row level security;
-create policy "Permitir tudo em clients" on public.clients for all using (true);
-    </textarea>
+    <div class="auth-foot">
+      A chave usada pelo navegador é a <b>anon key</b> (pública). As permissões são
+      validadas no banco (RLS + tabela <span class="mono">admins</span>). Nenhuma
+      service_role key fica no frontend.
+    </div>
   </div>
 </div>
 
-<!-- ============================================================== -->
-<!-- MODAL: EDITAR / TROCAR LISTA DO APARELHO                       -->
-<!-- ============================================================== -->
-<div class="modal-overlay" id="modalEditList">
-  <div class="modal-window">
+<!-- ============================= APP ============================= -->
+<div id="appView" class="app-shell hidden">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo-badge">M</div>
+      <div>
+        <h1>McPlayer / NexPlay</h1>
+        <p>Painel de gestão — código + MAC</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="rtStatus" class="rt offline"><span class="rt-dot"></span><span id="rtLabel">conectando</span></span>
+      <span id="userEmail" class="user-email"></span>
+      <button type="button" class="btn-outline btn-sm" id="btnLogout">Sair</button>
+    </div>
+  </header>
+
+  <nav class="nav-tabs">
+    <button type="button" class="nav-btn active" data-tab="overview">📊 Visão geral</button>
+    <button type="button" class="nav-btn" data-tab="devices">📱 Aparelhos <span class="count-tag" id="countDevices">0</span></button>
+    <button type="button" class="nav-btn" data-tab="playlists">🎬 Listas <span class="count-tag" id="countPlaylists">0</span></button>
+    <button type="button" class="nav-btn" data-tab="clients">👥 Clientes <span class="count-tag" id="countClients">0</span></button>
+    <button type="button" class="nav-btn" data-tab="audit">🧾 Auditoria <span class="count-tag" id="countAudit">0</span></button>
+    <button type="button" class="nav-btn" data-tab="settings">⚙️ Configuração</button>
+  </nav>
+
+  <div id="setupBanner" class="banner hidden">
+    <b>Banco ainda não migrado.</b> Rode <span class="mono">dashboard/sql/001_schema.sql</span>
+    no SQL Editor do Supabase e recarregue. <span id="setupBannerDetail"></span>
+  </div>
+
+  <main class="main">
+    <!-- ---------------------------- OVERVIEW ---------------------------- -->
+    <section id="tab-overview" class="tab-panel active">
+      <div id="overviewStats" class="stats-grid"></div>
+      <div id="overviewApps" class="app-stats"></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <div><h2>Últimos aparelhos</h2><p>Mais recentes em todos os apps</p></div>
+            <button type="button" class="btn-outline btn-sm" data-goto="devices">Ver todos</button>
+          </div>
+          <div id="overviewDevices" class="card-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div><h2>Auditoria recente</h2><p>Quem fez, quando e o que mudou</p></div>
+            <button type="button" class="btn-outline btn-sm" data-goto="audit">Ver tudo</button>
+          </div>
+          <div id="overviewAudit"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------------------------- DEVICES ----------------------------- -->
+    <section id="tab-devices" class="tab-panel">
+      <div class="toolbar">
+        <div class="grow">
+          <input type="search" id="searchDevices" placeholder="🔍 Buscar por código ou MAC (parcial)..." autocomplete="off">
+        </div>
+        <select id="filterDeviceApp" aria-label="Filtrar por app"></select>
+        <select id="filterDeviceStatus" aria-label="Filtrar por status">
+          <option value="all">Todos os status</option>
+          <option value="pending">Pendentes</option>
+          <option value="approved">Aprovados</option>
+          <option value="blocked">Bloqueados</option>
+        </select>
+        <button type="button" class="btn-primary" id="btnNewDevice">+ Novo aparelho</button>
+      </div>
+      <div id="devicesList" class="card-list"></div>
+    </section>
+
+    <!-- ---------------------------- PLAYLISTS --------------------------- -->
+    <section id="tab-playlists" class="tab-panel">
+      <div class="toolbar">
+        <div class="grow">
+          <input type="search" id="searchPlaylists" placeholder="🔍 Buscar por nome, servidor ou URL..." autocomplete="off">
+        </div>
+        <select id="filterPlaylistApp" aria-label="Filtrar por app"></select>
+        <button type="button" class="btn-primary" id="btnNewPlaylist">+ Nova lista</button>
+      </div>
+      <div id="playlistsList" class="card-list"></div>
+    </section>
+
+    <!-- ---------------------------- CLIENTS ----------------------------- -->
+    <section id="tab-clients" class="tab-panel">
+      <div class="toolbar">
+        <div class="grow">
+          <input type="search" id="searchClients" placeholder="🔍 Buscar por nome, telefone, código ou MAC..." autocomplete="off">
+        </div>
+        <select id="filterClientApp" aria-label="Filtrar por app"></select>
+        <button type="button" class="btn-primary" id="btnNewClient">+ Novo cliente</button>
+      </div>
+      <div id="clientsList" class="card-list"></div>
+    </section>
+
+    <!-- ----------------------------- AUDIT ------------------------------ -->
+    <section id="tab-audit" class="tab-panel">
+      <div class="toolbar">
+        <div class="grow">
+          <input type="search" id="searchAudit" placeholder="🔍 Buscar por código, MAC ou e-mail..." autocomplete="off">
+        </div>
+        <select id="filterAuditApp" aria-label="Filtrar por app"></select>
+        <select id="filterAuditAction" aria-label="Filtrar por ação">
+          <option value="all">Todas as ações</option>
+          <option value="insert">Inserir</option>
+          <option value="update">Editar</option>
+          <option value="delete">Excluir</option>
+          <option value="approve">Aprovar</option>
+          <option value="block">Bloquear</option>
+          <option value="unblock">Liberar</option>
+          <option value="link_mac">Vincular MAC</option>
+          <option value="unlink_mac">Desvincular MAC</option>
+          <option value="change_mac">Editar MAC</option>
+          <option value="change_code">Editar código</option>
+          <option value="list_change">Trocar lista</option>
+        </select>
+        <button type="button" class="btn-outline" id="btnReloadAudit">↻ Atualizar</button>
+      </div>
+      <div id="auditList" class="card"></div>
+    </section>
+
+    <!-- ---------------------------- SETTINGS ---------------------------- -->
+    <section id="tab-settings" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Apps e regras de código</h2>
+            <p>A regra vem do banco. Um app novo é uma linha nova aqui, sem duplicar código.</p>
+          </div>
+          <button type="button" class="btn-primary btn-sm" id="btnNewApp">+ Novo app</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>App</th>
+                <th>Regex do código</th>
+                <th>Dica</th>
+                <th>Maiúsculas</th>
+                <th>Ativo</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="appsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <div><h2>Administradores</h2><p>Quem pode acessar este painel</p></div>
+          </div>
+          <div id="adminsList" class="card-list"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div><h2>Backup / export</h2><p>Baixe um JSON com todos os dados atuais</p></div>
+            <button type="button" class="btn-success btn-sm" id="btnExport">⬇ Baixar backup</button>
+          </div>
+          <div id="backupInfo" class="secondary small"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><h2>Conexão e segurança</h2></div></div>
+        <dl id="configInfo" class="kv"></dl>
+      </div>
+
+      <div class="card danger-zone">
+        <div class="card-head"><div><h2>Limpeza / recomeçar do zero</h2></div></div>
+        <p class="secondary small" style="margin-bottom:10px;">
+          A exclusão em massa não é feita pelo navegador. Use os scripts SQL, na ordem,
+          com o backup em mãos. O <b>002_cleanup.sql</b> só deve rodar após confirmação.
+        </p>
+        <div class="code-box">dashboard/sql/001_schema.sql   -> cria a estrutura nova (não apaga os dados antigos)
+dashboard/sql/002_cleanup.sql  -> apaga devices/playlists/clients antigos + log de ativações
+dashboard/sql/003_admin.sql    -> confere/adiciona administradores
+dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><h2>Sessão</h2></div></div>
+        <p class="secondary small">Conectado como <b id="sessionEmail">—</b>.</p>
+        <div style="margin-top:10px;"><button type="button" class="btn-outline btn-sm" id="btnLogout2">Sair da conta</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ======================= MODAL: APARELHO ======================= -->
+<div class="modal-overlay" id="modalDevice">
+  <div class="modal-window wide">
     <div class="modal-header">
-      <h2 id="modalEditTitle">Editar / Trocar Lista</h2>
-      <button class="modal-close" onclick="closeModal('modalEditList')">&times;</button>
+      <h2 id="deviceModalTitle">Novo aparelho</h2>
+      <button type="button" class="modal-close" data-close="modalDevice">×</button>
     </div>
     <div class="modal-body">
-      <input type="hidden" id="editDevId">
+      <input type="hidden" id="devId">
 
-      <div style="display:flex; justify-content:space-between; align-items:center; background:#0e121a; padding:10px 14px; border-radius:8px; border:1px solid var(--border);">
-        <div>
-          <span style="font-size:11px; color:var(--text-muted); display:block;">CHAVE DO APARELHO:</span>
-          <b style="font-size:18px; font-family:'JetBrains Mono', monospace; color:#fff;" id="editDevKey">000000</b>
+      <div class="form-grid">
+        <div class="field">
+          <label for="devApp">App *</label>
+          <select id="devApp"></select>
         </div>
-        <span class="status-badge status-approved" id="editDevStatus">Ativo</span>
-      </div>
-
-      <div class="grid2" style="margin-top:6px;">
-        <div>
-          <label>Tipo de Lista *</label>
-          <select id="editType" onchange="toggleEditType()">
-            <option value="xtream">Xtream Codes (Servidor/User/Pass)</option>
-            <option value="m3u">M3U (URL Completa)</option>
+        <div class="field">
+          <label for="devStatus">Status</label>
+          <select id="devStatus">
+            <option value="pending">Pendente</option>
+            <option value="approved">Aprovado</option>
+            <option value="blocked">Bloqueado</option>
           </select>
         </div>
-        <div>
-          <label>Nome do Cliente (opcional)</label>
-          <input id="editClientName" placeholder="Ex: Carlos Silva">
+      </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="devCode">Código do aparelho *</label>
+          <div class="input-row">
+            <input id="devCode" maxlength="6" autocomplete="off" spellcheck="false" placeholder="000000">
+            <button type="button" class="btn-outline btn-sm" id="btnGenCode" title="Gerar código válido">Gerar</button>
+          </div>
+          <small id="devCodeHint"></small>
+        </div>
+        <div class="field">
+          <label for="devMac">MAC (opcional)</label>
+          <div class="input-row">
+            <input id="devMac" maxlength="17" autocomplete="off" spellcheck="false" placeholder="AA:BB:CC:DD:EE:FF">
+            <button type="button" class="btn-outline btn-sm" id="btnUnlinkMac" title="Desvincular MAC">Desvincular</button>
+          </div>
+          <small id="devMacHint">Aceita com hífen, sem separador ou minúsculo. Normaliza para AA:BB:CC:DD:EE:FF.</small>
         </div>
       </div>
 
-      <!-- Xtream Fields -->
-      <div id="boxXtream">
-        <label>URL do Servidor (com porta se houver) *</label>
-        <input id="editServer" placeholder="http://servidor:8080">
-        <div class="grid2">
-          <div>
-            <label>Usuário *</label>
-            <input id="editUser" placeholder="usuario">
+      <div class="form-grid">
+        <div class="field">
+          <label for="devClientName">Nome do cliente</label>
+          <input id="devClientName" placeholder="Ex.: Carlos Silva">
+        </div>
+        <div class="field">
+          <label for="devExpires">Vencimento</label>
+          <input type="date" id="devExpires">
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="devPlaylist">Playlist vinculada (opcional)</label>
+          <select id="devPlaylist"><option value="">— Nenhuma —</option></select>
+          <small>Escolher aqui preenche a lista abaixo.</small>
+        </div>
+        <div class="field">
+          <label for="devBlockReason">Motivo do bloqueio</label>
+          <input id="devBlockReason" placeholder="Só quando o status for Bloqueado">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="devNotes">Observações</label>
+        <textarea id="devNotes" rows="2" placeholder="Ex.: plano mensal, 2 telas, etc."></textarea>
+      </div>
+
+      <div class="card-flat">
+        <div class="card-head" style="margin-bottom:10px;">
+          <div><h3>Lista / conteúdo</h3></div>
+          <span id="devListSummary" class="pill-soft">sem lista</span>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="devListType">Tipo</label>
+            <select id="devListType">
+              <option value="">Sem lista</option>
+              <option value="m3u">M3U (URL)</option>
+              <option value="xtream">Xtream Codes</option>
+            </select>
           </div>
-          <div>
-            <label>Senha *</label>
-            <div class="pwd-wrapper">
-              <input type="password" id="editPass" placeholder="senha">
-              <button type="button" class="pwd-toggle" onclick="togglePwd('editPass', this)">👁️</button>
-            </div>
+          <div class="field" id="devM3uBox">
+            <label for="devM3uUrl">URL M3U</label>
+            <input id="devM3uUrl" placeholder="https://servidor/lista.m3u" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-grid-3" id="devXtreamBox">
+          <div class="field">
+            <label for="devServer">Servidor</label>
+            <input id="devServer" placeholder="http://servidor:8080" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="devUser">Usuário</label>
+            <input id="devUser" placeholder="usuario" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="devPass">Senha</label>
+            <input id="devPass" type="password" placeholder="senha" autocomplete="new-password">
           </div>
         </div>
       </div>
 
-      <!-- M3U Fields -->
-      <div id="boxM3u" style="display:none;">
-        <label>URL da Lista M3U *</label>
-        <input id="editM3uUrl" placeholder="https://.../lista.m3u">
-      </div>
-
-      <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
-        Ao clicar em salvar, o <b>McPlayer</b> receberá os novos canais em até 10 segundos no aparelho.
+      <p class="small muted" style="margin-top:10px;">
+        O app recebe a mudança em até 10 segundos (polling) e o painel é atualizado em tempo real.
       </p>
     </div>
     <div class="modal-footer">
-      <button class="btn-danger btn-sm" id="btnClearList" onclick="clearDeviceList()" title="Apaga apenas a lista vinculada, mantendo o aparelho cadastrado">
-        🗑️ Apagar lista
-      </button>
-      <span style="flex:1"></span>
-      <button class="btn-outline" onclick="closeModal('modalEditList')">Cancelar</button>
-      <button class="btn-success" id="btnSaveList" onclick="submitSaveList()">
-        Salvar e Enviar ao Aparelho
-      </button>
+      <button type="button" class="btn-danger btn-sm" id="btnDeleteDeviceFromModal" style="display:none;">🗑️ Excluir</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn-outline" data-close="modalDevice">Cancelar</button>
+      <button type="button" class="btn-primary" id="btnSaveDevice">Salvar aparelho</button>
     </div>
   </div>
 </div>
 
-<!-- ============================================================== -->
-<!-- MODAL: CADASTRAR / EDITAR CLIENTE                              -->
-<!-- ============================================================== -->
+<!-- ==================== MODAL: EXCLUIR APARELHO ==================== -->
+<div class="modal-overlay" id="modalDeleteDevice">
+  <div class="modal-window narrow">
+    <div class="modal-header">
+      <h2>Excluir aparelho</h2>
+      <button type="button" class="modal-close" data-close="modalDeleteDevice">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="delDeviceError" class="auth-msg hidden" style="margin-bottom:12px;"></div>
+      <p class="secondary small" style="margin-bottom:12px;">
+        Esta ação remove o aparelho <b id="delDeviceName"></b> do banco. O histórico do
+        dispositivo fica na auditoria. Para confirmar, digite o código exato:
+      </p>
+      <div class="field">
+        <label for="delDeviceCode">Código do aparelho</label>
+        <input id="delDeviceCode" class="mono" autocomplete="off" spellcheck="false" placeholder="000000">
+      </div>
+      <p class="small muted">Clientes vinculados ficam sem aparelho (o cadastro do cliente é preservado).</p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-outline" data-close="modalDeleteDevice">Cancelar</button>
+      <button type="button" class="btn-danger" id="btnConfirmDeleteDevice" disabled>Excluir definitivamente</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MODAL: PLAYLIST ======================= -->
+<div class="modal-overlay" id="modalPlaylist">
+  <div class="modal-window">
+    <div class="modal-header">
+      <h2 id="playlistModalTitle">Nova lista</h2>
+      <button type="button" class="modal-close" data-close="modalPlaylist">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="plId">
+      <div class="form-grid">
+        <div class="field">
+          <label for="plApp">App *</label>
+          <select id="plApp"></select>
+        </div>
+        <div class="field">
+          <label for="plName">Nome *</label>
+          <input id="plName" placeholder="Ex.: Lista principal">
+        </div>
+      </div>
+      <div class="field">
+        <label for="plType">Tipo *</label>
+        <select id="plType">
+          <option value="m3u">M3U (URL)</option>
+          <option value="xtream">Xtream Codes</option>
+        </select>
+      </div>
+      <div id="plM3uBox" class="field">
+        <label for="plUrl">URL M3U *</label>
+        <input id="plUrl" placeholder="https://servidor/lista.m3u" autocomplete="off">
+      </div>
+      <div id="plXtreamBox" class="form-grid-3">
+        <div class="field">
+          <label for="plServer">Servidor *</label>
+          <input id="plServer" placeholder="http://servidor:8080" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="plUser">Usuário *</label>
+          <input id="plUser" placeholder="usuario" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="plPass">Senha *</label>
+          <input id="plPass" type="password" placeholder="senha" autocomplete="new-password">
+        </div>
+      </div>
+      <div class="field">
+        <label for="plNotes">Observações</label>
+        <textarea id="plNotes" rows="2" placeholder="Ex.: painel do provedor, validade, etc."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-outline" data-close="modalPlaylist">Cancelar</button>
+      <button type="button" class="btn-primary" id="btnSavePlaylist">Salvar lista</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================== MODAL: CLIENTE ======================== -->
 <div class="modal-overlay" id="modalClient">
   <div class="modal-window">
     <div class="modal-header">
-      <h2 id="modalClientTitle">Cadastrar Cliente</h2>
-      <button class="modal-close" onclick="closeModal('modalClient')">&times;</button>
+      <h2 id="clientModalTitle">Novo cliente</h2>
+      <button type="button" class="modal-close" data-close="modalClient">×</button>
     </div>
     <div class="modal-body">
-      <input type="hidden" id="clientId">
-
-      <label>Nome Completo do Cliente *</label>
-      <input id="cName" placeholder="Ex: João da Silva">
-
-      <div class="grid2">
-        <div>
-          <label>WhatsApp / Telefone *</label>
-          <input id="cPhone" placeholder="Ex: (11) 99999-9999">
+      <input type="hidden" id="clId">
+      <div class="form-grid">
+        <div class="field">
+          <label for="clName">Nome completo *</label>
+          <input id="clName" placeholder="Ex.: João da Silva">
         </div>
-        <div>
-          <label>Chave do Aparelho (Device ID)</label>
-          <input id="cDeviceId" list="deviceSuggestions" placeholder="Ex: 837792">
-          <datalist id="deviceSuggestions"></datalist>
+        <div class="field">
+          <label for="clPhone">WhatsApp / telefone *</label>
+          <input id="clPhone" placeholder="Ex.: (11) 99999-9999">
         </div>
       </div>
-
-      <div class="grid2">
-        <div>
-          <label>Data de Vencimento *</label>
-          <input type="date" id="cExpDate">
+      <div class="form-grid">
+        <div class="field">
+          <label for="clApp">App</label>
+          <select id="clApp"></select>
         </div>
-        <div>
-          <label>Atalhos de Vencimento</label>
-          <div style="display:flex; gap:4px; margin-top:2px;">
-            <button type="button" class="btn-outline btn-sm" onclick="addDaysToExp(30)">+30d</button>
-            <button type="button" class="btn-outline btn-sm" onclick="addDaysToExp(60)">+60d</button>
-            <button type="button" class="btn-outline btn-sm" onclick="addDaysToExp(365)">+1 ano</button>
+        <div class="field">
+          <label for="clDevice">Código do aparelho</label>
+          <select id="clDevice"><option value="">— Nenhum —</option></select>
+          <small>O aparelho precisa existir no app escolhido.</small>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label for="clExpires">Vencimento</label>
+          <input type="date" id="clExpires">
+        </div>
+        <div class="field">
+          <label>Atalhos</label>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn-outline btn-sm" data-add-days="30">+30d</button>
+            <button type="button" class="btn-outline btn-sm" data-add-days="60">+60d</button>
+            <button type="button" class="btn-outline btn-sm" data-add-days="365">+1 ano</button>
           </div>
         </div>
       </div>
-
-      <label>Observações / Valor do Plano</label>
-      <input id="cNotes" placeholder="Ex: Plano Mensal R$ 35,00 - 1 Tela">
+      <div class="field">
+        <label for="clNotes">Observações / plano</label>
+        <textarea id="clNotes" rows="2" placeholder="Ex.: plano mensal R$ 35,00 — 1 tela"></textarea>
+      </div>
     </div>
     <div class="modal-footer">
-      <button class="btn-outline" onclick="closeModal('modalClient')">Cancelar</button>
-      <button class="btn-primary" onclick="submitClient()">Salvar Cliente</button>
+      <button type="button" class="btn-outline" data-close="modalClient">Cancelar</button>
+      <button type="button" class="btn-primary" id="btnSaveClient">Salvar cliente</button>
     </div>
   </div>
 </div>
 
-<div id="toast"></div>
-
-<script>
-let DEVICES = [];
-let CLIENTS = [];
-let DEVICE_FILTER = 'all';
-let APP_FILTER = 'all';
-
-function filterApp(app) {
-  APP_FILTER = app;
-  renderDevices();
-}
-
-function cfg() {
-  return {
-    base: document.getElementById('sbUrl').value.trim().replace(/\/$/, ''),
-    key: document.getElementById('sbKey').value.trim()
-  };
-}
-
-function headers() {
-  const c = cfg();
-  return {
-    'apikey': c.key,
-    'Authorization': 'Bearer ' + c.key,
-    'Content-Type': 'application/json'
-  };
-}
-
-function showToast(msg, isOk = true) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'show ' + (isOk ? 'toast-ok' : 'toast-err');
-  setTimeout(() => { t.className = ''; }, 3500);
-}
-
-function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function openModal(id) { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-
-function switchTab(tab) {
-  document.getElementById('tabDevices').style.display = tab === 'devices' ? 'block' : 'none';
-  document.getElementById('tabClients').style.display = tab === 'clients' ? 'block' : 'none';
-  document.getElementById('tabConfig').style.display = tab === 'config' ? 'block' : 'none';
-
-  document.getElementById('tabBtnDevices').classList.toggle('active', tab === 'devices');
-  document.getElementById('tabBtnClients').classList.toggle('active', tab === 'clients');
-  document.getElementById('tabBtnConfig').classList.toggle('active', tab === 'config');
-}
-
-function togglePwd(id, btn) {
-  const el = document.getElementById(id);
-  if (el.type === 'password') {
-    el.type = 'text';
-    btn.textContent = '🔒';
-  } else {
-    el.type = 'password';
-    btn.textContent = '👁️';
-  }
-}
-
-function toggleEditType() {
-  const t = document.getElementById('editType').value;
-  document.getElementById('boxXtream').style.display = t === 'xtream' ? 'block' : 'none';
-  document.getElementById('boxM3u').style.display = t === 'm3u' ? 'block' : 'none';
-}
-
-// -------------------------------------------------------------
-// CARREGAR TUDO (APARELHOS + CLIENTES)
-// -------------------------------------------------------------
-async function loadAll() {
-  await loadDevices();
-  loadClientsLocal();
-}
-
-async function loadDevices() {
-  const el = document.getElementById('devicesList');
-  el.innerHTML = '<span class="mono">Carregando aparelhos...</span>';
-  const c = cfg();
-  try {
-    const res = await fetch(`${c.base}/rest/v1/devices?select=*&limit=150`, { headers: headers() });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    DEVICES = await res.json();
-
-    // Ordena: pendentes primeiro, depois mais recentes
-    DEVICES.sort((a, b) => {
-      const aPend = (a.status === 'pending') ? 1 : 0;
-      const bPend = (b.status === 'pending') ? 1 : 0;
-      if (aPend !== bPend) return bPend - aPend;
-      const da = new Date(a.request_date || a.approved_at || 0).getTime();
-      const db = new Date(b.request_date || b.approved_at || 0).getTime();
-      return db - da;
-    });
-
-    document.getElementById('countDevices').textContent = DEVICES.length;
-    renderDevices();
-    updateDeviceSuggestions();
-  } catch (e) {
-    el.innerHTML = `<span class="mono" style="color:#ef4444">Erro ao carregar: ${esc(e.message)}</span>`;
-    showToast('Falha ao conectar com Supabase: ' + e.message, false);
-  }
-}
-
-function filterDevicesStatus(st) {
-  DEVICE_FILTER = st;
-  renderDevices();
-}
-
-function renderDevices() {
-  const q = (document.getElementById('searchDevices').value || '').trim().toLowerCase();
-  const list = DEVICES.filter(d => {
-    const st = (d.status || 'pending').toLowerCase();
-    const app = (d.app_name || 'McPlayer');
-    const matchesSt = (DEVICE_FILTER === 'all') || (st === DEVICE_FILTER);
-    const matchesApp = (APP_FILTER === 'all') || (app === APP_FILTER);
-    const matchesQ = !q || String(d.device_id).toLowerCase().includes(q) || String(d.mac).toLowerCase().includes(q) || app.toLowerCase().includes(q);
-    return matchesSt && matchesApp && matchesQ;
-  });
-
-  const el = document.getElementById('devicesList');
-  if (!list.length) {
-    el.innerHTML = '<span class="mono">Nenhum aparelho encontrado.</span>';
-    return;
-  }
-
-  el.innerHTML = list.map(d => {
-    const st = (d.status || 'pending').toLowerCase();
-    const appName = (d.app_name || 'McPlayer');
-    // Convenção de transição: McPlayer = 6 dígitos; NexPlay = alfanumérico (≥1 letra).
-    const idStr = String(d.device_id || '');
-    const isMcFormat = /^[0-9]{6}$/.test(idStr);
-    const isNexFormat = /[A-Za-z]/.test(idStr);
-    const fmtTag = isMcFormat ? '6 dígitos' : (isNexFormat ? 'alfanumérico' : 'formato livre');
-    const ld = d.list_data || {};
-    const isXtream = ld && (ld.type === 'xtream');
-    const isM3u = ld && (ld.type === 'm3u');
-
-    let listHtml = '';
-    if (st === 'approved') {
-      if (isXtream) {
-        listHtml = `
-          <div class="details-box">
-            <b>Xtream:</b> ${esc(ld.serverUrl || ld.server_url || '-')}
-            <span style="color:var(--text-muted)"> | Usuário:</span> <b>${esc(ld.username || '-')}</b>
-            <span style="color:var(--text-muted)"> | Senha:</span> <b>••••••••</b>
-            ${ld.clientName ? `<span style="color:#38bdf8"> | Cliente: <b>${esc(ld.clientName)}</b></span>` : ''}
-          </div>
-        `;
-      } else if (isM3u) {
-        listHtml = `
-          <div class="details-box">
-            <b>M3U:</b> <span class="mono">${esc(ld.url || '-')}</span>
-            ${ld.clientName ? `<span style="color:#38bdf8"> | Cliente: <b>${esc(ld.clientName)}</b></span>` : ''}
-          </div>
-        `;
-      } else {
-        listHtml = '<div class="details-box"><span style="color:var(--text-muted)">Aparelho aprovado sem lista vinculada.</span></div>';
-      }
-    } else {
-      listHtml = `<div class="details-box" style="color:#fbbf24">⏳ Aguardando aprovação e envio de lista (${esc(d.app_name || 'McPlayer')}).</div>`;
-    }
-
-    const dt = d.request_date ? new Date(d.request_date).toLocaleString('pt-BR') : '';
-
-    return `
-      <div class="item-row">
-        <div class="item-top">
-          <div>
-            <span class="key-chip">${esc(d.device_id)}</span>
-            <span class="status-badge status-${st}">${st === 'approved' ? '✓ Aprovado' : (st === 'pending' ? '● Pendente' : '✕ Rejeitado')}</span>
-            <span class="status-badge" style="background:#1e293b; color:#7dd3fc; margin-left:6px;">${esc(d.app_name || 'McPlayer')}</span>
-            <span class="status-badge" style="background:#0f172a; color:#94a3b8; margin-left:6px;" title="Formato do código do aparelho">${esc(fmtTag)}</span>
-            <div class="mono" style="margin-top:4px;">
-              MAC: <b>${esc(d.mac || 'N/A')}</b> · App: <b>${esc(d.app_name || 'McPlayer')}</b> · Data: ${esc(dt)}
-            </div>
-          </div>
-
-          <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn-primary btn-sm" onclick="openEditListModal('${esc(d.device_id)}')">
-              ✏️ Editar / Trocar Lista
-            </button>
-            <button class="btn-danger btn-sm" onclick="deleteDevice('${esc(d.device_id)}')">
-              🗑️ Excluir
-            </button>
-          </div>
+<!-- ========================= MODAL: APP ========================== -->
+<div class="modal-overlay" id="modalApp">
+  <div class="modal-window">
+    <div class="modal-header">
+      <h2 id="appModalTitle">Novo app</h2>
+      <button type="button" class="modal-close" data-close="modalApp">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="appOriginalName">
+      <div class="form-grid">
+        <div class="field">
+          <label for="appName">Nome do app *</label>
+          <input id="appName" placeholder="Ex.: NexPlay">
         </div>
-        ${listHtml}
-      </div>
-    `;
-  }).join('');
-}
-
-// -------------------------------------------------------------
-// EDITAR / TROCAR LISTA (ABRE MODAL POP-UP)
-// -------------------------------------------------------------
-function openEditListModal(id) {
-  const d = DEVICES.find(x => String(x.device_id) === String(id));
-  if (!d) return;
-
-  document.getElementById('editDevId').value = d.device_id;
-  document.getElementById('editDevKey').textContent = d.device_id;
-  document.getElementById('editDevStatus').textContent = d.status === 'approved' ? 'Aprovado' : 'Pendente';
-  document.getElementById('editDevStatus').className = 'status-badge status-' + (d.status || 'pending');
-
-  const ld = d.list_data || {};
-  const type = (ld.type || 'xtream').toLowerCase();
-  document.getElementById('editType').value = type;
-  toggleEditType();
-
-  if (type === 'xtream') {
-    document.getElementById('editServer').value = ld.serverUrl || ld.server_url || '';
-    document.getElementById('editUser').value = ld.username || '';
-    document.getElementById('editPass').value = ld.password || '';
-    document.getElementById('editM3uUrl').value = '';
-  } else {
-    document.getElementById('editM3uUrl').value = ld.url || '';
-    document.getElementById('editServer').value = '';
-    document.getElementById('editUser').value = '';
-    document.getElementById('editPass').value = '';
-  }
-
-  document.getElementById('editClientName').value = ld.clientName || '';
-  openModal('modalEditList');
-}
-
-async function submitSaveList() {
-  const id = document.getElementById('editDevId').value;
-  const type = document.getElementById('editType').value;
-  const clientName = document.getElementById('editClientName').value.trim();
-
-  let ld = null;
-  if (type === 'xtream') {
-    const serverUrl = document.getElementById('editServer').value.trim();
-    const username = document.getElementById('editUser').value.trim();
-    const password = document.getElementById('editPass').value.trim();
-
-    if (!serverUrl || !username || !password) {
-      alert('Preencha Servidor, Usuário e Senha do Xtream.');
-      return;
-    }
-    ld = {
-      type: 'xtream',
-      serverUrl,
-      server_url: serverUrl,
-      username,
-      password,
-      clientName
-    };
-  } else {
-    const url = document.getElementById('editM3uUrl').value.trim();
-    if (!url) {
-      alert('Informe a URL da lista M3U.');
-      return;
-    }
-    ld = {
-      type: 'm3u',
-      url,
-      clientName
-    };
-  }
-
-  const btn = document.getElementById('btnSaveList');
-  btn.textContent = 'Enviando ao aparelho...';
-  btn.disabled = true;
-
-  const c = cfg();
-  try {
-    const payload = {
-      status: 'approved',
-      list_data: ld,
-      approved_at: new Date().toISOString()
-    };
-
-    const res = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: headers(),
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-
-    closeModal('modalEditList');
-    showToast(`Lista salva com sucesso para o aparelho ${id}! McPlayer receberá em até 10s.`, true);
-    await loadDevices();
-  } catch (e) {
-    alert('Erro ao salvar no Supabase: ' + e.message);
-  } finally {
-    btn.textContent = 'Salvar e Enviar ao Aparelho';
-    btn.disabled = false;
-  }
-}
-
-// -------------------------------------------------------------
-// APAGAR APENAS A LISTA (mantém o aparelho cadastrado)
-// Permite limpar a lista atual para inserir outra em seguida.
-// -------------------------------------------------------------
-async function clearDeviceList() {
-  const id = document.getElementById('editDevId').value;
-  if (!id) return;
-  if (!confirm(`Apagar a lista vinculada ao aparelho ${id}?\n\nO aparelho continua cadastrado, mas ficará sem conteúdo até você inserir outra lista.`)) {
-    return;
-  }
-  const c = cfg();
-  const btn = document.getElementById('btnClearList');
-  const oldTxt = btn.textContent;
-  btn.textContent = 'Apagando...';
-  btn.disabled = true;
-  try {
-    const res = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: headers(),
-      body: JSON.stringify({ list_data: null })
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    // Limpa os campos do modal para inserir outra lista em seguida
-    document.getElementById('editServer').value = '';
-    document.getElementById('editUser').value = '';
-    document.getElementById('editPass').value = '';
-    document.getElementById('editM3uUrl').value = '';
-    showToast(`Lista do aparelho ${id} apagada. Insira outra e clique em Salvar.`, true);
-    await loadDevices();
-    // Reabre/atualiza o modal com o estado sem lista
-    const d = DEVICES.find(x => String(x.device_id) === String(id));
-    if (d) {
-      d.list_data = null;
-      document.getElementById('editDevId').value = d.device_id;
-    }
-  } catch (e) {
-    alert('Erro ao apagar lista: ' + e.message);
-  } finally {
-    btn.textContent = oldTxt;
-    btn.disabled = false;
-  }
-}
-
-// -------------------------------------------------------------
-// EXCLUIR APARELHO (COM SUPORTE A RLS)
-// Remove o aparelho do banco. Igual ao "Excluir" de Clientes,
-// serve para limpar aparelhos que não estão mais em uso.
-// -------------------------------------------------------------
-async function deleteDevice(id) {
-  if (!confirm(`Deseja realmente EXCLUIR o aparelho ${id}?\n\nEle perderá o acesso e a lista será desvinculada.`)) {
-    return;
-  }
-
-  const c = cfg();
-  try {
-    // Tentativa 1: Exclusão real no banco
-    const res = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: { ...headers(), 'Prefer': 'return=representation' }
-    });
-
-    let deletedRows = null;
-    try { deletedRows = await res.json(); } catch (_) { deletedRows = null; }
-
-    if (res.ok && Array.isArray(deletedRows) && deletedRows.length > 0) {
-      // Exclusão real funcionou: remove da lista local na hora
-      DEVICES = DEVICES.filter(x => String(x.device_id) !== String(id));
-      document.getElementById('countDevices').textContent = DEVICES.length;
-      renderDevices();
-      updateDeviceSuggestions();
-      showToast(`Aparelho ${id} excluído com sucesso!`, true);
-      return;
-    }
-
-    // Se o Supabase bloqueou o DELETE (RLS ou 0 linhas afetadas):
-    // Bloqueia e limpa o aparelho para não funcionar mais no McPlayer
-    const blockRes = await fetch(`${c.base}/rest/v1/devices?device_id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: headers(),
-      body: JSON.stringify({ status: 'rejected', list_data: null })
-    });
-
-      if (blockRes.ok) {
-        showToast(`Aparelho ${id} bloqueado/rejeitado (o acesso foi cancelado). Para apagar da tabela, ative a regra DELETE no SQL do Supabase (Aba Config).`, false);
-        await loadDevices();
-        return;
-      }
-
-    showToast(`Aparelho ${id} excluído com sucesso!`, true);
-    await loadDevices();
-  } catch (e) {
-    alert('Erro ao excluir: ' + e.message);
-  }
-}
-
-// -------------------------------------------------------------
-// ABA 2: GESTÃO DE CLIENTES
-// -------------------------------------------------------------
-function loadClientsLocal() {
-  try {
-    const raw = localStorage.getItem('mcplayer_clients');
-    CLIENTS = raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    CLIENTS = [];
-  }
-  document.getElementById('countClients').textContent = CLIENTS.length;
-  renderClients();
-}
-
-function saveClientsLocal() {
-  localStorage.setItem('mcplayer_clients', JSON.stringify(CLIENTS));
-  document.getElementById('countClients').textContent = CLIENTS.length;
-  renderClients();
-}
-
-function updateDeviceSuggestions() {
-  const dl = document.getElementById('deviceSuggestions');
-  dl.innerHTML = DEVICES.map(d => `<option value="${esc(d.device_id)}">${esc(d.device_id)} (${esc(d.app_name || 'McPlayer')} · ${esc(d.status)})</option>`).join('');
-}
-
-function openClientModal(id = null) {
-  document.getElementById('clientId').value = id || '';
-  if (id) {
-    const c = CLIENTS.find(x => x.id === id);
-    if (!c) return;
-    document.getElementById('modalClientTitle').textContent = 'Editar Cliente';
-    document.getElementById('cName').value = c.name || '';
-    document.getElementById('cPhone').value = c.phone || '';
-    document.getElementById('cDeviceId').value = c.deviceId || '';
-    document.getElementById('cExpDate').value = c.expDate || '';
-    document.getElementById('cNotes').value = c.notes || '';
-  } else {
-    document.getElementById('modalClientTitle').textContent = 'Cadastrar Novo Cliente';
-    document.getElementById('cName').value = '';
-    document.getElementById('cPhone').value = '';
-    document.getElementById('cDeviceId').value = '';
-    document.getElementById('cNotes').value = '';
-    // Padrão: 30 dias a partir de hoje
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    document.getElementById('cExpDate').value = d.toISOString().split('T')[0];
-  }
-  openModal('modalClient');
-}
-
-function addDaysToExp(days) {
-  const cur = document.getElementById('cExpDate').value;
-  const base = cur ? new Date(cur) : new Date();
-  base.setDate(base.getDate() + days);
-  document.getElementById('cExpDate').value = base.toISOString().split('T')[0];
-}
-
-function submitClient() {
-  const name = document.getElementById('cName').value.trim();
-  const phone = document.getElementById('cPhone').value.trim();
-  const deviceId = document.getElementById('cDeviceId').value.trim();
-  const expDate = document.getElementById('cExpDate').value;
-  const notes = document.getElementById('cNotes').value.trim();
-  const id = document.getElementById('clientId').value || ('cli_' + Date.now());
-
-  if (!name) return alert('Informe o nome do cliente.');
-  if (!phone) return alert('Informe o WhatsApp / Telefone.');
-
-  const clientData = { id, name, phone, deviceId, expDate, notes };
-
-  const idx = CLIENTS.findIndex(x => x.id === id);
-  if (idx >= 0) {
-    CLIENTS[idx] = clientData;
-  } else {
-    CLIENTS.push(clientData);
-  }
-
-  saveClientsLocal();
-  closeModal('modalClient');
-  showToast('Cliente salvo com sucesso!', true);
-}
-
-function deleteClient(id) {
-  const c = CLIENTS.find(x => x.id === id);
-  if (!confirm(`Deseja excluir o cadastro do cliente "${c ? c.name : id}"?`)) return;
-  CLIENTS = CLIENTS.filter(x => x.id !== id);
-  saveClientsLocal();
-  showToast('Cliente excluído.', true);
-}
-
-function addClientDays(id, days) {
-  const c = CLIENTS.find(x => x.id === id);
-  if (!c) return;
-  const base = c.expDate ? new Date(c.expDate) : new Date();
-  base.setDate(base.getDate() + days);
-  c.expDate = base.toISOString().split('T')[0];
-  saveClientsLocal();
-  showToast(`Adicionados +${days} dias para ${c.name}. Novo vencimento: ${new Date(c.expDate).toLocaleDateString('pt-BR')}`, true);
-}
-
-function sendWhatsApp(phone, name, expDate) {
-  const cleanPhone = phone.replace(/\D/g, '');
-  const dtStr = expDate ? new Date(expDate).toLocaleDateString('pt-BR') : '';
-  const text = encodeURIComponent(`Olá ${name}, tudo bem? Passando para lembrar do seu acesso McPlayer com vencimento em ${dtStr}. Qualquer dúvida estamos à disposição!`);
-  window.open(`https://wa.me/55${cleanPhone}?text=${text}`, '_blank');
-}
-
-function renderClients() {
-  const q = (document.getElementById('searchClients').value || '').trim().toLowerCase();
-  const list = CLIENTS.filter(c => {
-    return !q || c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)) || (c.deviceId && c.deviceId.includes(q));
-  });
-
-  const el = document.getElementById('clientsList');
-  if (!list.length) {
-    el.innerHTML = '<span class="mono">Nenhum cliente cadastrado. Clique em "+ Novo Cliente" para adicionar.</span>';
-    return;
-  }
-
-  const today = new Date().toISOString().split('T')[0];
-
-  el.innerHTML = list.map(c => {
-    const isExpired = c.expDate && c.expDate < today;
-    const diffDays = c.expDate ? Math.ceil((new Date(c.expDate) - new Date(today)) / (1000 * 60 * 60 * 24)) : null;
-
-    let badge = '';
-    if (!c.expDate) {
-      badge = '<span class="status-badge" style="background:#334155; color:#cbd5e1">Sem data</span>';
-    } else if (isExpired) {
-      badge = `<span class="status-badge status-expired">Vencido (${Math.abs(diffDays)}d atrás)</span>`;
-    } else if (diffDays <= 3) {
-      badge = `<span class="status-badge status-pending">Vence em ${diffDays} dia(s)</span>`;
-    } else {
-      badge = `<span class="status-badge status-approved">Em dia (${diffDays} dias)</span>`;
-    }
-
-    const expStr = c.expDate ? new Date(c.expDate).toLocaleDateString('pt-BR') : 'Não definida';
-
-    return `
-      <div class="item-row">
-        <div class="item-top">
-          <div>
-            <b style="font-size:16px;">${esc(c.name)}</b>
-            ${badge}
-            <div class="mono" style="margin-top:4px;">
-              📱 WhatsApp: <b>${esc(c.phone)}</b> ·
-              Chave TV: <b>${esc(c.deviceId || 'Não vinculada')}</b> ·
-              Vencimento: <b>${esc(expStr)}</b>
-              ${c.notes ? ` · <span style="color:#94a3b8">${esc(c.notes)}</span>` : ''}
-            </div>
-          </div>
-
-          <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn-wa btn-sm" onclick="sendWhatsApp('${esc(c.phone)}', '${esc(c.name)}', '${esc(c.expDate)}')">
-              💬 WhatsApp
-            </button>
-            <button class="btn-outline btn-sm" onclick="addClientDays('${esc(c.id)}', 30)" title="Renovar +30 dias">
-              +30 dias
-            </button>
-            <button class="btn-outline btn-sm" onclick="openClientModal('${esc(c.id)}')">
-              ✏️ Editar
-            </button>
-            <button class="btn-danger btn-sm" onclick="deleteClient('${esc(c.id)}')">
-              🗑️ Excluir
-            </button>
-          </div>
+        <div class="field">
+          <label for="appOrder">Ordem</label>
+          <input type="number" id="appOrder" value="100" min="0" step="10">
         </div>
       </div>
-    `;
-  }).join('');
-}
+      <div class="field">
+        <label for="appPattern">Regex do código *</label>
+        <input id="appPattern" class="mono" placeholder="^[0-9]{6}$" autocomplete="off">
+        <small>Ex.: McPlayer = <span class="mono">^[0-9]{6}$</span>; NexPlay = <span class="mono">^[A-Z0-9]{6}$</span>.</small>
+      </div>
+      <div class="field">
+        <label for="appHint">Dica exibida ao usuário</label>
+        <input id="appHint" placeholder="6 caracteres: letras A-Z e números 0-9">
+      </div>
+      <label class="checkbox"><input type="checkbox" id="appUpper" checked> Normalizar código em MAIÚSCULAS</label>
+      <label class="checkbox"><input type="checkbox" id="appActive" checked> App ativo (aceita check-in)</label>
+      <p class="small muted">Alterar a regex não altera códigos já existentes; eles continuam válidos até serem editados.</p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-outline" data-close="modalApp">Cancelar</button>
+      <button type="button" class="btn-primary" id="btnSaveApp">Salvar app</button>
+    </div>
+  </div>
+</div>
 
-// Iniciar
-window.addEventListener('DOMContentLoaded', () => {
-  loadAll();
-});
-</script>
+<div id="toastWrap"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/validation.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>

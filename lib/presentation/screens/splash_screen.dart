@@ -84,7 +84,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           return;
         }
       } else if (result.status == ActivationStatus.pending ||
-          result.status == ActivationStatus.rejected) {
+          result.status == ActivationStatus.rejected ||
+          result.status == ActivationStatus.blocked) {
         // Aparelho pendente de aprovação ou rejeitado:
         // Abre direto a tela de Listas/Ativação onde mostra a chave e faz polling
         Navigator.of(context).pushReplacement(

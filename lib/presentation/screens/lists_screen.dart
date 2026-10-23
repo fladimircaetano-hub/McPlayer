@@ -106,10 +106,11 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
         result.listData != null) {
       _pollTimer?.cancel();
       _applyRemoteApproval(result.listData!);
-    } else if (result.status == ActivationStatus.rejected) {
+    } else if (result.status == ActivationStatus.rejected ||
+        result.status == ActivationStatus.blocked) {
       _pollTimer?.cancel();
-      // Dispositivo rejeitado: para de fazer polling permanentemente
-      // (o usuário terá que adicionar lista manualmente)
+      // Dispositivo rejeitado/bloqueado: para de fazer polling permanentemente
+      // (o usuário terá que falar com o suporte / adicionar lista manualmente)
     } else {
       // Ainda pendente: agenda próximo polling com backoff
       _pollAttempt++;

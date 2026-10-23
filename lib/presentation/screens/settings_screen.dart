@@ -275,6 +275,9 @@ class _SettingsScreenState extends State<SettingsScreen> with BackNavigationMixi
           case ActivationStatus.rejected:
             _testResult = 'Rejeitado pelo dashboard';
             break;
+          case ActivationStatus.blocked:
+            _testResult = 'Aparelho bloqueado no dashboard';
+            break;
           case ActivationStatus.notFound:
             _testResult = 'Dispositivo nao registrado (check-in enviado)';
             break;
@@ -1013,17 +1016,12 @@ class _SettingsScreenState extends State<SettingsScreen> with BackNavigationMixi
         _panelTitle(tr('m_admin')),
         const SizedBox(height: 8),
         _optionRow(
-          label: 'Abrir Admin (aprovar dispositivos)',
+          label: 'Sobre a gestão de aparelhos (painel web)',
           showCheck: false,
           onTap: () {
-            final service = sl.activationService;
-            if (service == null) {
-              _snack('Ativação remota não configurada');
-              return;
-            }
             Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => AdminScreen(),
+                builder: (_) => const AdminScreen(),
               ),
             );
           },
@@ -1031,11 +1029,10 @@ class _SettingsScreenState extends State<SettingsScreen> with BackNavigationMixi
         const SizedBox(height: 16),
         _panelTitle('Como usar'),
         const Text(
-          '1. Configure ADMIN_PIN via --dart-define no build\n'
-          '2. Abre tela admin protegida por PIN seguro\n'
-          '3. Lista dispositivos pendentes do Supabase\n'
-          '4. Aprova + insere lista (M3U ou Xtream) em 1 clique\n'
-          '5. Funciona junto com o dashboard web\n',
+          '1. A gestão de aparelhos agora é feita no painel web (dashboard).\n'
+          '2. Entre no dashboard com uma conta admin (e-mail e senha).\n'
+          '3. Aprove, bloqueie, edite ou exclua aparelhos por lá.\n'
+          '4. Esta tela antiga é apenas informativa: o acesso anônimo à tabela devices foi removido pelo RLS.\n',
           style: TextStyle(color: Colors.white70, fontSize: 13),
         ),
       ],

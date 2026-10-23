@@ -5,6 +5,7 @@ enum ActivationStatus {
   pending,
   approved,
   rejected,
+  blocked,
   notFound,
   disabled,
 }

@@ -1,12 +1,13 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/activation/activation_config.dart';
 import '../../core/activation/admin_config.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
 
-/// Tela Admin oculta: aprova dispositivos + insere lista direto no Supabase.
-/// Acesso: Settings → segurar "Testar Conexão" por 2s ou digitar PIN.
+/// Tela informativa do admin antigo.
+///
+/// A gestão de aparelhos agora é feita pelo dashboard web, com login de
+/// administrador e RLS no banco. Esta tela não consulta mais o Supabase.
 class AdminScreen extends StatefulWidget {
   const AdminScreen({
     super.key,
@@ -18,10 +19,8 @@ class AdminScreen extends StatefulWidget {
 
 class _AdminScreenState extends State<AdminScreen> {
   List<_DeviceRow> _devices = [];
-  List<Map<String, dynamic>> _playlists = [];
   bool _loading = true;
   String _error = '';
-  Timer? _pollTimer;
   final TextEditingController _pinController = TextEditingController();
   bool _showPinDialog = true;
 
@@ -35,15 +34,15 @@ class _AdminScreenState extends State<AdminScreen> {
       _error = 'Admin desabilitado (configure ADMIN_PIN via --dart-define)';
       _loading = false;
     } else {
-      _loadDevices();
-      _loadPlaylists();
-      _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _loadDevices());
+      // Tela apenas informativa: a gestão real é feita no dashboard web.
+      // Não consultamos mais a tabela devices por aqui (o RLS removeu o
+      // acesso anônimo e a consulta só geraria erro).
+      _loading = false;
     }
   }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
     _pinController.dispose();
     super.dispose();
   }
@@ -75,33 +74,6 @@ class _AdminScreenState extends State<AdminScreen> {
         setState(() {
           _loading = false;
           _error = 'Erro ao carregar: $e';
-        });
-      }
-    }
-  }
-
-  Future<void> _loadPlaylists() async {
-    if (!mounted) {
-      return;
-    }
-    try {
-      final service = sl.activationService;
-      if (service == null) {
-        setState(() {
-          _playlists = [];
-        });
-        return;
-      }
-      final data = await service.fetchPlaylists();
-      if (mounted) {
-        setState(() {
-          _playlists = data;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _playlists = [];
         });
       }
     }
@@ -312,144 +284,6 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  void _showAddClientDialog() {
-    final deviceIdController = TextEditingController();
-    final macController = TextEditingController();
-    final typeController = TextEditingController(text: 'm3u');
-    final urlController = TextEditingController();
-    final serverController = TextEditingController();
-    final userController = TextEditingController();
-    final passController = TextEditingController();
-    String? selectedPlaylistId;
-    Map<String, dynamic>? selectedPlaylistData;
-
-    showDialog(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setDlgState) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          title: const Text('Adicionar Cliente', style: TextStyle(color: Colors.white)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _textField('Device ID', deviceIdController, hint: 'Opcional - auto gerado se vazio'),
-                const SizedBox(height: 12),
-                _textField('MAC Address', macController, hint: 'Opcional - auto gerado se vazio'),
-                const SizedBox(height: 16),
-                const Text('Playlist', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 8),
-                if (_playlists.isNotEmpty) ...[
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedPlaylistId,
-                    dropdownColor: AppColors.surface,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Selecionar playlist existente',
-                      labelStyle: const TextStyle(color: Colors.white70),
-                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: AppColors.cardBorder)),
-                      focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
-                    ),
-                    hint: const Text('Escolher playlist...', style: TextStyle(color: Colors.white54)),
-                    items: _playlists.map((p) => DropdownMenuItem(
-                      value: p['id']?.toString(),
-                      child: Text(p['name']?.toString() ?? 'Sem nome', style: const TextStyle(color: Colors.white)),
-                    )).toList(),
-                    onChanged: (v) {
-                      setDlgState(() {
-                        selectedPlaylistId = v;
-                        if (v != null) {
-                          selectedPlaylistData = _playlists.firstWhere((p) => p['id']?.toString() == v);
-                          typeController.text = selectedPlaylistData!['type']?.toString().toLowerCase() ?? 'm3u';
-                          urlController.text = selectedPlaylistData!['url']?.toString() ?? '';
-                          serverController.text = selectedPlaylistData!['server_url']?.toString() ?? '';
-                          userController.text = selectedPlaylistData!['username']?.toString() ?? '';
-                          passController.text = selectedPlaylistData!['password']?.toString() ?? '';
-                        } else {
-                          selectedPlaylistData = null;
-                        }
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                _dropdownField(
-                  label: 'Tipo',
-                  value: typeController.text,
-                  items: ['m3u', 'xtream'],
-                  onChanged: (v) {
-                    setDlgState(() => typeController.text = v!);
-                    selectedPlaylistId = null;
-                    selectedPlaylistData = null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                if (typeController.text == 'm3u')
-                  _textField('URL M3U', urlController, hint: 'http://.../playlist.m3u'),
-                if (typeController.text == 'xtream') ...[
-                  _textField('URL Painel', serverController, hint: 'http://painel.com:8080'),
-                  _textField('Usuário', userController),
-                  _textField('Senha', passController, obscure: true),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar', style: TextStyle(color: Colors.white70)),
-            ),
-            TextButton(
-              onPressed: () async {
-                final deviceId = deviceIdController.text.trim().isEmpty
-                    ? 'dev_${DateTime.now().millisecondsSinceEpoch}'
-                    : deviceIdController.text.trim();
-                final mac = macController.text.trim().isEmpty
-                    ? '00:00:00:00:00:00'
-                    : macController.text.trim();
-
-                Map<String, dynamic>? listData;
-                if (typeController.text == 'm3u' && urlController.text.trim().isNotEmpty) {
-                  listData = {'type': 'm3u', 'url': urlController.text.trim()};
-                } else if (typeController.text == 'xtream' &&
-                    serverController.text.trim().isNotEmpty &&
-                    userController.text.trim().isNotEmpty &&
-                    passController.text.trim().isNotEmpty) {
-                  listData = {
-                    'type': 'xtream',
-                    'serverUrl': serverController.text.trim(),
-                    'username': userController.text.trim(),
-                    'password': passController.text.trim(),
-                  };
-                }
-
-                Navigator.pop(ctx);
-                final service = sl.activationService!;
-                final ok = await service.createDevice(
-                  deviceId: deviceId,
-                  mac: mac,
-                  status: listData != null ? 'approved' : 'pending',
-                  listData: listData,
-                );
-
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(ok ? 'Cliente $deviceId criado!' : 'Falha ao criar cliente'),
-                      backgroundColor: ok ? AppColors.accentGreen : Colors.redAccent,
-                    ),
-                  );
-                  if (ok) _loadDevices();
-                }
-              },
-              child: const Text('Criar', style: TextStyle(color: AppColors.accentGreen)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _dropdownField({
     required String label,
     required String value,
@@ -561,24 +395,19 @@ class _AdminScreenState extends State<AdminScreen> {
         title: const Text('Admin - Dispositivos', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: AppColors.surface,
         iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add, color: Colors.white),
-            onPressed: _showAddClientDialog,
-            tooltip: 'Adicionar Cliente',
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _loadDevices,
-          ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
           : _error.isNotEmpty
               ? Center(child: Text(_error, style: const TextStyle(color: Colors.redAccent), textAlign: TextAlign.center))
               : _devices.isEmpty
-                  ? const Center(child: Text('Nenhum dispositivo', style: TextStyle(color: Colors.white54)))
+                  ? const Center(
+                      child: Text(
+                        'Nenhum dispositivo visível.\n\nA gestão de aparelhos agora é feita pelo painel web (dashboard), com login de administrador.',
+                        style: TextStyle(color: Colors.white54),
+                        textAlign: TextAlign.center,
+                      ),
+                    )
                   : RefreshIndicator(
                       onRefresh: _loadDevices,
                       color: AppColors.primary,

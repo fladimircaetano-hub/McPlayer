@@ -5,9 +5,10 @@ import 'package:mcplayer/core/storage/storage_service.dart';
 
 /// Invariantes da chave do aparelho (`device_id`).
 ///
-/// A `device_id` é chave primária da tabela `devices`, então os dois apps
-/// (McPlayer x NexPlay) dividem o mesmo espaço de nomes e os formatos precisam
-/// ser disjuntos para nunca se misturar.
+/// No schema novo a chave é única DENTRO do app (`app_name, device_id`), mas
+/// os formatos gerados continuam disjuntos: McPlayer só dígitos, NexPlay sempre
+/// com uma letra. Isso evita que o mesmo aparelho seja confundido ao trocar de
+/// app e mantém a rede de segurança contra colisão.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 

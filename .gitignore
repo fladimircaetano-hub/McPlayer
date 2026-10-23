@@ -56,3 +56,7 @@ app.*.map.json
 /test_out.txt
 /*.log
 /tv_*.png
+
+# Backups/exportações locais do dashboard (contêm usuários/senhas de listas)
+/dashboard/backups/
+/devices.json

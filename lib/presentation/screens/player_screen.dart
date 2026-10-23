@@ -8,6 +8,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/back_navigation_mixin.dart';
+import '../../core/utils/playback_math.dart';
 import '../../data/models/stream_item.dart';
 import '../widgets/tv_focusable.dart';
 
@@ -46,6 +47,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   Player? _player;
   VideoController? _videoController;
   late StreamItem _currentItem;
+  late List<StreamItem> _playlist;
   int _currentIndex = -1;
 
   /// Web não tem mpv nativo: mostra preview do layout sem reproduzir.
@@ -63,6 +65,12 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   Tracks? _tracks;
   bool _isSeeking = false;
   double? _seekPreview;
+
+  /// Segura a posição otimista por alguns instantes após um seek, para o
+  /// stream antigo do mpv não "puxar" a barra de volta.
+  Duration? _seekHoldPosition;
+  DateTime? _seekHoldUntil;
+  DateTime? _lastSurfaceTapAt;
 
   int _retryCount = 0;
   static const int _maxRetries = 2;
@@ -94,6 +102,11 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   final FocusNode _reconnectNode = FocusNode();
   final FocusNode _aspectNode = FocusNode();
   final FocusNode _backNode = FocusNode();
+  final FocusNode _prevNode = FocusNode();
+  final FocusNode _nextNode = FocusNode();
+  final FocusNode _back10Node = FocusNode();
+  final FocusNode _fwd10Node = FocusNode();
+  final FocusNode _sliderNode = FocusNode();
 
   /// Nós da tela de erro: o overlay entra depois do build inicial, então o
   /// autofocus sozinho nem sempre entrega o foco no Fire TV (D-pad). Sem
@@ -112,9 +125,26 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     // Libera os pôsteres da RAM ao abrir o player (as listas ficam na
     // pilha de navegação segurando imagens; no stick de 1 GB isso conta).
     PaintingBinding.instance.imageCache.clear();
+    _playlist = widget.playlist == null
+        ? <StreamItem>[]
+        : orderPlaylistForPlayback(widget.playlist!);
     _currentItem = widget.item;
-    if (widget.playlist != null && widget.initialIndex != null) {
-      _currentIndex = widget.initialIndex!;
+    if (_playlist.isNotEmpty) {
+      // Depois da ordenação (séries), o índice recebido pode não valer mais:
+      // localiza pelo item de verdade e só usa o índice como fallback.
+      final found = _playlist.indexWhere(
+        (e) => e.id == widget.item.id && e.streamUrl == widget.item.streamUrl,
+      );
+      if (found >= 0) {
+        _currentIndex = found;
+        _currentItem = _playlist[found];
+      } else {
+        final initial = widget.initialIndex;
+        if (initial != null && initial >= 0 && initial < _playlist.length) {
+          _currentIndex = initial;
+          _currentItem = _playlist[initial];
+        }
+      }
     }
 
     if (_isWebPreview) {
@@ -237,6 +267,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _subs.add(_player!.stream.position.listen((pos) {
       // Throttle: só rebuild quando o segundo muda e não está arrastando.
       if (_isSeeking) return;
+      // Após um seek, ignora posições antigas até o mpv alcançar o alvo.
+      if (_shouldIgnoreStalePosition(pos)) return;
       if (mounted && pos.inSeconds != _position.inSeconds) {
         setState(() => _position = pos);
       }
@@ -525,52 +557,87 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   }
 
   void _onCompleted() {
-    if (_hasPlaylist && _currentIndex + 1 < widget.playlist!.length) {
-      _zapTo(_currentIndex + 1);
-    } else {
+    if (!_hasPlaylist) {
+      if (mounted) setState(() => _showControls = true);
+      return;
+    }
+    // Ao vivo mantém o rodízio; filmes/séries param no último item.
+    final next = _isLive
+        ? (_currentIndex + 1) % _playlist.length
+        : nextIndex(_currentIndex, _playlist.length);
+    if (next != null) {
+      _zapTo(next);
+    } else if (mounted) {
       setState(() => _showControls = true);
     }
   }
 
-  bool get _hasPlaylist =>
-      widget.playlist != null && widget.playlist!.length > 1 && _currentIndex >= 0;
+  bool get _hasPlaylist => _playlist.length > 1 && _currentIndex >= 0;
 
   bool get _isLive => _currentItem.streamType == StreamType.live;
 
+  /// Teclado/controle: no Android (TV/box) as setas precisam navegar entre os
+  /// botões; em desktop/web as setas buscam ±10s. Teclas de mídia funcionam
+  /// em todos.
+  bool get _arrowKeysSeek =>
+      kIsWeb || defaultTargetPlatform != TargetPlatform.android;
+
+  int? get _prevTarget {
+    if (!_hasPlaylist) return null;
+    if (_isLive) return (_currentIndex - 1 + _playlist.length) % _playlist.length;
+    return previousIndex(_currentIndex, _playlist.length);
+  }
+
+  int? get _nextTarget {
+    if (!_hasPlaylist) return null;
+    if (_isLive) return (_currentIndex + 1) % _playlist.length;
+    return nextIndex(_currentIndex, _playlist.length);
+  }
+
+  bool get _canPrev => _prevTarget != null;
+  bool get _canNext => _nextTarget != null;
+
   Future<void> _zapTo(int index) async {
-    final list = widget.playlist!;
-    if (index < 0 || index >= list.length) return;
+    if (index < 0 || index >= _playlist.length) return;
     if (_isWebPreview) {
       // Preview web: troca o item exibido sem reproduzir.
       setState(() {
         _currentIndex = index;
-        _currentItem = list[index];
+        _currentItem = _playlist[index];
         _showControls = true;
+        _position = Duration.zero;
+        _duration = Duration.zero;
+        _seekPreview = null;
       });
       return;
     }
     _retryCount = 0;
+    _seekHoldUntil = null;
+    _seekHoldPosition = null;
     setState(() {
       _currentIndex = index;
-      _currentItem = list[index];
+      _currentItem = _playlist[index];
       _position = Duration.zero;
       _duration = Duration.zero;
-      _showControls = false;
+      _seekPreview = null;
+      _isSeeking = false;
+      _isBuffering = true;
+      // Mantém os controles visíveis para o usuário ver o novo título e o
+      // contador (n/total); o timer esconde quando o vídeo engatar.
+      _showControls = true;
     });
+    _hideTimer?.cancel();
     await _open(_currentItem.streamUrl);
   }
 
   void _zapNext() {
-    if (_hasPlaylist) {
-      _zapTo((_currentIndex + 1) % widget.playlist!.length);
-    }
+    final target = _nextTarget;
+    if (target != null) _zapTo(target);
   }
 
   void _zapPrev() {
-    if (_hasPlaylist) {
-      final len = widget.playlist!.length;
-      _zapTo((_currentIndex - 1 + len) % len);
-    }
+    final target = _prevTarget;
+    if (target != null) _zapTo(target);
   }
 
   void _reconnect() {
@@ -599,14 +666,95 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       _webNotice();
       return;
     }
-    _player!.playOrPause();
+    final player = _player;
+    if (player == null) return;
+    // Estado otimista: o botão responde na hora mesmo com o stream do mpv
+    // atrasado (cliques rápidos não "perdem" o segundo clique).
+    final next = !_isPlaying;
+    setState(() => _isPlaying = next);
+    player.playOrPause();
+    _resetControlsTimeout();
+  }
+
+  void _play() {
+    if (_isWebPreview || _player == null || _isPlaying) return;
+    setState(() => _isPlaying = true);
+    _player!.play();
+    _resetControlsTimeout();
+  }
+
+  void _pause() {
+    if (_isWebPreview || _player == null || !_isPlaying) return;
+    setState(() => _isPlaying = false);
+    _player!.pause();
+    _resetControlsTimeout();
+  }
+
+  /// Posição antiga do mpv logo após um seek: ignora por até 1,2s, a menos
+  /// que já esteja perto do alvo (aí o seek terminou).
+  bool _shouldIgnoreStalePosition(Duration pos) {
+    final until = _seekHoldUntil;
+    final anchor = _seekHoldPosition;
+    if (until == null || anchor == null) return false;
+    if (DateTime.now().isAfter(until)) {
+      _seekHoldUntil = null;
+      _seekHoldPosition = null;
+      return false;
+    }
+    if ((pos - anchor).abs() <= const Duration(seconds: 2)) {
+      _seekHoldUntil = null;
+      _seekHoldPosition = null;
+      return false;
+    }
+    return true;
+  }
+
+  /// Aplica um seek com limite [0, duração], atualizando a barra na hora.
+  void _seekTo(Duration target) {
+    if (_isWebPreview || _isLive) return;
+    var t = target;
+    if (t < Duration.zero) t = Duration.zero;
+    if (_duration > Duration.zero && t > _duration) t = _duration;
+
+    _seekHoldPosition = t;
+    _seekHoldUntil = DateTime.now().add(const Duration(milliseconds: 1200));
+    _hideTimer?.cancel();
+    setState(() {
+      _position = t;
+      _isSeeking = false;
+      _seekPreview = null;
+    });
+    _player?.seek(t);
     _resetControlsTimeout();
   }
 
   void _seekBy(int seconds) {
     if (_isWebPreview || _isLive) return;
-    final target = _position + Duration(seconds: seconds);
-    _player?.seek(target < Duration.zero ? Duration.zero : target);
+    _seekTo(clampSeekTarget(_position, seconds, _duration));
+  }
+
+  /// Toque/clique na área do vídeo: 1 toque mostra/esconde os controles,
+  /// 2 toques rápidos alternam play/pause. Feito à mão (sem onDoubleTap)
+  /// porque o reconhecedor de duplo toque do pai engolia os toques dos
+  /// botões e da barra de progresso.
+  void _handleSurfaceTap() {
+    final now = DateTime.now();
+    final last = _lastSurfaceTapAt;
+    _lastSurfaceTapAt = now;
+    if (last != null &&
+        now.difference(last) < const Duration(milliseconds: 320)) {
+      _lastSurfaceTapAt = null;
+      _togglePlay();
+      return;
+    }
+    _toggleControls();
+  }
+
+  /// Select/Enter só chegam aqui quando nenhum botão focado consumiu a tecla
+  /// (o TvFocusable trata select/enter dos botões).
+  void _onSelectKey() {
+    if (_hasError) return;
+    if (!_showControls) _toggleControls();
   }
 
   void _resetControlsTimeout() {
@@ -744,6 +892,11 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _reconnectNode.dispose();
     _aspectNode.dispose();
     _backNode.dispose();
+    _prevNode.dispose();
+    _nextNode.dispose();
+    _back10Node.dispose();
+    _fwd10Node.dispose();
+    _sliderNode.dispose();
     _errorBackNode.dispose();
     _errorRetryNode.dispose();
     _player?.dispose();
@@ -769,23 +922,32 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       backgroundColor: Colors.black,
       body: CallbackShortcuts(
         bindings: {
-          const SingleActivator(LogicalKeyboardKey.select): () {
-            if (!_showControls && !_hasError) _toggleControls();
-          },
-          const SingleActivator(LogicalKeyboardKey.enter): () {
-            if (!_showControls && !_hasError) _toggleControls();
-          },
+          const SingleActivator(LogicalKeyboardKey.select): _onSelectKey,
+          const SingleActivator(LogicalKeyboardKey.enter): _onSelectKey,
           const SingleActivator(LogicalKeyboardKey.mediaPlayPause): _togglePlay,
-          const SingleActivator(LogicalKeyboardKey.arrowUp): _zapPrev,
-          const SingleActivator(LogicalKeyboardKey.arrowDown): _zapNext,
-          const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _seekBy(-10),
-          const SingleActivator(LogicalKeyboardKey.arrowRight): () => _seekBy(10),
+          const SingleActivator(LogicalKeyboardKey.mediaPlay): _play,
+          const SingleActivator(LogicalKeyboardKey.mediaPause): _pause,
+          const SingleActivator(LogicalKeyboardKey.mediaRewind): () =>
+              _seekBy(-10),
+          const SingleActivator(LogicalKeyboardKey.mediaFastForward): () =>
+              _seekBy(10),
+          const SingleActivator(LogicalKeyboardKey.channelUp): _zapPrev,
+          const SingleActivator(LogicalKeyboardKey.channelDown): _zapNext,
+          if (_arrowKeysSeek) ...{
+            const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+                _seekBy(-10),
+            const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+                _seekBy(10),
+            const SingleActivator(LogicalKeyboardKey.arrowUp): _zapPrev,
+            const SingleActivator(LogicalKeyboardKey.arrowDown): _zapNext,
+          },
         },
         child: FocusScope(
           autofocus: true,
           child: GestureDetector(
-            onTap: _toggleControls,
-            onDoubleTap: _togglePlay,
+            // Sem onDoubleTap: o reconhecedor de duplo toque do pai vencia a
+            // disputa e anulava o toque dos botões e da barra.
+            onTap: _handleSurfaceTap,
             onVerticalDragUpdate: (d) => _handleVerticalDragUpdate(d, size.width),
             onVerticalDragEnd: _handleVerticalDragEnd,
             child: Stack(
@@ -922,11 +1084,58 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     );
   }
 
+  Widget _circleControl({
+    required FocusNode node,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    bool primary = false,
+    bool autofocus = false,
+  }) {
+    final enabled = onPressed != null;
+    return Opacity(
+      opacity: enabled ? 1 : 0.35,
+      child: TvFocusable(
+        focusNode: node,
+        autofocus: autofocus,
+        enabled: enabled,
+        borderRadius: BorderRadius.circular(40),
+        scaleOnFocus: primary ? 1.06 : 1.1,
+        onPressed: onPressed,
+        child: Container(
+          padding: EdgeInsets.all(primary ? 16 : 12),
+          decoration: BoxDecoration(
+            color: primary
+                ? AppColors.primary.withValues(alpha: 0.9)
+                : Colors.black54,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+          ),
+          child: Icon(
+            icon,
+            color: primary ? Colors.black : Colors.white,
+            size: primary ? 46 : 30,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildControlsOverlay() {
+    final maxSeconds =
+        _duration.inSeconds > 0 ? _duration.inSeconds.toDouble() : 1.0;
+    final currentSeconds = (_seekPreview ??
+            (_position.inSeconds > 0 ? _position.inSeconds.toDouble() : 0.0))
+        .clamp(0.0, maxSeconds)
+        .toDouble();
+    final shownPosition =
+        _seekPreview != null ? Duration(seconds: _seekPreview!.round()) : _position;
+
     return Container(
       color: Colors.black.withValues(alpha: 0.45),
       child: SafeArea(
-        child: Column(
+        child: FocusTraversalGroup(
+          policy: ReadingOrderTraversalPolicy(),
+          child: Column(
           children: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -962,7 +1171,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                         ),
                         Text(
                           _hasPlaylist
-                              ? '${_currentItem.category} • ${_currentIndex + 1}/${widget.playlist!.length}'
+                              ? '${_currentItem.category} • ${_currentIndex + 1}/${_playlist.length}'
                               : _currentItem.category,
                           maxLines: 1,
                           style: const TextStyle(
@@ -1053,89 +1262,47 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (_hasPlaylist)
-                    TvFocusable(
-                      borderRadius: BorderRadius.circular(30),
-                      onPressed: _zapPrev,
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.skip_previous_rounded,
-                            color: Colors.white, size: 30),
-                      ),
+                  if (_hasPlaylist) ...[
+                    _circleControl(
+                      node: _prevNode,
+                      icon: Icons.skip_previous_rounded,
+                      onPressed: _canPrev ? _zapPrev : null,
                     ),
-                  if (_hasPlaylist) const SizedBox(width: 20),
-                  // Voltar 10s (só VOD: filme/série). No ao vivo não há
-                  // timeline para retroceder.
-                  if (!_isLive)
-                    TvFocusable(
-                      borderRadius: BorderRadius.circular(30),
+                    const SizedBox(width: 20),
+                  ],
+                  if (!_isLive) ...[
+                    _circleControl(
+                      node: _back10Node,
+                      icon: Icons.replay_10,
                       onPressed: () => _seekBy(-10),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.replay_10,
-                            color: Colors.white, size: 30),
-                      ),
                     ),
-                  if (!_isLive) const SizedBox(width: 20),
-                  TvFocusable(
-                    focusNode: _playPauseNode,
-                    autofocus: true,
-                    borderRadius: BorderRadius.circular(40),
+                    const SizedBox(width: 20),
+                  ],
+                  _circleControl(
+                    node: _playPauseNode,
+                    icon: _isPlaying
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
                     onPressed: _togglePlay,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.85),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        _isPlaying
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        color: Colors.black,
-                        size: 46,
-                      ),
-                    ),
+                    primary: true,
+                    autofocus: true,
                   ),
-                  if (!_isLive) const SizedBox(width: 20),
-                  // Avançar 10s (só VOD: filme/série).
-                  if (!_isLive)
-                    TvFocusable(
-                      borderRadius: BorderRadius.circular(30),
+                  if (!_isLive) ...[
+                    const SizedBox(width: 20),
+                    _circleControl(
+                      node: _fwd10Node,
+                      icon: Icons.forward_10,
                       onPressed: () => _seekBy(10),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.forward_10,
-                            color: Colors.white, size: 30),
-                      ),
                     ),
-                  if (_hasPlaylist) const SizedBox(width: 20),
-                  if (_hasPlaylist)
-                    TvFocusable(
-                      borderRadius: BorderRadius.circular(30),
-                      onPressed: _zapNext,
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.skip_next_rounded,
-                            color: Colors.white, size: 30),
-                      ),
+                  ],
+                  if (_hasPlaylist) ...[
+                    const SizedBox(width: 20),
+                    _circleControl(
+                      node: _nextNode,
+                      icon: Icons.skip_next_rounded,
+                      onPressed: _canNext ? _zapNext : null,
                     ),
+                  ],
                 ],
               ),
             ),
@@ -1181,57 +1348,60 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                         SliderTheme(
                           data: SliderTheme.of(context).copyWith(
                             activeTrackColor: AppColors.primary,
-                            inactiveTrackColor: Colors.white12,
+                            inactiveTrackColor: Colors.white24,
                             thumbColor: AppColors.primary,
                             thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 7),
-                            overlayShape: SliderComponentShape.noOverlay,
-                            trackHeight: 3,
+                                enabledThumbRadius: 8),
+                            overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 18),
+                            trackHeight: 4,
                           ),
                           child: Slider(
-                            value: _seekPreview ??
-                                (_duration.inSeconds > 0
-                                    ? _position.inSeconds
-                                        .clamp(0, _duration.inSeconds)
-                                        .toDouble()
-                                    : 0),
-                            max: (_duration.inSeconds > 0
-                                    ? _duration.inSeconds
-                                    : 1)
-                                .toDouble(),
-                            onChanged: (v) {
-                              // Preview local sem seek a cada tick.
-                              setState(() {
-                                _isSeeking = true;
-                                _seekPreview = v;
-                              });
-                            },
-                            onChangeEnd: (v) {
-                              _player?.seek(Duration(seconds: v.toInt()));
-                              setState(() {
-                                _position = Duration(seconds: v.toInt());
-                                _isSeeking = false;
-                                _seekPreview = null;
-                              });
-                              _resetControlsTimeout();
-                            },
+                            focusNode: _sliderNode,
+                            value: currentSeconds,
+                            max: maxSeconds,
+                            // Sem duração ainda não há como buscar: desativa
+                            // em vez de mandar o vídeo para o segundo 1.
+                            onChangeStart: _duration.inSeconds > 0
+                                ? (v) {
+                                    _hideTimer?.cancel();
+                                    setState(() {
+                                      _isSeeking = true;
+                                      _seekPreview = v;
+                                    });
+                                  }
+                                : null,
+                            onChanged: _duration.inSeconds > 0
+                                ? (v) {
+                                    setState(() => _seekPreview = v);
+                                  }
+                                : null,
+                            onChangeEnd: _duration.inSeconds > 0
+                                ? (v) => _seekTo(
+                                    Duration(seconds: v.round()))
+                                : null,
                           ),
                         ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(_formatDuration(_position),
-                                style: const TextStyle(
-                                    color: Colors.white70, fontSize: 12)),
-                            Text(_formatDuration(_duration),
-                                style: const TextStyle(
-                                    color: Colors.white70, fontSize: 12)),
-                          ],
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(_formatDuration(shownPosition),
+                                  style: const TextStyle(
+                                      color: Colors.white70, fontSize: 12)),
+                              Text(_formatDuration(_duration),
+                                  style: const TextStyle(
+                                      color: Colors.white70, fontSize: 12)),
+                            ],
+                          ),
                         ),
                       ],
                     ),
             ),
           ],
+          ),
         ),
       ),
     );

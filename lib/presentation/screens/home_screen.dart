@@ -5,6 +5,7 @@ import '../../data/models/stream_item.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/double_back_to_exit.dart';
+import '../widgets/duplicate_prompt_host.dart';
 import '../widgets/starfield_background.dart';
 import '../widgets/tv_focusable.dart';
 import 'content_section_screen.dart';
@@ -114,7 +115,9 @@ class HomeScreen extends StatelessWidget {
           ),
         ];
 
-        return DoubleBackToExit(
+        return DuplicatePromptHost(
+          controller: controller,
+          child: DoubleBackToExit(
           child: Scaffold(
           body: StarfieldBackground(
             child: SafeArea(
@@ -247,6 +250,7 @@ class HomeScreen extends StatelessWidget {
                 ],
               ),
             ),
+          ),
           ),
           ),
         );

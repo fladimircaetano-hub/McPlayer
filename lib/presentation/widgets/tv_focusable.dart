@@ -12,6 +12,10 @@ class TvFocusable extends StatefulWidget {
   final double scaleOnFocus;
   final EdgeInsetsGeometry padding;
 
+  /// Desativado: não recebe foco, não responde a toque/tecla e fica sem
+  /// realce. Usado nos limites (primeiro/último item da playlist, por ex.).
+  final bool enabled;
+
   /// Chamado ao ganhar/perder foco (ex.: atualizar preview ao navegar no D-pad).
   final ValueChanged<bool>? onFocusChange;
 
@@ -25,6 +29,7 @@ class TvFocusable extends StatefulWidget {
     this.borderRadius,
     this.scaleOnFocus = 1.04,
     this.padding = EdgeInsets.zero,
+    this.enabled = true,
     this.onFocusChange,
   });
 
@@ -35,6 +40,7 @@ class TvFocusable extends StatefulWidget {
 class _TvFocusableState extends State<TvFocusable> {
   late FocusNode _node;
   bool _isFocused = false;
+  bool _isHovered = false;
 
   @override
   void initState() {
@@ -80,11 +86,15 @@ class _TvFocusableState extends State<TvFocusable> {
   @override
   Widget build(BuildContext context) {
     final radius = widget.borderRadius ?? BorderRadius.circular(12);
+    final active = widget.enabled;
 
     return Focus(
       focusNode: _node,
-      autofocus: widget.autofocus,
+      autofocus: widget.autofocus && active,
+      canRequestFocus: active,
+      skipTraversal: !active,
       onKeyEvent: (node, event) {
+        if (!active) return KeyEventResult.ignored;
         if (event is KeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.select ||
               event.logicalKey == LogicalKeyboardKey.enter ||
@@ -95,33 +105,48 @@ class _TvFocusableState extends State<TvFocusable> {
         }
         return KeyEventResult.ignored;
       },
-      child: GestureDetector(
-        onTap: widget.onPressed,
-        onLongPress: widget.onLongPress,
-        child: AnimatedScale(
-          scale: _isFocused ? widget.scaleOnFocus : 1.0,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          child: AnimatedContainer(
+      child: MouseRegion(
+        cursor: active ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onEnter: (_) {
+          if (active && mounted) setState(() => _isHovered = true);
+        },
+        onExit: (_) {
+          if (_isHovered && mounted) setState(() => _isHovered = false);
+        },
+        child: GestureDetector(
+          onTap: active ? widget.onPressed : null,
+          onLongPress: active ? widget.onLongPress : null,
+          child: AnimatedScale(
+            scale: _isFocused
+                ? widget.scaleOnFocus
+                : (_isHovered && active ? 1.02 : 1.0),
             duration: const Duration(milliseconds: 180),
-            padding: widget.padding,
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              border: Border.all(
-                color: _isFocused ? AppColors.primary : Colors.transparent,
-                width: _isFocused ? 2.5 : 0,
+            curve: Curves.easeOutCubic,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: widget.padding,
+              decoration: BoxDecoration(
+                borderRadius: radius,
+                border: Border.all(
+                  color: _isFocused
+                      ? AppColors.primary
+                      : (_isHovered && active
+                          ? Colors.white38
+                          : Colors.transparent),
+                  width: _isFocused ? 2.5 : 1.5,
+                ),
+                boxShadow: _isFocused
+                    ? [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.35),
+                          blurRadius: 16,
+                          spreadRadius: 2,
+                        ),
+                      ]
+                    : null,
               ),
-              boxShadow: _isFocused
-                  ? [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.35),
-                        blurRadius: 16,
-                        spreadRadius: 2,
-                      ),
-                    ]
-                  : null,
+              child: widget.child,
             ),
-            child: widget.child,
           ),
         ),
       ),

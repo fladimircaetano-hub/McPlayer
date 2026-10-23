@@ -321,4 +321,59 @@ class StorageService {
   Future<void> clearFavorites() async {
     await _prefs.remove(_keyFavorites);
   }
+
+  // --- Deduplicação de filmes/séries ---
+
+  static const String _keyDedupeReport = 'dedupe_last_report';
+  static const String _keyDedupeBackup = 'dedupe_last_backup';
+  static const String _keyDedupeAuto = 'dedupe_auto_';
+  static const String _keyDedupeIgnored = 'dedupe_ignored_';
+
+  /// Relatório legível da última limpeza (para exibir em Configurações).
+  String? getDedupeReport() => _prefs.getString(_keyDedupeReport);
+
+  Future<void> saveDedupeReport(String report) async {
+    await _prefs.setString(_keyDedupeReport, report);
+  }
+
+  /// Cópia JSON dos itens envolvidos na última limpeza.
+  String? getDedupeBackup() => _prefs.getString(_keyDedupeBackup);
+
+  Future<void> saveDedupeBackup(String json) async {
+    await _prefs.setString(_keyDedupeBackup, json);
+  }
+
+  bool getDedupeAuto(String sourceKey) =>
+      _prefs.getBool('$_keyDedupeAuto$sourceKey') ?? false;
+
+  Future<void> setDedupeAuto(String sourceKey, bool value) async {
+    await _prefs.setBool('$_keyDedupeAuto$sourceKey', value);
+  }
+
+  /// Impressão digital da lista em que o usuário escolheu "manter tudo".
+  /// Enquanto a lista não mudar, não perguntamos de novo.
+  String? getDedupeIgnored(String sourceKey) =>
+      _prefs.getString('$_keyDedupeIgnored$sourceKey');
+
+  Future<void> setDedupeIgnored(String sourceKey, String fingerprint) async {
+    await _prefs.setString('$_keyDedupeIgnored$sourceKey', fingerprint);
+  }
+
+  /// Migra favoritos de ids removidos para a cópia mantida.
+  Future<void> remapFavorites(Map<String, String> remap) async {
+    if (remap.isEmpty) return;
+    await _atomicWrite(_keyFavorites, () async {
+      final current = getFavorites();
+      var changed = false;
+      for (final entry in remap.entries) {
+        if (current.remove(entry.key)) {
+          current.add(entry.value);
+          changed = true;
+        }
+      }
+      if (changed) {
+        await _prefs.setStringList(_keyFavorites, current.toList());
+      }
+    });
+  }
 }

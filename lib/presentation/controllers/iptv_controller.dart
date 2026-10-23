@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../../core/network/api_client.dart';
 import '../../core/parser/m3u_parser.dart';
 import '../../core/storage/storage_service.dart';
+import '../../core/utils/duplicates.dart';
 import '../../data/datasources/xtream_api.dart';
 import '../../data/models/iptv_category.dart';
 import '../../data/models/stream_item.dart';
@@ -43,6 +45,11 @@ class IptvController extends ChangeNotifier {
   XtreamAccount? _currentAccount;
   String? _loadedListName;
 
+  /// Varredura de repetidos aguardando confirmação do usuário.
+  DuplicateScan? _pendingScan;
+  String _pendingSource = '';
+  String? _pendingFingerprint;
+
   /// EPG compartilhado (cache em memória). A tela guia lê daqui.
   final EpgService epgService = EpgService();
   bool get hasEpg => epgService.hasData;
@@ -55,6 +62,13 @@ class IptvController extends ChangeNotifier {
   String get searchQuery => _searchQuery;
   XtreamAccount? get currentAccount => _currentAccount;
   String? get loadedListName => _loadedListName;
+
+  /// Repetidos encontrados na última carga, aguardando confirmação.
+  DuplicateReport? get pendingDuplicates => _pendingScan?.report;
+  String? get pendingDuplicatesFingerprint => _pendingFingerprint;
+
+  /// Relatório legível da última limpeza (Configurações/ suporte).
+  String? get lastDuplicateReport => storageService.getDedupeReport();
 
   int get totalLiveCount => _liveItems.length;
   int get totalMoviesCount => _movieItems.length;
@@ -156,7 +170,7 @@ class IptvController extends ChangeNotifier {
         throw Exception('Nenhuma stream válida encontrada na lista informada.');
       }
 
-      _organizeItems(items);
+      await _prepareItems(items, 'm3u:$url');
       _loadedListName = url.split('/').last.split('?').first;
       if (_loadedListName == null || _loadedListName!.isEmpty) {
         _loadedListName = 'Lista M3U Online';
@@ -202,7 +216,7 @@ class IptvController extends ChangeNotifier {
         throw Exception('Nenhum canal encontrado dentro do arquivo M3U.');
       }
 
-      _organizeItems(items);
+      await _prepareItems(items, 'file:$filePath');
       _loadedListName = file.uri.pathSegments.last;
       await storageService.saveLastM3uPath(filePath);
       // Arquivo local não tem credenciais: limpa EPG anterior.
@@ -257,7 +271,10 @@ class IptvController extends ChangeNotifier {
         throw Exception(
             'Login OK, mas nenhum conteúdo retornado. Verifique a assinatura.');
       }
-      _organizeItems(combined);
+      await _prepareItems(
+        combined,
+        'xtream:${account.username}@${account.serverUrl}',
+      );
       _loadedListName = 'Xtream: ${account.username}';
       // EPG em segundo plano: nunca bloqueia nem derruba o login.
       unawaited(_refreshEpgForXtream(account));
@@ -295,11 +312,23 @@ class IptvController extends ChangeNotifier {
     return false;
   }
 
-  /// Busca episódios de uma série específica (Xtream)
+  /// Busca episódios de uma série específica (Xtream).
+  ///
+  /// A lista do provedor costuma repetir o mesmo episódio (mesmo
+  /// temporada/episódio com stream_id diferente). A deduplicação é feita só
+  /// na exibição: a fonte não é alterada e, se precisar, o próximo fetch
+  /// traz tudo de novo.
   Future<List<StreamItem>> getSeriesEpisodes(int seriesId) async {
     if (_currentAccount == null) return [];
     try {
-      return await xtreamApi.getSeriesEpisodes(_currentAccount!, seriesId);
+      final episodes =
+          await xtreamApi.getSeriesEpisodes(_currentAccount!, seriesId);
+      final cleaned = dedupeEpisodes(episodes);
+      if (cleaned.length != episodes.length) {
+        debugPrint('[Dedupe] série $seriesId: '
+            '${episodes.length - cleaned.length} episódio(s) repetido(s)');
+      }
+      return cleaned;
     } catch (_) {
       return [];
     }
@@ -350,6 +379,90 @@ class IptvController extends ChangeNotifier {
   void debugLoadItems(List<StreamItem> items, {String name = 'Teste'}) {
     _organizeItems(items);
     _loadedListName = name;
+    notifyListeners();
+  }
+
+  /// Prepara a lista carregada: procura repetidos em filmes/séries e,
+  /// conforme a decisão do usuário (ou preferência já salva), aplica a
+  /// limpeza. Canais ao vivo passam intactos.
+  Future<void> _prepareItems(List<StreamItem> items, String sourceKey) async {
+    final scan = scanCatalogDuplicates(items);
+    if (!scan.hasDuplicates) {
+      _pendingScan = null;
+      _pendingSource = '';
+      _pendingFingerprint = null;
+      _organizeItems(items);
+      return;
+    }
+
+    // Já autorizado para esta fonte: limpa direto (relatório + backup são
+    // regravados a cada carga, então nada se perde).
+    if (storageService.getDedupeAuto(sourceKey)) {
+      await _commitDedupe(scan, sourceKey);
+      return;
+    }
+
+    // Usuário já escolheu "manter tudo" para exatamente esta lista.
+    if (storageService.getDedupeIgnored(sourceKey) == scan.fingerprint) {
+      _pendingScan = null;
+      _pendingSource = '';
+      _pendingFingerprint = null;
+      _organizeItems(items);
+      return;
+    }
+
+    // Primeira vez: mostra a lista original e deixa a decisão para a tela
+    // (relatório + confirmação).
+    _pendingScan = scan;
+    _pendingSource = sourceKey;
+    _pendingFingerprint = scan.fingerprint;
+    _organizeItems(items);
+    notifyListeners();
+  }
+
+  Future<void> _commitDedupe(DuplicateScan scan, String sourceKey) async {
+    final report = scan.report;
+
+    // Backup dos itens envolvidos (não a lista inteira: economiza RAM e
+    // armazenamento em listas de 100k+).
+    final backup = jsonEncode({
+      'generatedAt': report.generatedAt.toIso8601String(),
+      'source': sourceKey,
+      'removed': report.removedCount,
+      'entries': [for (final e in report.entries) e.toJson()],
+    });
+    await storageService.saveDedupeBackup(backup);
+    await storageService.saveDedupeReport(report.toText());
+
+    // Favoritos migram da cópia removida para a mantida.
+    await storageService.remapFavorites(report.idRemap);
+    _favorites = storageService.getFavorites();
+
+    await storageService.setDedupeAuto(sourceKey, true);
+
+    _pendingScan = null;
+    _pendingSource = '';
+    _pendingFingerprint = null;
+    _organizeItems(scan.cleaned);
+    notifyListeners();
+  }
+
+  /// Confirma a remoção dos repetidos encontrados na carga atual.
+  Future<void> applyPendingDuplicates() async {
+    final scan = _pendingScan;
+    if (scan == null) return;
+    await _commitDedupe(scan, _pendingSource);
+  }
+
+  /// Mantém a lista como está e não pergunta de novo até ela mudar.
+  Future<void> dismissPendingDuplicates() async {
+    final fp = _pendingFingerprint;
+    if (fp != null && _pendingSource.isNotEmpty) {
+      await storageService.setDedupeIgnored(_pendingSource, fp);
+    }
+    _pendingScan = null;
+    _pendingSource = '';
+    _pendingFingerprint = null;
     notifyListeners();
   }
 

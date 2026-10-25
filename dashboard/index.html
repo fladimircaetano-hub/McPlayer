@@ -61,8 +61,20 @@
       </form>
     </div>
 
+    <div id="resetBox" class="hidden" style="margin-top:14px;">
+      <div id="resetMsg" class="auth-msg hidden"></div>
+      <form id="resetForm">
+        <div class="field">
+          <label for="resetEmail">E-mail da conta</label>
+          <input type="email" id="resetEmail" autocomplete="username" placeholder="voce@exemplo.com" required>
+        </div>
+        <button type="submit" class="btn-outline" id="resetBtn">Enviar link de recuperação</button>
+      </form>
+    </div>
+
     <div class="auth-links">
       <button type="button" id="btnShowSignup">Primeiro acesso / criar conta</button>
+      <button type="button" id="btnForgot">Esqueci minha senha</button>
       <button type="button" id="btnBackLogin" class="hidden">Já tenho conta</button>
     </div>
 
@@ -587,6 +599,36 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
 </div>
 
 <div id="toastWrap"></div>
+
+<!-- ================== MODAL: NOVA SENHA (RECUPERAÇÃO) ================== -->
+<div class="modal-overlay" id="modalNewPassword">
+  <div class="modal-window" style="max-width:430px;">
+    <div class="modal-header">
+      <h2>Definir nova senha</h2>
+    </div>
+    <div class="modal-body">
+      <div id="newPassMsg" class="auth-msg hidden"></div>
+      <div class="field">
+        <label for="newPass1">Nova senha (mín. 6 caracteres)</label>
+        <div class="pw-wrap">
+          <input type="password" id="newPass1" minlength="6" autocomplete="new-password">
+          <button type="button" class="pw-toggle" data-pw="newPass1" title="Mostrar senha" aria-label="Mostrar senha" aria-pressed="false">👁</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="newPass2">Repita a nova senha</label>
+        <div class="pw-wrap">
+          <input type="password" id="newPass2" minlength="6" autocomplete="new-password">
+          <button type="button" class="pw-toggle" data-pw="newPass2" title="Mostrar senha" aria-label="Mostrar senha" aria-pressed="false">👁</button>
+        </div>
+      </div>
+      <p class="small muted">Depois de salvar, você será desconectado e poderá entrar com a nova senha.</p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-primary" id="btnSaveNewPass">Salvar nova senha</button>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="js/config.js"></script>

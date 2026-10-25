@@ -18,6 +18,7 @@
     user: null,
     adminReady: false,
     entering: false,
+    recoveryMode: false,
     tab: 'overview',
     apps: [],
     devices: [],
@@ -55,18 +56,31 @@
 
   function init() {
     bindStaticEvents();
+
+    // Link de recuperação: o Supabase cria a sessão e avisa em PASSWORD_RECOVERY.
+    if (/type=recovery/.test(window.location.hash)) state.recoveryMode = true;
+
     Api.onAuthStateChange(function (event, session) {
+      if (event === 'PASSWORD_RECOVERY') {
+        state.recoveryMode = true;
+        showNewPasswordModal();
+        return;
+      }
       if (event === 'SIGNED_OUT' || !session) {
         if (state.adminReady || event === 'SIGNED_OUT') resetToLogin();
         return;
       }
-      if (!state.adminReady && !state.entering) {
+      if (!state.adminReady && !state.entering && !state.recoveryMode) {
         enterApp(session);
       }
     });
 
     Api.getSession()
       .then(function (session) {
+        if (state.recoveryMode) {
+          showNewPasswordModal();
+          return;
+        }
         if (session) return enterApp(session);
         showLogin();
       })
@@ -113,7 +127,7 @@
   }
 
   async function enterApp(session) {
-    if (state.entering || state.adminReady) return;
+    if (state.entering || state.adminReady || state.recoveryMode) return;
     state.entering = true;
     try {
       state.user = session.user;
@@ -1068,10 +1082,14 @@
       }).join('');
     sel.value = current;
 
-    hint.textContent = linked.length > 1
-      ? 'Esta lista já está em ' + linked.length +
-        ' aparelhos. Escolher um aqui atualiza só esse aparelho.'
-      : 'Opcional. Ao salvar, a lista é enviada para este aparelho.';
+    if (linked.length > 1) {
+      hint.textContent = 'Esta lista já está em ' + linked.length +
+        ' aparelhos. Ao salvar, todos recebem a versão atualizada.';
+    } else if (linked.length === 1) {
+      hint.textContent = 'Ao salvar, o aparelho ' + linked[0].device_id + ' recebe a lista atualizada.';
+    } else {
+      hint.textContent = 'Opcional. Ao salvar, a lista é enviada para este aparelho.';
+    }
 
     applyPlaylistDeviceSelection();
   }
@@ -1159,26 +1177,46 @@
     try {
       var saved = await Api.savePlaylist(payload);
       var targetId = document.getElementById('plDevice').value;
+      var targetClient = document.getElementById('plClient').value.trim();
+
+      // Aparelhos que já usavam esta lista + o aparelho escolhido no modal.
+      var toUpdate = [];
+      if (state.editPlaylist) {
+        linkedDevices(state.editPlaylist.id).forEach(function (d) { toUpdate.push(d); });
+      }
       if (targetId) {
-        var dev = deviceById(targetId);
-        if (dev) {
-          await Api.saveDevice({
-            id: dev.id,
-            app_name: dev.app_name,
-            device_id: dev.device_id,
-            mac: dev.mac,
-            status: dev.status,
-            list_data: listDataFromPlaylist(saved),
-            playlist_id: saved.id,
-            client_name: document.getElementById('plClient').value.trim() || dev.client_name || '',
-            expires_at: dev.expires_at,
-            notes: dev.notes,
-            block_reason: dev.block_reason
-          });
+        var chosen = deviceById(targetId);
+        if (chosen && !toUpdate.some(function (d) { return d.id === chosen.id; })) {
+          toUpdate.push(chosen);
         }
       }
+
+      if (toUpdate.length) {
+        await Promise.all(toUpdate.map(function (d) {
+          var isChosen = targetId && d.id === targetId;
+          return Api.saveDevice({
+            id: d.id,
+            app_name: d.app_name,
+            device_id: d.device_id,
+            mac: d.mac,
+            status: d.status,
+            list_data: listDataFromPlaylist(saved),
+            playlist_id: saved.id,
+            client_name: (isChosen ? targetClient : '') || d.client_name || '',
+            expires_at: d.expires_at,
+            notes: d.notes,
+            block_reason: d.block_reason
+          });
+        }));
+      }
+
       U.closeModal('modalPlaylist');
-      U.toast(targetId ? 'Lista salva e enviada para o aparelho.' : 'Lista salva.', 'ok');
+      U.toast(
+        toUpdate.length
+          ? 'Lista salva e enviada para ' + toUpdate.length + ' aparelho(s).'
+          : 'Lista salva.',
+        'ok'
+      );
       await refreshAll(true);
     } catch (err) {
       U.toast(U.errorMessage(err), 'err', 9000);
@@ -1413,17 +1451,25 @@
     document.getElementById('btnShowSignup').addEventListener('click', function () {
       document.getElementById('loginTitle').textContent = 'Criar conta de administrador';
       document.getElementById('signupBox').classList.remove('hidden');
+      document.getElementById('resetBox').classList.add('hidden');
       this.classList.add('hidden');
+      document.getElementById('btnForgot').classList.add('hidden');
       document.getElementById('btnBackLogin').classList.remove('hidden');
       hideLoginMsg();
     });
     document.getElementById('btnBackLogin').addEventListener('click', function () {
       document.getElementById('loginTitle').textContent = 'Entrar como administrador';
       document.getElementById('signupBox').classList.add('hidden');
+      document.getElementById('resetBox').classList.add('hidden');
       this.classList.add('hidden');
       document.getElementById('btnShowSignup').classList.remove('hidden');
+      document.getElementById('btnForgot').classList.remove('hidden');
       hideLoginMsg();
     });
+
+    document.getElementById('btnForgot').addEventListener('click', showResetForm);
+    document.getElementById('resetForm').addEventListener('submit', onResetPassword);
+    document.getElementById('btnSaveNewPass').addEventListener('click', saveNewPassword);
 
     document.getElementById('btnLogout').addEventListener('click', logout);
     document.getElementById('btnLogout2').addEventListener('click', logout);
@@ -1683,6 +1729,91 @@
           'Se o painel ainda não tiver admin, a primeira conta confirmada vira admin.';
         box.className = 'auth-msg ok';
       }
+    } catch (err) {
+      box.textContent = U.errorMessage(err);
+      box.className = 'auth-msg';
+    } finally {
+      U.setBusy(btn, false);
+    }
+  }
+
+  /* --------------------------- recuperar senha --------------------------- */
+
+  function showResetForm() {
+    document.getElementById('loginTitle').textContent = 'Recuperar senha';
+    document.getElementById('resetBox').classList.remove('hidden');
+    document.getElementById('signupBox').classList.add('hidden');
+    document.getElementById('btnShowSignup').classList.add('hidden');
+    document.getElementById('btnForgot').classList.add('hidden');
+    document.getElementById('btnBackLogin').classList.remove('hidden');
+    document.getElementById('resetMsg').className = 'auth-msg hidden';
+    document.getElementById('resetEmail').value = document.getElementById('loginEmail').value.trim();
+    hideLoginMsg();
+  }
+
+  async function onResetPassword(e) {
+    e.preventDefault();
+    var box = document.getElementById('resetMsg');
+    box.className = 'auth-msg hidden';
+    var email = document.getElementById('resetEmail').value.trim();
+    if (!email) {
+      box.textContent = 'Informe o e-mail da conta.';
+      box.className = 'auth-msg';
+      return;
+    }
+    var btn = document.getElementById('resetBtn');
+    U.setBusy(btn, true, 'Enviando...');
+    try {
+      await Api.resetPassword(email);
+      box.textContent =
+        'Se este e-mail estiver cadastrado, o link de recuperação chega em instantes. ' +
+        'Confira também a caixa de spam.';
+      box.className = 'auth-msg ok';
+    } catch (err) {
+      box.textContent = U.errorMessage(err);
+      box.className = 'auth-msg';
+    } finally {
+      U.setBusy(btn, false);
+    }
+  }
+
+  function showNewPasswordModal() {
+    document.getElementById('loginView').classList.add('hidden');
+    document.getElementById('appView').classList.add('hidden');
+    document.getElementById('newPassMsg').className = 'auth-msg hidden';
+    document.getElementById('newPass1').value = '';
+    document.getElementById('newPass2').value = '';
+    U.openModal('modalNewPassword');
+  }
+
+  async function saveNewPassword() {
+    var box = document.getElementById('newPassMsg');
+    box.className = 'auth-msg hidden';
+    var p1 = document.getElementById('newPass1').value;
+    var p2 = document.getElementById('newPass2').value;
+
+    if (p1.length < 6) {
+      box.textContent = 'A senha precisa ter pelo menos 6 caracteres.';
+      box.className = 'auth-msg';
+      return;
+    }
+    if (p1 !== p2) {
+      box.textContent = 'As duas senhas não conferem.';
+      box.className = 'auth-msg';
+      return;
+    }
+
+    var btn = document.getElementById('btnSaveNewPass');
+    U.setBusy(btn, true, 'Salvando...');
+    try {
+      await Api.updatePassword(p1);
+      state.recoveryMode = false;
+      U.closeModal('modalNewPassword');
+      try { await Api.signOut(); } catch (_err) { /* segue para o login */ }
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+      showLogin('Senha alterada com sucesso. Entre com a nova senha.', true);
     } catch (err) {
       box.textContent = U.errorMessage(err);
       box.className = 'auth-msg';

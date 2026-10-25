@@ -71,6 +71,21 @@
         .then(unwrap);
     },
 
+    resetPassword: function (email) {
+      return sb.auth
+        .resetPasswordForEmail(email, {
+          redirectTo: window.location.origin + window.location.pathname
+        })
+        .then(function (res) {
+          if (res.error) throw res.error;
+          return true;
+        });
+    },
+
+    updatePassword: function (password) {
+      return sb.auth.updateUser({ password: password }).then(unwrap);
+    },
+
     signOut: function () {
       return sb.auth.signOut().then(function (res) {
         if (res.error) throw res.error;

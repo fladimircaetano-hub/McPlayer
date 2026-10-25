@@ -228,6 +228,17 @@ textarea { resize: vertical; min-height: 60px; }
 input::placeholder, textarea::placeholder { color: #55637a; }
 .field { margin-bottom: 12px; }
 .field small { display: block; font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 42px; }
+.pw-toggle {
+  position: absolute; top: 50%; right: 5px; transform: translateY(-50%);
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text-muted);
+  font-size: 15px; line-height: 1; cursor: pointer; padding: 0;
+}
+.pw-toggle:hover { background: rgba(148, 163, 184, 0.16); color: var(--text-primary); }
+.pw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pw-toggle.is-on { color: var(--accent); }
 .field-error { color: #fca5a5 !important; }
 .field-warn { color: #fbbf24 !important; }
 .input-row { display: flex; gap: 6px; align-items: stretch; }

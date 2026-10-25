@@ -311,6 +311,33 @@
     return state.devices.filter(function (d) { return d.playlist_id === playlistId; });
   }
 
+  // Nomes de cliente ligados a um aparelho: o campo do aparelho + cadastros
+  // em public.clients que apontam para o mesmo app/código.
+  function clientNamesForDevice(d) {
+    var names = [];
+    if (d.client_name) names.push(d.client_name);
+    state.clients.forEach(function (c) {
+      if (c.app_name === d.app_name && c.device_id === d.device_id &&
+          c.name && names.indexOf(c.name) === -1) {
+        names.push(c.name);
+      }
+    });
+    return names;
+  }
+
+  function listDataFromPlaylist(p) {
+    if (String(p.type).toLowerCase() === 'xtream') {
+      return {
+        type: 'xtream',
+        serverUrl: p.server_url || '',
+        server_url: p.server_url || '',
+        username: p.username || '',
+        password: p.password || ''
+      };
+    }
+    return { type: 'm3u', url: p.url || '' };
+  }
+
   function expiryBadge(iso) {
     var days = V.daysUntil(iso);
     if (days === null) return '';
@@ -499,11 +526,16 @@
     return state.playlists.filter(function (p) {
       if (f.app !== 'all' && p.app_name !== f.app) return false;
       if (!q) return true;
+      var linkedText = linkedDevices(p.id)
+        .map(function (d) { return d.device_id + ' ' + (d.client_name || ''); })
+        .join(' ')
+        .toLowerCase();
       return (
         String(p.name || '').toLowerCase().indexOf(q) !== -1 ||
         String(p.server_url || '').toLowerCase().indexOf(q) !== -1 ||
         String(p.url || '').toLowerCase().indexOf(q) !== -1 ||
-        String(p.username || '').toLowerCase().indexOf(q) !== -1
+        String(p.username || '').toLowerCase().indexOf(q) !== -1 ||
+        linkedText.indexOf(q) !== -1
       );
     });
   }
@@ -521,11 +553,31 @@
   }
 
   function playlistCard(p) {
-    var linked = linkedDevices(p.id).length;
+    var devs = linkedDevices(p.id);
+    var linked = devs.length;
     var endpoint =
       p.type === 'xtream'
         ? '<b>Servidor:</b> <span class="mono">' + U.esc(p.server_url || '—') + '</span> · <b>Usuário:</b> ' + U.esc(p.username || '—') + ' · <b>Senha:</b> ••••••••'
         : '<b>URL:</b> <span class="mono">' + U.esc(p.url || '—') + '</span>';
+
+    var clientNames = [];
+    devs.forEach(function (d) {
+      clientNamesForDevice(d).forEach(function (n) {
+        if (clientNames.indexOf(n) === -1) clientNames.push(n);
+      });
+    });
+
+    var whereBits = devs.slice(0, 3).map(function (d) {
+      return '<span class="pill-soft mono">' + U.esc(d.device_id) + '</span>';
+    }).join(' ');
+    if (devs.length > 3) {
+      whereBits += ' <span class="pill-soft">+' + (devs.length - 3) + '</span>';
+    }
+
+    var whereLine = linked
+      ? '<div class="small" style="margin-top:6px;">📍 <b>Onde:</b> ' + whereBits +
+        ' · 👤 <b>Cliente:</b> ' + U.esc(clientNames.length ? clientNames.join(', ') : 'não informado') + '</div>'
+      : '<div class="small muted" style="margin-top:6px;">📍 Ainda não vinculada a nenhum aparelho</div>';
 
     return (
       '<div class="row-card">' +
@@ -538,6 +590,8 @@
       '<span class="pill-soft">' + linked + ' aparelho(s)</span>' +
       '</div>' +
       '<div class="small secondary" style="margin-top:7px; overflow-wrap:anywhere;">' + endpoint + '</div>' +
+      '<div class="small muted" style="margin-top:4px;">ID do app: <span class="mono">' + U.esc(p.app_name) + '</span></div>' +
+      whereLine +
       (p.notes ? '<div class="small muted" style="margin-top:5px;">' + U.esc(p.notes) + '</div>' : '') +
       '</div>' +
       '<div class="device-actions">' +
@@ -990,8 +1044,59 @@
     document.getElementById('plUser').value = playlist && playlist.type === 'xtream' ? playlist.username || '' : '';
     document.getElementById('plPass').value = playlist && playlist.type === 'xtream' ? playlist.password || '' : '';
     document.getElementById('plNotes').value = playlist ? playlist.notes || '' : '';
+    fillPlaylistDeviceSelect(
+      playlist ? playlist.app_name : (state.apps[0] && state.apps[0].name),
+      playlist
+    );
     updatePlaylistBoxes();
+    updatePlAppIdLine();
     U.openModal('modalPlaylist');
+  }
+
+  function fillPlaylistDeviceSelect(appName, playlist) {
+    var sel = document.getElementById('plDevice');
+    var devs = state.devices.filter(function (d) { return d.app_name === appName; });
+    var linked = playlist ? linkedDevices(playlist.id) : [];
+    var current = linked.length === 1 ? linked[0].id : '';
+    var hint = document.getElementById('plDeviceHint');
+
+    sel.innerHTML = '<option value="">— não vincular agora —</option>' +
+      devs.map(function (d) {
+        return '<option value="' + U.esc(d.id) + '">' + U.esc(d.device_id) +
+          ' — ' + U.esc(d.client_name || 'sem cliente') +
+          ' (' + U.esc(d.status) + ')</option>';
+      }).join('');
+    sel.value = current;
+
+    hint.textContent = linked.length > 1
+      ? 'Esta lista já está em ' + linked.length +
+        ' aparelhos. Escolher um aqui atualiza só esse aparelho.'
+      : 'Opcional. Ao salvar, a lista é enviada para este aparelho.';
+
+    applyPlaylistDeviceSelection();
+  }
+
+  function applyPlaylistDeviceSelection() {
+    var sel = document.getElementById('plDevice');
+    var input = document.getElementById('plClient');
+    var dev = sel.value ? deviceById(sel.value) : null;
+
+    input.disabled = !dev;
+    if (!dev) {
+      input.value = '';
+      input.placeholder = 'Selecione o aparelho para preencher';
+      return;
+    }
+    var names = clientNamesForDevice(dev);
+    input.placeholder = 'Ex.: João';
+    input.value = names.length ? names[0] : '';
+  }
+
+  function updatePlAppIdLine() {
+    var app = document.getElementById('plApp').value || '—';
+    var dev = deviceById(document.getElementById('plDevice').value);
+    document.getElementById('plAppIdLine').textContent =
+      'ID do app: ' + app + (dev ? ' · Aparelho: ' + dev.device_id : '');
   }
 
   function fillAppSelectForModal(id, current) {
@@ -1052,9 +1157,28 @@
     var btn = document.getElementById('btnSavePlaylist');
     U.setBusy(btn, true, 'Salvando...');
     try {
-      await Api.savePlaylist(payload);
+      var saved = await Api.savePlaylist(payload);
+      var targetId = document.getElementById('plDevice').value;
+      if (targetId) {
+        var dev = deviceById(targetId);
+        if (dev) {
+          await Api.saveDevice({
+            id: dev.id,
+            app_name: dev.app_name,
+            device_id: dev.device_id,
+            mac: dev.mac,
+            status: dev.status,
+            list_data: listDataFromPlaylist(saved),
+            playlist_id: saved.id,
+            client_name: document.getElementById('plClient').value.trim() || dev.client_name || '',
+            expires_at: dev.expires_at,
+            notes: dev.notes,
+            block_reason: dev.block_reason
+          });
+        }
+      }
       U.closeModal('modalPlaylist');
-      U.toast('Lista salva.', 'ok');
+      U.toast(targetId ? 'Lista salva e enviada para o aparelho.' : 'Lista salva.', 'ok');
       await refreshAll(true);
     } catch (err) {
       U.toast(U.errorMessage(err), 'err', 9000);
@@ -1304,6 +1428,21 @@
     document.getElementById('btnLogout').addEventListener('click', logout);
     document.getElementById('btnLogout2').addEventListener('click', logout);
 
+    // Olho para mostrar/ocultar senhas
+    U.qsa('.pw-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var input = document.getElementById(btn.dataset.pw);
+        if (!input) return;
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.classList.toggle('is-on', show);
+        btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+        btn.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
+        btn.title = show ? 'Ocultar senha' : 'Mostrar senha';
+        btn.textContent = show ? '🙈' : '👁';
+      });
+    });
+
     // Navegação
     U.qsa('.nav-btn').forEach(function (btn) {
       btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
@@ -1454,6 +1593,14 @@
 
     // Modal playlist
     document.getElementById('plType').addEventListener('change', updatePlaylistBoxes);
+    document.getElementById('plApp').addEventListener('change', function () {
+      fillPlaylistDeviceSelect(this.value, null);
+      updatePlAppIdLine();
+    });
+    document.getElementById('plDevice').addEventListener('change', function () {
+      applyPlaylistDeviceSelection();
+      updatePlAppIdLine();
+    });
     document.getElementById('btnSavePlaylist').addEventListener('click', savePlaylist);
 
     // Modal cliente

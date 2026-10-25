@@ -35,7 +35,10 @@
       </div>
       <div class="field">
         <label for="loginPassword">Senha</label>
-        <input type="password" id="loginPassword" autocomplete="current-password" placeholder="sua senha" required>
+        <div class="pw-wrap">
+          <input type="password" id="loginPassword" autocomplete="current-password" placeholder="sua senha" required>
+          <button type="button" class="pw-toggle" data-pw="loginPassword" title="Mostrar senha" aria-label="Mostrar senha" aria-pressed="false">👁</button>
+        </div>
       </div>
       <button type="submit" class="btn-primary" id="loginBtn">Entrar</button>
     </form>
@@ -49,7 +52,10 @@
         </div>
         <div class="field">
           <label for="signupPassword">Senha (mín. 6 caracteres)</label>
-          <input type="password" id="signupPassword" autocomplete="new-password" minlength="6" required>
+          <div class="pw-wrap">
+            <input type="password" id="signupPassword" autocomplete="new-password" minlength="6" required>
+            <button type="button" class="pw-toggle" data-pw="signupPassword" title="Mostrar senha" aria-label="Mostrar senha" aria-pressed="false">👁</button>
+          </div>
         </div>
         <button type="submit" class="btn-outline" id="signupBtn">Criar conta</button>
       </form>
@@ -362,7 +368,10 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
           </div>
           <div class="field">
             <label for="devPass">Senha</label>
-            <input id="devPass" type="password" placeholder="senha" autocomplete="new-password">
+            <div class="pw-wrap">
+              <input id="devPass" type="password" placeholder="senha" autocomplete="new-password">
+              <button type="button" class="pw-toggle" data-pw="devPass" title="Mostrar senha" aria-label="Mostrar senha" aria-pressed="false">👁</button>
+            </div>
           </div>
         </div>
       </div>
@@ -447,9 +456,29 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
         </div>
         <div class="field">
           <label for="plPass">Senha *</label>
-          <input id="plPass" type="password" placeholder="senha" autocomplete="new-password">
+          <div class="pw-wrap">
+            <input id="plPass" type="password" placeholder="senha" autocomplete="new-password">
+            <button type="button" class="pw-toggle" data-pw="plPass" title="Mostrar senha" aria-label="Mostrar senha" aria-pressed="false">👁</button>
+          </div>
         </div>
       </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="plDevice">Onde foi inserida (aparelho)</label>
+          <select id="plDevice">
+            <option value="">— não vincular agora —</option>
+          </select>
+          <small id="plDeviceHint">Opcional. Ao salvar, a lista é enviada para este aparelho.</small>
+        </div>
+        <div class="field">
+          <label for="plClient">Nome do cliente</label>
+          <input id="plClient" placeholder="Selecione o aparelho para preencher" maxlength="120" disabled>
+          <small>Fica salvo no aparelho escolhido acima.</small>
+        </div>
+      </div>
+      <p class="small muted" id="plAppIdLine" style="margin:-2px 0 10px;">ID do app: —</p>
+
       <div class="field">
         <label for="plNotes">Observações</label>
         <textarea id="plNotes" rows="2" placeholder="Ex.: painel do provedor, validade, etc."></textarea>

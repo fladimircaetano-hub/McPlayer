@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../../core/theme/app_theme.dart';
 
 class TvFocusable extends StatefulWidget {
@@ -96,9 +97,15 @@ class _TvFocusableState extends State<TvFocusable> {
       onKeyEvent: (node, event) {
         if (!active) return KeyEventResult.ignored;
         if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.select ||
-              event.logicalKey == LogicalKeyboardKey.enter ||
-              event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+          // Alguns controles/TVs mandam OK como gameButtonA (ou espaço, em
+          // teclados USB). Sem isso, o primeiro OK só focava o item e o
+          // usuário precisava apertar duas vezes para selecionar.
+          final key = event.logicalKey;
+          if (key == LogicalKeyboardKey.select ||
+              key == LogicalKeyboardKey.enter ||
+              key == LogicalKeyboardKey.numpadEnter ||
+              key == LogicalKeyboardKey.gameButtonA ||
+              key == LogicalKeyboardKey.space) {
             widget.onPressed?.call();
             return KeyEventResult.handled;
           }
@@ -114,6 +121,9 @@ class _TvFocusableState extends State<TvFocusable> {
           if (_isHovered && mounted) setState(() => _isHovered = false);
         },
         child: GestureDetector(
+          // Foca no toque/clique já no "down": a seleção visual (borda,
+          // escala e preview) aparece no primeiro clique, não no segundo.
+          onTapDown: active ? (_) => _node.requestFocus() : null,
           onTap: active ? widget.onPressed : null,
           onLongPress: active ? widget.onLongPress : null,
           child: AnimatedScale(
@@ -131,8 +141,8 @@ class _TvFocusableState extends State<TvFocusable> {
                   color: _isFocused
                       ? AppColors.primary
                       : (_isHovered && active
-                          ? Colors.white38
-                          : Colors.transparent),
+                            ? Colors.white38
+                            : Colors.transparent),
                   width: _isFocused ? 2.5 : 1.5,
                 ),
                 boxShadow: _isFocused

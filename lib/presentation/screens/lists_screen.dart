@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import '../../core/activation/activation_models.dart';
 import '../../core/activation/activation_service.dart';
 import '../../core/di/service_locator.dart';
@@ -8,6 +10,7 @@ import '../../core/utils/back_navigation_mixin.dart';
 import '../../data/models/xtream_account.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/double_back_to_exit.dart';
+import '../widgets/exit_confirmation_dialog.dart';
 import '../widgets/tv_focusable.dart';
 import 'add_playlist_screen.dart';
 import 'home_screen.dart';
@@ -39,7 +42,7 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   bool get _activationDisabled => _activation == null;
   Timer? _pollTimer;
   bool _autoActivating = false;
-  
+
   // Exponential backoff para polling: 10s -> 20s -> 30s -> 30s (max)
   int _pollAttempt = 0;
   static const int _maxPollInterval = 30; // segundos
@@ -64,7 +67,9 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
 
   /// Calcula o intervalo de polling com exponential backoff
   int _getPollInterval() {
-    final interval = _basePollInterval * (1 << (_pollAttempt.clamp(0, 3))); // 10, 20, 30, 30...
+    final interval =
+        _basePollInterval *
+        (1 << (_pollAttempt.clamp(0, 3))); // 10, 20, 30, 30...
     return interval.clamp(_basePollInterval, _maxPollInterval);
   }
 
@@ -89,8 +94,7 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
       regenerateDeviceId: controller.storageService.newDeviceId,
     );
     if (!mounted) return;
-    if (result.status == ActivationStatus.approved &&
-        result.listData != null) {
+    if (result.status == ActivationStatus.approved && result.listData != null) {
       _applyRemoteApproval(result.listData!);
       return;
     }
@@ -102,8 +106,7 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
     if (!mounted || _autoActivating || activation == null) return;
     final result = await activation.fetchStatus(_deviceId);
     if (!mounted || _autoActivating) return;
-    if (result.status == ActivationStatus.approved &&
-        result.listData != null) {
+    if (result.status == ActivationStatus.approved && result.listData != null) {
       _pollTimer?.cancel();
       _applyRemoteApproval(result.listData!);
     } else if (result.status == ActivationStatus.rejected ||
@@ -152,7 +155,9 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
         if (msg != null && msg.isNotEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Lista aprovada mas falhou: $msg. Aguardando correção no painel...'),
+              content: Text(
+                'Lista aprovada mas falhou: $msg. Aguardando correção no painel...',
+              ),
               backgroundColor: Colors.orange.shade800,
               behavior: SnackBarBehavior.floating,
               duration: const Duration(seconds: 5),
@@ -180,8 +185,7 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
     }
   }
 
-  Future<void> _loadXtream(
-      BuildContext context, XtreamAccount account) async {
+  Future<void> _loadXtream(BuildContext context, XtreamAccount account) async {
     final ok = await controller.loginXtream(
       serverUrl: account.serverUrl,
       username: account.username,
@@ -206,8 +210,7 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
 
   void _openActive() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-          builder: (_) => HomeScreen(controller: controller)),
+      MaterialPageRoute(builder: (_) => HomeScreen(controller: controller)),
       (r) => false,
     );
   }
@@ -243,24 +246,33 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
             : (controller.loadedListName ?? lastUrl ?? '');
         final rows = <_PlaylistRow>[];
         if (hasActive) {
-          rows.add(_PlaylistRow(
-              name: activeName, url: lastUrl, isXtream: account != null));
+          rows.add(
+            _PlaylistRow(
+              name: activeName,
+              url: lastUrl,
+              isXtream: account != null,
+            ),
+          );
         }
         // Multi-listas: contas Xtream salvas (exceto a ativa) p/ trocar
         // sem redigitar. M3U recentes continuam abaixo como antes.
         for (final saved in storage.getXtreamAccounts()) {
-          final isActive = account != null &&
+          final isActive =
+              account != null &&
               saved.serverUrl == account.serverUrl &&
               saved.username == account.username;
           if (isActive) continue;
-          if (rows.any((r) =>
-              r.account != null &&
-              r.account!.serverUrl == saved.serverUrl &&
-              r.account!.username == saved.username)) {
+          if (rows.any(
+            (r) =>
+                r.account != null &&
+                r.account!.serverUrl == saved.serverUrl &&
+                r.account!.username == saved.username,
+          )) {
             continue;
           }
-          rows.add(_PlaylistRow(
-              name: saved.username, isXtream: true, account: saved));
+          rows.add(
+            _PlaylistRow(name: saved.username, isXtream: true, account: saved),
+          );
         }
         for (final u in recents) {
           rows.add(_PlaylistRow(name: u, url: u, isXtream: false));
@@ -268,253 +280,309 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
 
         return buildWithDoubleBackExit(
           child: Scaffold(
-          body: SafeArea(
-            child: Stack(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          TvFocusable(
-                            borderRadius: BorderRadius.circular(10),
-                            onPressed: _onBackButton,
-                            child: const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Icon(
+            body: SafeArea(
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            TvFocusable(
+                              borderRadius: BorderRadius.circular(10),
+                              onPressed: _onBackButton,
+                              child: const Padding(
+                                padding: EdgeInsets.all(8),
+                                child: Icon(
                                   Icons.arrow_back_rounded,
                                   color: Colors.white,
-                                  size: 26),
+                                  size: 26,
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Expanded(
-                            child: Text('Playlist',
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Playlist',
                                 style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 30,
+                                ),
+                              ),
+                            ),
+                            TvFocusable(
+                              borderRadius: BorderRadius.circular(8),
+                              onPressed: () => confirmExitApp(context),
+                              child: Container(
+                                margin: const EdgeInsets.only(right: 10),
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.accentLive.withValues(
+                                    alpha: 0.12,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: AppColors.accentLive.withValues(
+                                      alpha: 0.55,
+                                    ),
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.power_settings_new_rounded,
+                                  color: AppColors.accentLive,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                            TvFocusable(
+                              borderRadius: BorderRadius.circular(8),
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => AddPlaylistScreen(
+                                      controller: controller,
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: AppColors.cardBorder,
+                                  ),
+                                ),
+                                child: const Text(
+                                  '+',
+                                  style: TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
-                                    fontSize: 30)),
-                          ),
-                          TvFocusable(
-                            borderRadius: BorderRadius.circular(8),
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => AddPlaylistScreen(
-                                      controller: controller),
+                                    fontSize: 20,
+                                  ),
                                 ),
-                              );
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: AppColors.surface,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                    color: AppColors.cardBorder),
                               ),
-                              child: const Text('+',
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 20)),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      if (rows.isEmpty)
-                        const Center(
-                          child: Padding(
-                            padding: EdgeInsets.only(top: 40),
-                            child: Text(
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        if (rows.isEmpty)
+                          const Center(
+                            child: Padding(
+                              padding: EdgeInsets.only(top: 40),
+                              child: Text(
                                 'Nenhuma playlist. Toque em + para adicionar.',
                                 style: TextStyle(
-                                    color: AppColors.textSecondary)),
-                          ),
-                        )
-                      else
-                        ...rows.asMap().entries.map((e) {
-                          final i = e.key;
-                          final row = e.value;
-                          final selected = i == 0 && hasActive;
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: TvFocusable(
-                                    borderRadius:
-                                        BorderRadius.circular(10),
-                                    onPressed: () {
-                                      if (i == 0 && hasActive) {
-                                        _openActive();
-                                      } else if (row.account != null) {
-                                        _loadXtream(context, row.account!);
-                                      } else if (row.url != null) {
-                                        _loadRecent(context, row.url!);
-                                      }
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 18, vertical: 16),
-                                      decoration: BoxDecoration(
-                                        color: selected
-                                            ? Colors.white
-                                            : AppColors.surface,
-                                        borderRadius:
-                                            BorderRadius.circular(10),
-                                        border: Border.all(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          ...rows.asMap().entries.map((e) {
+                            final i = e.key;
+                            final row = e.value;
+                            final selected = i == 0 && hasActive;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: TvFocusable(
+                                      borderRadius: BorderRadius.circular(10),
+                                      onPressed: () {
+                                        if (i == 0 && hasActive) {
+                                          _openActive();
+                                        } else if (row.account != null) {
+                                          _loadXtream(context, row.account!);
+                                        } else if (row.url != null) {
+                                          _loadRecent(context, row.url!);
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 18,
+                                          vertical: 16,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: selected
+                                              ? Colors.white
+                                              : AppColors.surface,
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          border: Border.all(
                                             color: selected
                                                 ? Colors.white
-                                                : AppColors.cardBorder),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          SizedBox(
-                                            width: 36,
-                                            child: Text('${i + 1}',
-                                                style: TextStyle(
-                                                    color: selected
-                                                        ? Colors.black54
-                                                        : AppColors
-                                                            .textSecondary,
-                                                    fontWeight:
-                                                        FontWeight.w600,
-                                                    fontSize: 16)),
+                                                : AppColors.cardBorder,
                                           ),
-                                          Expanded(
-                                            child: Text(
-                                              row.name,
-                                              maxLines: 1,
-                                              overflow:
-                                                  TextOverflow.ellipsis,
-                                              style: TextStyle(
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            SizedBox(
+                                              width: 36,
+                                              child: Text(
+                                                '${i + 1}',
+                                                style: TextStyle(
+                                                  color: selected
+                                                      ? Colors.black54
+                                                      : AppColors.textSecondary,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 16,
+                                                ),
+                                              ),
+                                            ),
+                                            Expanded(
+                                              child: Text(
+                                                row.name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
                                                   color: selected
                                                       ? Colors.black
                                                       : Colors.white,
-                                                  fontWeight:
-                                                      FontWeight.w600,
-                                                  fontSize: 16),
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 16,
+                                                ),
+                                              ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                TvFocusable(
-                                  borderRadius:
-                                      BorderRadius.circular(24),
-                                  onPressed: () async {
-                                    if (i == 0 && hasActive) {
-                                      await _removeActive(context);
-                                    } else if (row.account != null) {
-                                      await storage.removeXtreamAccount(
-                                          row.account!);
-                                      controller.refresh();
-                                    } else if (row.url != null) {
-                                      await storage
-                                          .removeRecentUrl(row.url!);
-                                      controller.refresh();
-                                    }
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                          color: AppColors.cardBorder),
-                                    ),
-                                    child: const Icon(
+                                  const SizedBox(width: 12),
+                                  TvFocusable(
+                                    borderRadius: BorderRadius.circular(24),
+                                    onPressed: () async {
+                                      if (i == 0 && hasActive) {
+                                        await _removeActive(context);
+                                      } else if (row.account != null) {
+                                        await storage.removeXtreamAccount(
+                                          row.account!,
+                                        );
+                                        controller.refresh();
+                                      } else if (row.url != null) {
+                                        await storage.removeRecentUrl(row.url!);
+                                        controller.refresh();
+                                      }
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: AppColors.cardBorder,
+                                        ),
+                                      ),
+                                      child: const Icon(
                                         Icons.delete_outline_rounded,
                                         color: Colors.white70,
-                                        size: 20),
+                                        size: 20,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
+                            );
+                          }),
+                        const Spacer(),
+                        if (_activationDisabled)
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
                             ),
-                          );
-                        }),
-                      const Spacer(),
-                      if (_activationDisabled)
-                        Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                                color: Colors.orange.withValues(alpha: 0.6)),
-                          ),
-                          child: const Text(
-                            'Ativação remota DESLIGADA: este aparelho não aparece no dashboard. '
-                            'Reinstale o APK compilado com SUPABASE_URL e SUPABASE_ANON_KEY.',
-                            style: TextStyle(
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: Colors.orange.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            child: const Text(
+                              'Ativação remota DESLIGADA neste APK: este aparelho não aparece no dashboard. '
+                              'Instale o APK oficial (ou compile com SUPABASE_URL e SUPABASE_ANON_KEY) '
+                              'e informe a Device key abaixo ao suporte.',
+                              style: TextStyle(
                                 color: Colors.orange,
                                 fontWeight: FontWeight.w600,
-                                fontSize: 12),
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
-                        ),
-                      Row(
-                        children: [
-                          const Expanded(
-                            child: Text(
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
                                 'Web Page: https://mcplayer.app',
                                 style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13)),
-                          ),
-                          Text('Device key: $_deviceId',
-                              style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w600,
-                                  fontSize: 13)),
-                        ],
-                      ),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text('Mac Address: $_deviceMac',
-                            style: const TextStyle(
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              'Device key: $_deviceId',
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w600,
-                                fontSize: 13)),
-                      ),
-                    ],
-                  ),
-                ),
-                if (controller.isLoading)
-                  Container(
-                    color: Colors.black.withValues(alpha: 0.7),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CircularProgressIndicator(
-                              color: AppColors.primary),
-                          const SizedBox(height: 16),
-                          Text(
-                            controller.loadingStatus.isNotEmpty
-                                ? controller.loadingStatus
-                                : 'Carregando...',
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            'Mac Address: $_deviceMac',
                             style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold),
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-              ],
+                  if (controller.isLoading)
+                    Container(
+                      color: Colors.black.withValues(alpha: 0.7),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(
+                              color: AppColors.primary,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              controller.loadingStatus.isNotEmpty
+                                  ? controller.loadingStatus
+                                  : 'Carregando...',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
           ),
         );
       },
@@ -528,9 +596,10 @@ class _PlaylistRow {
   final bool isXtream;
   final XtreamAccount? account;
 
-  _PlaylistRow(
-      {required this.name,
-      this.url,
-      required this.isXtream,
-      this.account});
+  _PlaylistRow({
+    required this.name,
+    this.url,
+    required this.isXtream,
+    this.account,
+  });
 }

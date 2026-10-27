@@ -1,8 +1,11 @@
 import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/back_navigation_mixin.dart';
 import '../../../data/models/iptv_category.dart';
@@ -28,8 +31,11 @@ class LiveTvGuide extends StatefulWidget {
 
 class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchNode = FocusNode();
+  final FocusNode _backNode = FocusNode();
   Timer? _searchDebounce;
   Timer? _clockTimer;
+  Timer? _focusPreviewDebounce;
 
   Player? _previewPlayer;
   VideoController? _previewVideoController;
@@ -58,8 +64,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
 
   bool _showOnlyFavorites = false;
   int _sortMode = 0; // 0=original, 1=A–Z, 2=Z–A
-  String get _sortSuffix =>
-      _sortMode == 1 ? ' A–Z ✓' : _sortMode == 2 ? ' Z–A ✓' : '';
+  String get _sortSuffix => _sortMode == 1
+      ? ' A–Z ✓'
+      : _sortMode == 2
+      ? ' Z–A ✓'
+      : '';
   bool _isSearching = false;
   DateTime _now = DateTime.now();
   List<EpgProgram> _epg = const [];
@@ -76,8 +85,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   void initState() {
     super.initState();
     _now = DateTime.now();
-    _clockTimer =
-        Timer.periodic(const Duration(seconds: 20), (_) => _tickClock());
+    _clockTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => _tickClock(),
+    );
     final cats = widget.controller.getCategories(StreamType.live);
     _selectedCategory = cats.isNotEmpty ? cats.first.name : 'TODOS';
     _selectedIndex = 0;
@@ -93,6 +104,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   void dispose() {
     _searchDebounce?.cancel();
     _clockTimer?.cancel();
+    _focusPreviewDebounce?.cancel();
+    _searchNode.dispose();
+    _backNode.dispose();
     _searchCtrl.dispose();
     try {
       _previewPlayer?.dispose();
@@ -114,9 +128,61 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     });
   }
 
+  bool get _searchEngaged =>
+      _isSearching || _searchNode.hasFocus || _searchCtrl.text.isNotEmpty;
+
+  void _hideKeyboard() {
+    SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+  }
+
+  /// Fecha teclado, limpa a busca e devolve o foco ao botão Voltar.
+  /// Sem isso, o D-pad/Back ficava preso no TextField da pesquisa.
+  void _cancelSearch() {
+    _searchDebounce?.cancel();
+    if (_searchCtrl.text.isNotEmpty) _searchCtrl.clear();
+    if (widget.controller.searchQuery.isNotEmpty) {
+      widget.controller.setSearchQuery('');
+    }
+    _searchNode.unfocus();
+    _hideKeyboard();
+    if (_isSearching) {
+      setState(() => _isSearching = false);
+    } else if (mounted) {
+      setState(() {});
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _backNode.requestFocus();
+    });
+  }
+
+  KeyEventResult _onSearchKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape) {
+      _cancelSearch();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.arrowUp) {
+      _searchNode.unfocus();
+      _hideKeyboard();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        FocusScope.of(context).focusInDirection(
+          key == LogicalKeyboardKey.arrowDown
+              ? TraversalDirection.down
+              : TraversalDirection.up,
+        );
+      });
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   // ---------- dados ----------
 
-  List<IptvCategory> get _cats => widget.controller.getCategories(StreamType.live);
+  List<IptvCategory> get _cats =>
+      widget.controller.getCategories(StreamType.live);
 
   List<CategoryNode> get _mobileTree => buildCategoryTree(_cats);
 
@@ -175,8 +241,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     }
     final token = ++_epgToken;
     setState(() => _epgLoading = true);
-    final day = DateTime(_now.year, _now.month, _now.day)
-        .add(Duration(days: _epgDayOffset));
+    final day = DateTime(
+      _now.year,
+      _now.month,
+      _now.day,
+    ).add(Duration(days: _epgDayOffset));
     final programs = await _epgService.getPrograms(ch, day: day);
     if (mounted && token == _epgToken) {
       setState(() {
@@ -205,6 +274,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   // ---------- navegação mobile por níveis ----------
 
   void _stopPreview() {
+    _focusPreviewDebounce?.cancel();
     try {
       _previewPlayer?.stop();
     } catch (_) {}
@@ -259,9 +329,8 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   /// o "voltar"; false deixa o mixin fechar a tela.
   bool _mobileBackLevel() {
     if (_isTv) return false;
-    if (_isSearching) {
-      widget.controller.setSearchQuery('');
-      setState(() => _isSearching = false);
+    if (_searchEngaged) {
+      _cancelSearch();
       return true;
     }
     if (_mobileSub != null) {
@@ -293,24 +362,37 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   @override
   void onSystemBack(bool didPop, Object? result) {
     if (didPop) return;
+    // 1º Back: fecha teclado/sai da busca. 2º Back: nível anterior/sai.
+    if (_searchEngaged) {
+      _cancelSearch();
+      return;
+    }
     if (_mobileBackLevel()) return;
     super.onSystemBack(didPop, result);
   }
 
   @override
   void handleBackButton() {
+    if (_searchEngaged) {
+      _cancelSearch();
+      return;
+    }
     if (_mobileBackLevel()) return;
     super.handleBackButton();
   }
 
-  void _selectChannel(int i) {
+  /// [fromFocus] = true quando o canal foi apenas focado pelo D-pad:
+  /// a seleção/preview aparecem na hora, mas o player só abre no OK
+  /// (um único OK, porque o foco já deixou o canal escolhido).
+  void _selectChannel(int i, {bool fromFocus = false}) {
+    final list = _channels();
+    if (i < 0 || i >= list.length) return;
+
     if (_selectedIndex == i && _channelChosen) {
-      final list = _channels();
-      if (list.isNotEmpty && i >= 0 && i < list.length) {
-        _openPlayer(list, i);
-      }
+      if (!fromFocus) _openPlayer(list, i);
       return;
     }
+
     setState(() {
       _selectedIndex = i;
       _channelChosen = true;
@@ -319,10 +401,16 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       _epg = const [];
     });
     _loadEpg();
-    final ch = _selectedChannel;
-    if (ch != null) {
-      _startPreview(ch);
-    }
+
+    // Ao navegar rápido com o D-pad, só abre o preview depois de uma
+    // pequena pausa; o item selecionado e o EPG já mudam imediatamente.
+    _focusPreviewDebounce?.cancel();
+    final delay = fromFocus ? const Duration(milliseconds: 220) : Duration.zero;
+    _focusPreviewDebounce = Timer(delay, () {
+      if (!mounted || !_channelChosen || _selectedIndex != i) return;
+      final ch = _selectedChannel;
+      if (ch != null) _startPreview(ch);
+    });
   }
 
   Future<void> _startPreview(StreamItem ch) async {
@@ -373,6 +461,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   // ---------- player ----------
 
   Future<void> _openPlayer(List<StreamItem> playlist, int index) async {
+    _focusPreviewDebounce?.cancel();
     try {
       await _previewPlayer?.pause();
     } catch (_) {}
@@ -383,8 +472,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
           item: playlist[index],
           playlist: playlist,
           initialIndex: index,
-          keepScreenOn:
-              widget.controller.storageService.getKeepScreenOn(),
+          keepScreenOn: widget.controller.storageService.getKeepScreenOn(),
         ),
       ),
     );
@@ -402,10 +490,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   List<StreamItem> _applySort(List<StreamItem> items) {
     if (_sortMode == 0) return items;
     final asc = _sortMode == 1;
-    return [...items]
-      ..sort((a, b) => asc
+    return [...items]..sort(
+      (a, b) => asc
           ? a.name.toLowerCase().compareTo(b.name.toLowerCase())
-          : b.name.toLowerCase().compareTo(a.name.toLowerCase()));
+          : b.name.toLowerCase().compareTo(a.name.toLowerCase()),
+    );
   }
 
   void _toggleSort() {
@@ -425,9 +514,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       child: FocusScope(
         autofocus: true,
         child: Scaffold(
-          body: SafeArea(
-            child: _isTv ? _buildTvGuide() : _buildMobileGuide(),
-          ),
+          body: SafeArea(child: _isTv ? _buildTvGuide() : _buildMobileGuide()),
         ),
       ),
     );
@@ -442,9 +529,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     final chosenLogo = _selectedChannel?.logoUrl;
     return Stack(
       children: [
-        if (_channelChosen &&
-            chosenLogo != null &&
-            chosenLogo.isNotEmpty)
+        if (_channelChosen && chosenLogo != null && chosenLogo.isNotEmpty)
           Positioned.fill(
             child: Opacity(
               opacity: 0.14,
@@ -457,9 +542,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
           ),
         if (_channelChosen)
           Positioned.fill(
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.45),
-            ),
+            child: Container(color: Colors.black.withValues(alpha: 0.45)),
           ),
         Column(
           children: [
@@ -496,27 +579,31 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Row(
         children: [
-          const Icon(Icons.grid_view_rounded,
-              color: Colors.white, size: 20),
+          const Icon(Icons.grid_view_rounded, color: Colors.white, size: 20),
           const SizedBox(width: 10),
-          const Text('All',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16)),
+          const Text(
+            'All',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
           const SizedBox(width: 24),
-          Text('$total',
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16)),
+          Text(
+            '$total',
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ),
           const SizedBox(width: 16),
           TvFocusable(
             borderRadius: BorderRadius.circular(8),
             onPressed: _toggleSort,
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(8),
@@ -525,24 +612,29 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.sort_rounded,
-                      color: Colors.white, size: 18),
+                  const Icon(Icons.sort_rounded, color: Colors.white, size: 18),
                   const SizedBox(width: 8),
-                  Text('Sort$_sortSuffix',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600)),
+                  Text(
+                    'Sort$_sortSuffix',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
           const Spacer(),
-          Text(date,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 16)),
+          Text(
+            date,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
         ],
       ),
     );
@@ -555,12 +647,16 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       child: Row(
         children: [
           TvFocusable(
+            focusNode: _backNode,
             borderRadius: BorderRadius.circular(8),
             onPressed: handleBackButton,
             child: const Padding(
               padding: EdgeInsets.all(8),
-              child: Icon(Icons.arrow_back_rounded,
-                  color: Colors.white, size: 24),
+              child: Icon(
+                Icons.arrow_back_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -602,9 +698,27 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
             ),
           ),
           const SizedBox(width: 12),
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onPressed: () {
+              setState(() => _isSearching = true);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _searchNode.requestFocus();
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLight,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.cardBorder),
+              ),
+              child: const Icon(Icons.search, color: Colors.white, size: 20),
+            ),
+          ),
+          const SizedBox(width: 10),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(8),
@@ -613,9 +727,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
             child: Text(
               _clockLabel,
               style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15),
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
             ),
           ),
         ],
@@ -645,11 +760,14 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               ),
             ),
             const SizedBox(width: 8),
-            Text(label,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       ),
@@ -659,14 +777,65 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   Widget _buildSearchRow() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: TextField(
-        controller: _searchCtrl,
-        autofocus: true,
-        decoration: const InputDecoration(
-          hintText: 'Pesquisar canais...',
-          prefixIcon: Icon(Icons.search, size: 20),
-        ),
-        onChanged: _onSearchChanged,
+      child: Row(
+        children: [
+          Expanded(
+            child: Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: _onSearchKey,
+              child: TextField(
+                controller: _searchCtrl,
+                focusNode: _searchNode,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                decoration: const InputDecoration(
+                  hintText: 'Pesquisar canais...',
+                  prefixIcon: Icon(Icons.search, size: 20),
+                  isDense: true,
+                ),
+                onChanged: _onSearchChanged,
+                onSubmitted: (_) {
+                  _searchNode.unfocus();
+                  _hideKeyboard();
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onPressed: _cancelSearch,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.cardBorder),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.keyboard_backspace_rounded,
+                    color: AppColors.primary,
+                    size: 17,
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    'Cancelar',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -677,9 +846,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     return Column(
       children: [
         _navHeader(
-            icon: Icons.grid_view_rounded,
-            title: 'CATEGORIAS',
-            count: null),
+          icon: Icons.grid_view_rounded,
+          title: 'CATEGORIAS',
+          count: null,
+        ),
         const SizedBox(height: 8),
         Expanded(
           child: ListView.builder(
@@ -724,26 +894,27 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         Expanded(
           child: list.isEmpty
               ? const Center(
-                  child: Text('Nenhum canal',
-                      style: TextStyle(color: AppColors.textMuted)))
+                  child: Text(
+                    'Nenhum canal',
+                    style: TextStyle(color: AppColors.textMuted),
+                  ),
+                )
               : ListView.builder(
                   itemCount: list.length,
                   itemBuilder: (context, i) {
                     final item = list[i];
-                    final selected =
-                        _channelChosen && i == _selectedIndex;
+                    final selected = _channelChosen && i == _selectedIndex;
                     return _channelRow(
                       number: i + 1,
                       item: item,
                       selected: selected,
-                      onFocus: (_) {},
-                      onTap: () {
-                        if (_channelChosen && _selectedIndex == i) {
-                          _openPlayer(list, i);
-                        } else {
-                          _selectChannel(i);
-                        }
+                      // Focar já seleciona e mostra a prévia: o visual
+                      // responde na primeira navegação do D-pad. Um OK
+                      // depois abre o player (sem o antigo duplo clique).
+                      onFocus: (focused) {
+                        if (focused) _selectChannel(i, fromFocus: true);
                       },
+                      onTap: () => _selectChannel(i),
                     );
                   },
                 ),
@@ -773,8 +944,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               onPressed: onBack,
               child: const Padding(
                 padding: EdgeInsets.all(4),
-                child: Icon(Icons.arrow_back,
-                    color: AppColors.primary, size: 20),
+                child: Icon(
+                  Icons.arrow_back,
+                  color: AppColors.primary,
+                  size: 20,
+                ),
               ),
             )
           else
@@ -786,17 +960,21 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14),
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+              ),
             ),
           ),
           if (count != null)
-            Text('$count',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14)),
+            Text(
+              '$count',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
         ],
       ),
     );
@@ -818,13 +996,13 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         onPressed: onTap,
         onFocusChange: onFocus,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
           decoration: BoxDecoration(
             color: selected ? Colors.white : AppColors.surface,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-                color: selected ? Colors.white : AppColors.cardBorder),
+              color: selected ? Colors.white : AppColors.cardBorder,
+            ),
           ),
           child: Row(
             children: [
@@ -834,15 +1012,19 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: selected ? Colors.black : Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14),
+                    color: selected ? Colors.black : Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
                 ),
               ),
-              Text('$count',
-                  style: TextStyle(
-                      color: selected ? Colors.black : Colors.white,
-                      fontWeight: FontWeight.bold)),
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: selected ? Colors.black : Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
           ),
         ),
@@ -866,25 +1048,28 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         onPressed: onTap,
         onFocusChange: onFocus,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
             color: selected
                 ? Colors.white
                 : AppColors.surface.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-                color: selected ? Colors.white : AppColors.cardBorder),
+              color: selected ? Colors.white : AppColors.cardBorder,
+            ),
           ),
           child: Row(
             children: [
               SizedBox(
                 width: 30,
-                child: Text('$number',
-                    style: TextStyle(
-                        color: selected ? Colors.black : Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13)),
+                child: Text(
+                  '$number',
+                  style: TextStyle(
+                    color: selected ? Colors.black : Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
               ),
               _logoThumb(item.logoUrl, 40, 30),
               const SizedBox(width: 10),
@@ -894,9 +1079,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: selected ? Colors.black : Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14),
+                    color: selected ? Colors.black : Colors.white,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
                 ),
               ),
               InkWell(
@@ -909,9 +1095,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                         : Icons.star_outline_rounded,
                     color: item.isFavorite
                         ? AppColors.accentOrange
-                        : (selected
-                            ? Colors.black54
-                            : AppColors.textSecondary),
+                        : (selected ? Colors.black54 : AppColors.textSecondary),
                     size: 20,
                   ),
                 ),
@@ -938,13 +1122,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               fit: BoxFit.contain,
               memCacheWidth: 120,
               memCacheHeight: 90,
-              errorWidget: (_, _, _) => const Icon(
-                  Icons.tv_rounded,
-                  color: Colors.white70,
-                  size: 20),
+              errorWidget: (_, _, _) =>
+                  const Icon(Icons.tv_rounded, color: Colors.white70, size: 20),
             )
-          : const Icon(Icons.tv_rounded,
-              color: Colors.white70, size: 20),
+          : const Icon(Icons.tv_rounded, color: Colors.white70, size: 20),
     );
   }
 
@@ -1010,15 +1191,16 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                     Center(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 5),
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.6),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: const Text(
                           'Não foi possível abrir o canal',
-                          style:
-                              TextStyle(color: Colors.white70, fontSize: 11),
+                          style: TextStyle(color: Colors.white70, fontSize: 11),
                         ),
                       ),
                     ),
@@ -1030,7 +1212,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                       left: 0,
                       right: 0,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
@@ -1044,7 +1229,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                         child: Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppColors.primary,
                                 borderRadius: BorderRadius.circular(5),
@@ -1087,7 +1275,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                               ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(6),
@@ -1096,7 +1287,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.fullscreen_rounded, color: Colors.white, size: 14),
+                                  Icon(
+                                    Icons.fullscreen_rounded,
+                                    color: Colors.white,
+                                    size: 14,
+                                  ),
                                   SizedBox(width: 4),
                                   Text(
                                     'Tela Cheia',
@@ -1136,7 +1331,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                           ? const Text(
                               'Selecione um canal para assistir à transmissão',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.white70, fontSize: 13),
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
                             )
                           : Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1146,16 +1344,29 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                                   children: [
                                     if (current != null) ...[
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
                                         decoration: BoxDecoration(
-                                          color: AppColors.accentGreen.withValues(alpha: 0.25),
-                                          borderRadius: BorderRadius.circular(4),
-                                          border: Border.all(color: AppColors.accentGreen, width: 0.8),
+                                          color: AppColors.accentGreen
+                                              .withValues(alpha: 0.25),
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                          border: Border.all(
+                                            color: AppColors.accentGreen,
+                                            width: 0.8,
+                                          ),
                                         ),
                                         child: const Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Icon(Icons.circle, color: AppColors.accentGreen, size: 7),
+                                            Icon(
+                                              Icons.circle,
+                                              color: AppColors.accentGreen,
+                                              size: 7,
+                                            ),
                                             SizedBox(width: 4),
                                             Text(
                                               'NO AR',
@@ -1172,7 +1383,8 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                                     ],
                                     Expanded(
                                       child: Text(
-                                        current?.title ?? 'Programação não informada',
+                                        current?.title ??
+                                            'Programação não informada',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
@@ -1226,15 +1438,17 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.cardBorder),
             ),
-            child: const Icon(Icons.live_tv_rounded,
-                color: AppColors.primary, size: 32),
+            child: const Icon(
+              Icons.live_tv_rounded,
+              color: AppColors.primary,
+              size: 32,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             ch?.name ?? 'Selecione um canal',
             textAlign: TextAlign.center,
-            style: const TextStyle(
-                color: Colors.white70, fontSize: 14),
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
           ),
         ],
       ),
@@ -1244,7 +1458,8 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   Widget _buildEpgPanel() {
     if (_epgLoading) {
       return const Center(
-          child: CircularProgressIndicator(color: AppColors.primary));
+        child: CircularProgressIndicator(color: AppColors.primary),
+      );
     }
     if (_epg.isEmpty) {
       return Center(
@@ -1302,11 +1517,17 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               if (isLive) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.accentGreen.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: AppColors.accentGreen, width: 0.8),
+                    border: Border.all(
+                      color: AppColors.accentGreen,
+                      width: 0.8,
+                    ),
                   ),
                   child: const Text(
                     'NO AR',
@@ -1329,12 +1550,12 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
 
   void _toggleMobileSearch() {
     if (!_mobileAtChannels) return;
-    setState(() => _isSearching = !_isSearching);
     if (_isSearching) {
-      _searchCtrl.clear();
-    } else {
-      widget.controller.setSearchQuery('');
+      _cancelSearch();
+      return;
     }
+    setState(() => _isSearching = true);
+    _searchCtrl.clear();
   }
 
   Widget _buildMobileGuide() {
@@ -1391,12 +1612,16 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       child: Row(
         children: [
           TvFocusable(
+            focusNode: _backNode,
             borderRadius: BorderRadius.circular(8),
             onPressed: atRoot ? handleBackButton : _mobileBackLevel,
             child: const Padding(
               padding: EdgeInsets.all(6),
-              child: Icon(Icons.arrow_back_rounded,
-                  color: Colors.white, size: 24),
+              child: Icon(
+                Icons.arrow_back_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
             ),
           ),
           const SizedBox(width: 4),
@@ -1404,9 +1629,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
             child: Text(
               'TV ao vivo',
               style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18),
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
             ),
           ),
           if (_mobileAtChannels)
@@ -1430,29 +1656,66 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   Widget _buildMobileSearchRow() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(11, 6, 11, 0),
-      child: TextField(
-        controller: _searchCtrl,
-        autofocus: true,
-        style: const TextStyle(color: Colors.white, fontSize: 13),
-        decoration: InputDecoration(
-          hintText: 'Pesquisar canais...',
-          isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          prefixIcon: const Icon(Icons.search, size: 18),
-          suffixIcon: _searchCtrl.text.isEmpty
-              ? null
-              : IconButton(
-                  tooltip: 'Limpar busca',
-                  icon: const Icon(Icons.close, size: 17),
-                  onPressed: () {
-                    _searchCtrl.clear();
-                    _onSearchChanged('');
-                    setState(() {});
-                  },
+      child: Row(
+        children: [
+          Expanded(
+            child: Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: _onSearchKey,
+              child: TextField(
+                controller: _searchCtrl,
+                focusNode: _searchNode,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: 'Pesquisar canais...',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 10,
+                  ),
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  suffixIcon: _searchCtrl.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Limpar busca',
+                          icon: const Icon(Icons.close, size: 17),
+                          onPressed: _cancelSearch,
+                        ),
                 ),
-        ),
-        onChanged: _onSearchChanged,
+                onChanged: (v) {
+                  _onSearchChanged(v);
+                  if (mounted) setState(() {});
+                },
+                onSubmitted: (_) {
+                  _searchNode.unfocus();
+                  _hideKeyboard();
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          TvFocusable(
+            borderRadius: BorderRadius.circular(8),
+            onPressed: _cancelSearch,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.cardBorder),
+              ),
+              child: const Icon(
+                Icons.keyboard_backspace_rounded,
+                color: AppColors.primary,
+                size: 17,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1484,8 +1747,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.live_tv_rounded,
-                        color: Colors.white24, size: 44),
+                    Icon(
+                      Icons.live_tv_rounded,
+                      color: Colors.white24,
+                      size: 44,
+                    ),
                     SizedBox(height: 8),
                     Text(
                       'Selecione um canal',
@@ -1513,12 +1779,16 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                           fit: BoxFit.contain,
                           memCacheWidth: 220,
                           errorWidget: (_, _, _) => const Icon(
-                              Icons.tv_rounded,
-                              color: Colors.white38,
-                              size: 44),
+                            Icons.tv_rounded,
+                            color: Colors.white38,
+                            size: 44,
+                          ),
                         )
-                      : const Icon(Icons.tv_rounded,
-                          color: Colors.white38, size: 44),
+                      : const Icon(
+                          Icons.tv_rounded,
+                          color: Colors.white38,
+                          size: 44,
+                        ),
                 ),
               if (_previewLoading)
                 const Center(
@@ -1534,8 +1804,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               if (_previewError)
                 Center(
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(6),
@@ -1551,8 +1823,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                 right: 0,
                 bottom: 0,
                 child: Container(
-                  padding:
-                      const EdgeInsets.fromLTRB(10, 22, 8, 8),
+                  padding: const EdgeInsets.fromLTRB(10, 22, 8, 8),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
@@ -1589,14 +1860,18 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                                   const SizedBox(width: 6),
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 4, vertical: 1),
+                                      horizontal: 4,
+                                      vertical: 1,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: AppColors.accentLive
-                                          .withValues(alpha: 0.25),
+                                      color: AppColors.accentLive.withValues(
+                                        alpha: 0.25,
+                                      ),
                                       borderRadius: BorderRadius.circular(3),
                                       border: Border.all(
-                                          color: AppColors.accentLive,
-                                          width: 0.6),
+                                        color: AppColors.accentLive,
+                                        width: 0.6,
+                                      ),
                                     ),
                                     child: const Text(
                                       'AO VIVO',
@@ -1616,7 +1891,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                  color: Colors.white70, fontSize: 10.5),
+                                color: Colors.white70,
+                                fontSize: 10.5,
+                              ),
                             ),
                             if (current != null) ...[
                               const SizedBox(height: 3),
@@ -1630,10 +1907,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                         height: 32,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 10),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
                             textStyle: const TextStyle(
-                                fontSize: 11, fontWeight: FontWeight.bold),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                           onPressed: () => _openPlayer(list, index),
                           child: const Text('Assistir'),
@@ -1698,15 +1976,21 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                       onPressed: _mobileBackLevel,
                       child: const Padding(
                         padding: EdgeInsets.all(5),
-                        child: Icon(Icons.arrow_back_rounded,
-                            color: AppColors.primary, size: 19),
+                        child: Icon(
+                          Icons.arrow_back_rounded,
+                          color: AppColors.primary,
+                          size: 19,
+                        ),
                       ),
                     )
                   else
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 5),
-                      child: Icon(Icons.grid_view_rounded,
-                          color: AppColors.primary, size: 18),
+                      child: Icon(
+                        Icons.grid_view_rounded,
+                        color: AppColors.primary,
+                        size: 18,
+                      ),
                     ),
                   const SizedBox(width: 4),
                   Expanded(
@@ -1715,17 +1999,19 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13),
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                   Text(
                     '$count',
                     style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600),
+                      color: Colors.white70,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   if (showSort)
                     TvFocusable(
@@ -1759,8 +2045,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     final tree = _mobileTree;
     if (tree.isEmpty) {
       return const Center(
-        child: Text('Nenhuma categoria',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+        child: Text(
+          'Nenhuma categoria',
+          style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+        ),
       );
     }
     return ListView.separated(
@@ -1796,8 +2084,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     final leaves = node?.leaves ?? const <IptvCategory>[];
     if (leaves.isEmpty) {
       return const Center(
-        child: Text('Nenhuma subcategoria',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+        child: Text(
+          'Nenhuma subcategoria',
+          style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+        ),
       );
     }
     return ListView.separated(
@@ -1838,7 +2128,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         child: Row(
           children: [
             Icon(
-              hasSubs ? Icons.folder_rounded : Icons.play_circle_outline_rounded,
+              hasSubs
+                  ? Icons.folder_rounded
+                  : Icons.play_circle_outline_rounded,
               color: hasSubs ? AppColors.primary : AppColors.accentGreen,
               size: 19,
             ),
@@ -1853,9 +2145,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13.5),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13.5,
+                    ),
                   ),
                   const SizedBox(height: 1),
                   Text(
@@ -1863,7 +2156,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: AppColors.textSecondary, fontSize: 10),
+                      color: AppColors.textSecondary,
+                      fontSize: 10,
+                    ),
                   ),
                 ],
               ),
@@ -1872,9 +2167,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
             Text(
               '$count',
               style: const TextStyle(
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 11),
+                color: Colors.white70,
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+              ),
             ),
             const SizedBox(width: 3),
             Icon(
@@ -1951,15 +2247,18 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12.5),
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12.5,
+                          ),
                         ),
                         if (selected)
                           const Text(
                             'Prévia ao vivo',
                             style: TextStyle(
-                                color: AppColors.primary, fontSize: 9.5),
+                              color: AppColors.primary,
+                              fontSize: 9.5,
+                            ),
                           ),
                       ],
                     ),
@@ -1987,8 +2286,6 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       },
     );
   }
-
-
 }
 
 /// Barra de progresso do programa atual. Atualiza a cada segundo:
@@ -2022,9 +2319,14 @@ class _EpgProgressBarState extends State<_EpgProgressBar> {
   }
 
   double get _progress {
-    final total = widget.program.end.difference(widget.program.start).inMilliseconds;
+    final total = widget.program.end
+        .difference(widget.program.start)
+        .inMilliseconds;
     if (total <= 0) return 0;
-    final elapsed = DateTime.now().toUtc().difference(widget.program.start).inMilliseconds;
+    final elapsed = DateTime.now()
+        .toUtc()
+        .difference(widget.program.start)
+        .inMilliseconds;
     return (elapsed / total).clamp(0.0, 1.0);
   }
 

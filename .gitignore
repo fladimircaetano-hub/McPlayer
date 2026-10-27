@@ -48,7 +48,9 @@ app.*.map.json
 .widget_preview/
 
 # Artefatos locais de build/distribuicao
+/dist/
 /apk-serve/
+/*.apk
 /McPayer.apk
 /McPayer_copy.apk
 /McPayer_full.apk

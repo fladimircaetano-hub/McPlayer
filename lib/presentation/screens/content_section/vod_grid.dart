@@ -1,6 +1,9 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/back_navigation_mixin.dart';
 import '../../../data/models/iptv_category.dart';
@@ -47,7 +50,6 @@ String _categoryParent(String raw) => categoryParent(raw);
 
 String _categorySubLabel(String raw) => categorySubLabel(raw);
 
-
 /// Grade de pôsteres para Filmes e Séries.
 /// - Layout responsivo (2/3/4 colunas conforme largura)
 /// - Séries agrupadas (1 cartão por série, abre sheet de temporadas/episódios)
@@ -64,12 +66,17 @@ class VodGrid extends StatefulWidget {
 
 class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchNode = FocusNode();
+  final FocusNode _backNode = FocusNode();
   Timer? _searchDebounce;
 
   bool _showOnlyFavorites = false;
   int _sortMode = 0; // 0=original, 1=A–Z, 2=Z–A
-  String get _sortSuffix =>
-      _sortMode == 1 ? ' A–Z ✓' : _sortMode == 2 ? ' Z–A ✓' : '';
+  String get _sortSuffix => _sortMode == 1
+      ? ' A–Z ✓'
+      : _sortMode == 2
+      ? ' Z–A ✓'
+      : '';
   bool _isSearching = false;
   String _appVersion = '';
 
@@ -130,15 +137,16 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   /// resultados imediatamente, não a grade de pastas.
   bool get _searchActive => widget.controller.searchQuery.trim().isNotEmpty;
 
-  bool get _isAllSelected =>
-      !_showOnlyFavorites && _selectedParent == 'TODOS';
+  bool get _isAllSelected => !_showOnlyFavorites && _selectedParent == 'TODOS';
 
   String get _title {
     if (_searchActive) return 'Busca';
     if (_showOnlyFavorites) return 'Favoritos';
     if (!_isTv && _selectedParent.isNotEmpty) {
       if (_selectedParent == 'TODOS') {
-        return _type == StreamType.movie ? 'Todos os Filmes' : 'Todas as Séries';
+        return _type == StreamType.movie
+            ? 'Todos os Filmes'
+            : 'Todas as Séries';
       }
       final sub = _selectedSub;
       if (sub != null && sub != _kAllSubs) {
@@ -159,7 +167,14 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   @override
   void initState() {
     super.initState();
+    // A barra de busca da TV fica sempre visível: o listener garante que
+    // o botão "Cancelar" apareça assim que o campo recebe foco.
+    _searchNode.addListener(_onSearchFocusChanged);
     _loadAppVersion();
+  }
+
+  void _onSearchFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadAppVersion() async {
@@ -177,6 +192,9 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _searchNode.removeListener(_onSearchFocusChanged);
+    _searchNode.dispose();
+    _backNode.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -186,6 +204,60 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
       widget.controller.setSearchQuery(val);
     });
+  }
+
+  bool get _searchEngaged =>
+      _isSearching || _searchNode.hasFocus || _searchCtrl.text.isNotEmpty;
+
+  void _hideKeyboard() {
+    SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+  }
+
+  /// Sai do campo de busca: fecha o teclado, limpa o filtro e devolve o
+  /// foco ao botão Voltar. Chamado pelo "Cancelar" e pelo botão Back do
+  /// controle — antes o D-pad ficava preso no TextField.
+  void _cancelSearch() {
+    _searchDebounce?.cancel();
+    if (_searchCtrl.text.isNotEmpty) _searchCtrl.clear();
+    if (widget.controller.searchQuery.isNotEmpty) {
+      widget.controller.setSearchQuery('');
+    }
+    _searchNode.unfocus();
+    _hideKeyboard();
+    if (_isSearching) {
+      setState(() => _isSearching = false);
+    } else if (mounted) {
+      setState(() {});
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _backNode.requestFocus();
+    });
+  }
+
+  /// D-pad preso no TextField: setas verticais não movem o cursor, então
+  /// devolvem a navegação para a lista de categorias.
+  KeyEventResult _onSearchKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape) {
+      _cancelSearch();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.arrowUp) {
+      _searchNode.unfocus();
+      _hideKeyboard();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        FocusScope.of(context).focusInDirection(
+          key == LogicalKeyboardKey.arrowDown
+              ? TraversalDirection.down
+              : TraversalDirection.up,
+        );
+      });
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   // ---------- dados ----------
@@ -219,9 +291,11 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     if (_sortMode != 0) {
       final asc = _sortMode == 1;
       items = [...items]
-        ..sort((a, b) => asc
-            ? a.name.toLowerCase().compareTo(b.name.toLowerCase())
-            : b.name.toLowerCase().compareTo(a.name.toLowerCase()));
+        ..sort(
+          (a, b) => asc
+              ? a.name.toLowerCase().compareTo(b.name.toLowerCase())
+              : b.name.toLowerCase().compareTo(a.name.toLowerCase()),
+        );
     }
     return items;
   }
@@ -242,8 +316,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
           item: playlist[index],
           playlist: playlist,
           initialIndex: index,
-          keepScreenOn:
-              widget.controller.storageService.getKeepScreenOn(),
+          keepScreenOn: widget.controller.storageService.getKeepScreenOn(),
         ),
       ),
     );
@@ -260,8 +333,9 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
           child: CircularProgressIndicator(color: AppColors.primary),
         ),
       );
-      final episodes =
-          await widget.controller.getSeriesEpisodes(group.seriesId!);
+      final episodes = await widget.controller.getSeriesEpisodes(
+        group.seriesId!,
+      );
       if (!mounted) return;
       Navigator.of(context).pop();
       if (episodes.isEmpty) {
@@ -320,12 +394,21 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   @override
   void onSystemBack(bool didPop, Object? result) {
     if (didPop) return;
+    // 1º Back: sai da busca (teclado + foco). 2º Back: volta um nível/sai.
+    if (_searchEngaged) {
+      _cancelSearch();
+      return;
+    }
     if (_goBackLevel()) return;
     super.onSystemBack(didPop, result);
   }
 
   @override
   void handleBackButton() {
+    if (_searchEngaged) {
+      _cancelSearch();
+      return;
+    }
     if (_goBackLevel()) return;
     super.handleBackButton();
   }
@@ -363,9 +446,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 _buildTopBar(),
                 if (!_isTv && _isSearching) _buildSearchRow(),
                 if (!_isTv) _buildMobileBreadcrumb(),
-                Expanded(
-                  child: _isTv ? _buildTvBody() : _buildMobileBody(),
-                ),
+                Expanded(child: _isTv ? _buildTvBody() : _buildMobileBody()),
               ],
             ),
           ),
@@ -407,15 +488,11 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       children: [
         _sidebarHeader('CATEGORIAS', subtitle: '$visibleCount'),
         const SizedBox(height: 8),
-        TextField(
-          controller: _searchCtrl,
-          decoration: InputDecoration(
-            hintText: _isSeries ? 'Pesquisar séries...' : 'Pesquisar filmes...',
-            prefixIcon: const Icon(Icons.search, size: 20),
-            isDense: true,
-          ),
-          onChanged: _onSearchChanged,
-        ),
+        _buildSearchField(),
+        if (_searchEngaged) ...[
+          const SizedBox(height: 6),
+          _buildSearchCancelButton(compact: true),
+        ],
         const SizedBox(height: 8),
         Expanded(
           child: ListView(
@@ -438,13 +515,15 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               ),
               ...tree
                   .where((node) => hidden == null || node.name != hidden.name)
-                  .map((node) => _categoryRow(
-                        name: node.name,
-                        count: node.count,
-                        selected: !_showOnlyFavorites &&
-                            _selectedParent == node.name,
-                        onTap: () => _selectParent(node.name),
-                      )),
+                  .map(
+                    (node) => _categoryRow(
+                      name: node.name,
+                      count: node.count,
+                      selected:
+                          !_showOnlyFavorites && _selectedParent == node.name,
+                      onTap: () => _selectParent(node.name),
+                    ),
+                  ),
             ],
           ),
         ),
@@ -463,17 +542,18 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               _categoryRow(
                 name: 'TODAS',
                 count: node.count,
-                selected:
-                    _selectedSub == null || _selectedSub == _kAllSubs,
+                selected: _selectedSub == null || _selectedSub == _kAllSubs,
                 autofocus: true,
                 onTap: () => _selectSub(_kAllSubs),
               ),
-              ...node.leaves.map((leaf) => _categoryRow(
-                    name: _categorySubLabel(leaf.name),
-                    count: leaf.count,
-                    selected: _selectedSub == leaf.name,
-                    onTap: () => _selectSub(leaf.name),
-                  )),
+              ...node.leaves.map(
+                (leaf) => _categoryRow(
+                  name: _categorySubLabel(leaf.name),
+                  count: leaf.count,
+                  selected: _selectedSub == leaf.name,
+                  onTap: () => _selectSub(leaf.name),
+                ),
+              ),
             ],
           ),
         ),
@@ -499,9 +579,10 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14),
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+              ),
             ),
           ),
           if (subtitle != null) ...[
@@ -511,9 +592,10 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13),
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
             ),
           ],
         ],
@@ -543,8 +625,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 ? active.withValues(alpha: 0.18)
                 : AppColors.surface,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: selected ? active : AppColors.cardBorder),
+            border: Border.all(color: selected ? active : AppColors.cardBorder),
           ),
           child: Row(
             children: [
@@ -554,15 +635,19 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      color: selected ? active : Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14),
+                    color: selected ? active : Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
                 ),
               ),
-              Text('$count',
-                  style: TextStyle(
-                      color: selected ? active : Colors.white,
-                      fontWeight: FontWeight.bold)),
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: selected ? active : Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
           ),
         ),
@@ -584,7 +669,9 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                _isSeries ? Icons.movie_filter_rounded : Icons.video_collection_rounded,
+                _isSeries
+                    ? Icons.movie_filter_rounded
+                    : Icons.video_collection_rounded,
                 color: AppColors.primary.withValues(alpha: 0.5),
                 size: 56,
               ),
@@ -593,8 +680,8 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 awaitingSub
                     ? 'Selecione uma subcategoria de filmes'
                     : _isSeries
-                        ? 'Selecione uma categoria de séries'
-                        : 'Selecione uma categoria de filmes',
+                    ? 'Selecione uma categoria de séries'
+                    : 'Selecione uma categoria de filmes',
                 style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 16,
@@ -606,7 +693,10 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 awaitingSub
                     ? 'Navegue pelas subcategorias ao lado'
                     : 'Navegue pelas categorias à esquerda',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
@@ -622,12 +712,12 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     final label = _showOnlyFavorites
         ? 'FAVORITOS'
         : _searchActive
-            ? 'BUSCA'
-            : (_selectedParent == 'TODOS'
-                ? 'TODOS'
-                : sub != null
-                    ? '$parentLabel  ›  ${sub == _kAllSubs ? 'TODAS' : _categorySubLabel(sub)}'
-                    : parentLabel);
+        ? 'BUSCA'
+        : (_selectedParent == 'TODOS'
+              ? 'TODOS'
+              : sub != null
+              ? '$parentLabel  ›  ${sub == _kAllSubs ? 'TODAS' : _categorySubLabel(sub)}'
+              : parentLabel);
     return Container(
       decoration: BoxDecoration(
         // Grade translúcida; categorias à esquerda seguem opacas.
@@ -639,8 +729,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
                 Expanded(
@@ -649,16 +738,20 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 24),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 24,
+                    ),
                   ),
                 ),
-                Text('$count',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16)),
+                Text(
+                  '$count',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
               ],
             ),
           ),
@@ -680,7 +773,10 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
 
     // Nível 2: grade de cards de subcategorias (se existirem)
     final node = _selectedNode;
-    if (node != null && node.hasSubs && _selectedSub == null && !_showOnlyFavorites) {
+    if (node != null &&
+        node.hasSubs &&
+        _selectedSub == null &&
+        !_showOnlyFavorites) {
       return _buildMobileSubcategoriesView(node);
     }
 
@@ -719,8 +815,11 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
             onPressed: _goBackLevel,
             child: const Padding(
               padding: EdgeInsets.all(4),
-              child: Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white70, size: 14),
+              child: Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: Colors.white70,
+                size: 14,
+              ),
             ),
           ),
           const SizedBox(width: 6),
@@ -767,8 +866,11 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Row(
             children: [
-              const Icon(Icons.folder_rounded,
-                  color: AppColors.primary, size: 22),
+              const Icon(
+                Icons.folder_rounded,
+                color: AppColors.primary,
+                size: 22,
+              ),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
@@ -853,8 +955,11 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Row(
             children: [
-              const Icon(Icons.subdirectory_arrow_right_rounded,
-                  color: AppColors.accentGreen, size: 22),
+              const Icon(
+                Icons.subdirectory_arrow_right_rounded,
+                color: AppColors.accentGreen,
+                size: 22,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -977,10 +1082,6 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     );
   }
 
-
-
-
-
   Widget _buildTopBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -988,12 +1089,16 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       child: Row(
         children: [
           TvFocusable(
+            focusNode: _backNode,
             borderRadius: BorderRadius.circular(8),
             onPressed: handleBackButton,
             child: const Padding(
               padding: EdgeInsets.all(8),
-              child: Icon(Icons.arrow_back_rounded,
-                  color: Colors.white, size: 24),
+              child: Icon(
+                Icons.arrow_back_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -1001,9 +1106,10 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
             child: Text(
               _title,
               style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 24),
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 24,
+              ),
             ),
           ),
           if (_appVersion.isNotEmpty)
@@ -1012,9 +1118,10 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               child: Text(
                 'v$_appVersion',
                 style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600),
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           if (_isTv) ...[
@@ -1072,11 +1179,92 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               ),
             ),
             const SizedBox(width: 8),
-            Text(label,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Campo de busca compartilhado entre TV (sidebar) e celular.
+  /// O [Focus] externo só intercepta teclas que o TextField ignorou
+  /// (setas verticais/Escape) para o D-pad não ficar preso no campo.
+  Widget _buildSearchField() {
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: _onSearchKey,
+      child: TextField(
+        controller: _searchCtrl,
+        focusNode: _searchNode,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: _isSeries ? 'Pesquisar séries...' : 'Pesquisar filmes...',
+          prefixIcon: const Icon(Icons.search, size: 20),
+          isDense: true,
+          suffixIcon: _searchCtrl.text.isEmpty && !_searchNode.hasFocus
+              ? null
+              : IconButton(
+                  tooltip: 'Limpar busca',
+                  icon: const Icon(Icons.close, size: 18),
+                  onPressed: _cancelSearch,
+                ),
+        ),
+        onChanged: (v) {
+          _onSearchChanged(v);
+          // Rebuild local para o "X" aparecer enquanto digita.
+          if (mounted) setState(() {});
+        },
+        onSubmitted: (_) {
+          // Enter/OK no teclado apenas recolhe o teclado e mantém os
+          // resultados; não fecha a tela nem deixa o foco preso.
+          _searchNode.unfocus();
+          _hideKeyboard();
+          if (mounted) setState(() {});
+        },
+      ),
+    );
+  }
+
+  Widget _buildSearchCancelButton({bool compact = false}) {
+    return TvFocusable(
+      borderRadius: BorderRadius.circular(8),
+      onPressed: _cancelSearch,
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: compact ? 8 : 11,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.cardBorder),
+        ),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.keyboard_backspace_rounded,
+              color: AppColors.primary,
+              size: 17,
+            ),
+            SizedBox(width: 6),
+            Text(
+              'Cancelar busca',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ),
       ),
@@ -1086,15 +1274,39 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   Widget _buildSearchRow() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: TextField(
-        controller: _searchCtrl,
-        autofocus: true,
-        decoration: InputDecoration(
-          hintText: _isSeries ? 'Pesquisar séries...' : 'Pesquisar filmes...',
-          prefixIcon: const Icon(Icons.search, size: 20),
-        ),
-        onChanged: _onSearchChanged,
-        onSubmitted: (_) => setState(() => _isSearching = false),
+      child: Row(
+        children: [
+          Expanded(
+            child: Focus(
+              canRequestFocus: false,
+              skipTraversal: true,
+              onKeyEvent: _onSearchKey,
+              child: TextField(
+                controller: _searchCtrl,
+                focusNode: _searchNode,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: _isSeries
+                      ? 'Pesquisar séries...'
+                      : 'Pesquisar filmes...',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                ),
+                onChanged: (v) {
+                  _onSearchChanged(v);
+                  if (mounted) setState(() {});
+                },
+                onSubmitted: (_) {
+                  _searchNode.unfocus();
+                  _hideKeyboard();
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(width: 148, child: _buildSearchCancelButton()),
+        ],
       ),
     );
   }
@@ -1157,15 +1369,14 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       itemCount: items.length,
       itemBuilder: (context, i) {
         final item = items[i];
-        return TvFocusable(
-          borderRadius: BorderRadius.circular(8),
-          onPressed: () => _openPlayer(items, i),
-          child: StreamCard(
-            item: item,
-            onTap: () => _openPlayer(items, i),
-            onToggleFavorite: () => widget.controller.toggleFavorite(item),
-            isVod: true,
-          ),
+        // StreamCard já é um TvFocusable: um único clique pressiona OK,
+        // abre o player e desenha o foco. O wrapper externo duplicava os
+        // eventos e exigia um segundo toque em alguns controles.
+        return StreamCard(
+          item: item,
+          onTap: () => _openPlayer(items, i),
+          onToggleFavorite: () => widget.controller.toggleFavorite(item),
+          isVod: true,
         );
       },
     );
@@ -1208,15 +1419,11 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               ? _seriesCardSubtitle(group.category)
               : '${group.episodes.length} episódios',
         );
-        return TvFocusable(
-          borderRadius: BorderRadius.circular(8),
-          onPressed: () => _onSeriesTap(group),
-          child: StreamCard(
-            item: displayItem,
-            onTap: () => _onSeriesTap(group),
-            onToggleFavorite: () => widget.controller.toggleFavorite(group.rep),
-            isVod: true,
-          ),
+        return StreamCard(
+          item: displayItem,
+          onTap: () => _onSeriesTap(group),
+          onToggleFavorite: () => widget.controller.toggleFavorite(group.rep),
+          isVod: true,
         );
       },
     );

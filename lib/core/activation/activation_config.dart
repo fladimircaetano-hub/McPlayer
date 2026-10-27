@@ -1,17 +1,45 @@
 /// Configuração da ativação remota (McPlayer/NexPlay <-> Dashboard).
 ///
-/// Valores são injetados via `--dart-define` no build:
+/// O build PADRÃO já sai com a ativação remota LIGADA: os valores abaixo são
+/// embutidos no APK sem precisar de `--dart-define`. Isso evita o APK
+/// "sem painel" (aparelho não aparece no dashboard).
+///
+/// A chave usada é a **anon key** (pública, a mesma de `dashboard/js/config.js`);
+/// quem controla o acesso são as RLS + RPCs do Supabase, nunca a chave.
+/// NUNCA colocar a `service_role` key aqui.
+///
+/// Para sobrescrever (outro projeto Supabase, outro nome de app ou build em
+/// modo manual), basta passar os defines no build:
 /// `--dart-define=SUPABASE_URL=https://... --dart-define=SUPABASE_ANON_KEY=... --dart-define=APP_NAME=McPlayer`
 /// `--dart-define=SUPABASE_URL=https://... --dart-define=SUPABASE_ANON_KEY=... --dart-define=APP_NAME=NexPlay`
-/// Se não definidos, a ativação remota fica DESLIGADA e o app
-/// funciona normalmente no modo manual (digitar M3U/Xtream).
+/// Para gerar um APK SEM ativação remota (modo manual), passe vazio:
+/// `--dart-define=SUPABASE_URL= --dart-define=SUPABASE_ANON_KEY=`
 class ActivationConfig {
-  static const String supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
-  static const String supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+  /// Projeto Supabase usado pelo Dashboard (`mcplayer-dashboard.vercel.app`).
+  static const String _defaultSupabaseUrl =
+      'https://pfpmizermpxhwaekoylq.supabase.co';
+
+  /// Chave ANON (pública) do mesmo projeto. Ver `dashboard/js/config.js`.
+  static const String _defaultSupabaseAnonKey =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
+      'eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmcG1pemVybXB4aHdhZWtveWxxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNDk3ODIsImV4cCI6MjEwNDgyNTc4Mn0.'
+      'Bu9cr3bhTFhc92Ilbz0UVWEPiD55Yi3TBU2VvI_sw70';
+
+  static const String supabaseUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: _defaultSupabaseUrl,
+  );
+  static const String supabaseAnonKey = String.fromEnvironment(
+    'SUPABASE_ANON_KEY',
+    defaultValue: _defaultSupabaseAnonKey,
+  );
 
   /// Nome do app enviado no check-in (aparece no painel).
   /// Permite diferenciar apps no mesmo Dashboard: 'McPlayer' | 'NexPlay'.
-  static const String appName = String.fromEnvironment('APP_NAME', defaultValue: 'McPlayer');
+  static const String appName = String.fromEnvironment(
+    'APP_NAME',
+    defaultValue: 'McPlayer',
+  );
 
   /// Formato da chave do aparelho (ver `StorageService.getDeviceId`).
   ///

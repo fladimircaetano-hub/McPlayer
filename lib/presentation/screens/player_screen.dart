@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/back_navigation_mixin.dart';
 import '../../core/utils/playback_math.dart';
@@ -76,6 +78,41 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   static const int _maxRetries = 2;
   int _openGeneration = 0;
 
+  // ===== Pipeline de vídeo (4K / HEVC / AV1) =====
+  // TV boxes baratas costumam renderizar "verde/quadriculado" quando o
+  // MediaCodec entrega frames direto na superfície (direct rendering).
+  // Para conteúdo 4K começamos em `mediacodec-copy` e, se ainda falhar,
+  // caímos para decodificação 100% por software.
+  bool _is4K = false;
+  int _decodeAttempt = 0;
+  bool _switchingDecoder = false;
+  bool _autoTuned4K = false;
+  static const int _maxDecodeAttempts = 2;
+
+  bool get _isAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// Codec/renderização que será aplicada antes de cada `open()`.
+  String? get _hwdecMode {
+    if (!_isAndroid) {
+      // Windows/Linux/macOS: usa o padrão na 1ª tentativa e software na 2ª.
+      return _decodeAttempt == 0 ? null : 'no';
+    }
+    if (_decodeAttempt == 0) {
+      return _is4K ? 'mediacodec-copy' : 'auto-safe';
+    }
+    return 'no';
+  }
+
+  static final RegExp _uhdPattern = RegExp(
+    r'(\b4k\b|\buhd\b|\b2160p?\b|\bhevc\b|h\.?265|\bx265\b|\bav1\b|3840\s*[x×]\s*2160)',
+    caseSensitive: false,
+  );
+
+  /// Detecta 4K/codecs de alto risco pelo nome, categoria ou URL do item.
+  static bool _looksLike4K(StreamItem item) =>
+      _uhdPattern.hasMatch('${item.name} ${item.category} ${item.streamUrl}');
+
   /// Watchdog anti-travamento: detecta buffering infinito ou frame
   /// congelado (posição sem avançar em VOD) e reconecta sozinho.
   Timer? _stallTimer;
@@ -84,7 +121,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   static const _bufferTimeout = Duration(seconds: 25);
   static const _stallTimeout = Duration(seconds: 20);
   bool _watchdogActive = false;
-  
+
   // Para detectar "frame congelado" em live streams com timestamp parado
   int _lastKnownPosition = -1;
   int _stallPositionCount = 0;
@@ -107,6 +144,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   final FocusNode _back10Node = FocusNode();
   final FocusNode _fwd10Node = FocusNode();
   final FocusNode _sliderNode = FocusNode();
+  final FocusNode _compatNode = FocusNode();
 
   /// Nós da tela de erro: o overlay entra depois do build inicial, então o
   /// autofocus sozinho nem sempre entrega o foco no Fire TV (D-pad). Sem
@@ -129,6 +167,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         ? <StreamItem>[]
         : orderPlaylistForPlayback(widget.playlist!);
     _currentItem = widget.item;
+    _is4K = _looksLike4K(_currentItem);
     if (_playlist.isNotEmpty) {
       // Depois da ordenação (séries), o índice recebido pode não valer mais:
       // localiza pelo item de verdade e só usa o índice como fallback.
@@ -166,148 +205,373 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _initBrightness();
   }
 
-  /// Inicialização ordenada do player nativo: cria, liga a decodificação
-  /// por hardware e só então abre a stream. `auto-safe` seleciona o decodificador
-  /// por hardware ideal para a plataforma (MediaCodec no Android, D3D11VA no Windows)
-  /// e faz fallback limpo para software se não disponível.
+  /// Inicialização ordenada do player nativo: cria, configura o pipeline
+  /// (4K seguro quando necessário) e só então abre a stream.
   Future<void> _initNativePlayer() async {
-    _player = Player(
-      configuration: const PlayerConfiguration(
-        title: 'MC Player',
-        osc: false,
-      ),
-    );
-    try {
-      final platform = _player!.platform;
-      if (platform != null) {
-        final dyn = platform as dynamic;
-        
-        // ========== DECODIFICAÇÃO DE HARDWARE ==========
-        // auto-safe: tenta hwdec, cai para software se falhar
-        await dyn
-            .setProperty('hwdec', 'auto-safe')
-            .timeout(const Duration(seconds: 5));
-        
-        // ========== BUFFER/MEMÓRIA (OTIMIZADO P/ 1 GB RAM) ==========
-        // Stick de 1 GB: o padrão do mpv (250 MB + 100 MB back) estoura a RAM
-        // e o sistema mata o app (LMK). Valores reduzidos com margem de segurança.
-        await dyn
-            .setProperty('demuxer-max-bytes', '48MiB')     // era 64MiB
-            .timeout(const Duration(seconds: 5));
-        await dyn
-            .setProperty('demuxer-max-back-bytes', '8MiB')  // era 16MiB
-            .timeout(const Duration(seconds: 5));
-        
-        // Cache de rede: menor = menos RAM, mas pode travar em rede instável
-        // 8s é equilíbrio para HLS live; VOD busca sob demanda
-        await dyn
-            .setProperty('cache-secs', '8')                 // era 10
-            .timeout(const Duration(seconds: 3));
-        await dyn
-            .setProperty('cache-pause', 'yes')              // pausa download quando pausado
-            .timeout(const Duration(seconds: 3));
-        
-        // ========== ESTABILIDADE DE REDE ==========
-        // Reconexão automática em falhas de rede transitórias
-        await dyn
-            .setProperty('network-timeout', '20')           // timeout de rede (segundos)
-            .timeout(const Duration(seconds: 3));
-        await dyn
-            .setProperty('reconnect-streamed', 'yes')       // reconecta streams ao vivo
-            .timeout(const Duration(seconds: 3));
-        await dyn
-            .setProperty('reconnect-delay-max', '5')        // max delay entre retries
-            .timeout(const Duration(seconds: 3));
-        
-        // ========== HLS ESPECÍFICO ==========
-        // Melhora robustez de HLS (muito usado em IPTV)
-        await dyn
-            .setProperty('hls-bitrate', 'auto')             // seleção adaptativa
-            .timeout(const Duration(seconds: 3));
-        await dyn
-            .setProperty('hls-max-bitrate', '5000000')      // limite 5 Mbps p/ sticks
-            .timeout(const Duration(seconds: 3));
-        
-        // ========== BAIXA LATÊNCIA (LIVE) ==========
-        // Reduz buffer para canais ao vivo (zapping mais rápido)
-        await dyn
-            .setProperty('cache-pause-initial', 'yes')      // não bufferiza antes do play
-            .timeout(const Duration(seconds: 3));
-        
-        // ========== LOGGING DEBUG (DESABILITADO EM PRODUÇÃO) ==========
-        // await dyn.setProperty('msg-level', 'all=warn');   // reduz logs verbosos
-      }
-    } catch (e) {
-      // Aparelho sem suporte: segue em software.
-      debugPrint('[Player] hwdec/setup failed (fallback to software): $e');
-    }
+    await _createNativePlayer();
     if (!mounted) return;
-    setState(() {
-      _videoController = VideoController(
-        _player!,
-        configuration: const VideoControllerConfiguration(
-          enableHardwareAcceleration: true,
-        ),
-      );
-    });
-    _subscribe();
     _open(_currentItem.streamUrl);
     _startStallWatchdog();
   }
 
-  void _subscribe() {
-    _subs.add(_player!.stream.playing.listen((playing) {
-      if (mounted && playing != _isPlaying) {
-        setState(() => _isPlaying = playing);
-        if (playing) _resetControlsTimeout();
+  Future<void> _createNativePlayer() async {
+    _player = Player(
+      configuration: const PlayerConfiguration(title: 'MC Player', osc: false),
+    );
+    await _applyMpvProperties(_player!);
+    if (!mounted) return;
+
+    final controller = VideoController(
+      _player!,
+      configuration: VideoControllerConfiguration(
+        // Android: `gpu` é o único vo estável com o surface do media_kit.
+        vo: _isAndroid ? 'gpu' : null,
+        // A configuração do controller sobrepõe o que foi definido antes:
+        // é aqui que o 4K realmente troca para mediacodec-copy/no.
+        hwdec: _hwdecMode,
+        // Aceleração de GPU (render), não confundir com decode por HW.
+        enableHardwareAcceleration: true,
+        // Só anexa a surface depois de conhecer a resolução real: evita
+        // stride/tamanho errado no primeiro frame de streams 4K.
+        androidAttachSurfaceAfterVideoParameters: true,
+      ),
+    );
+    setState(() => _videoController = controller);
+    _subscribe();
+  }
+
+  /// Propriedades de rede/memória/hardware do mpv.
+  Future<void> _applyMpvProperties(Player player) async {
+    try {
+      final platform = player.platform;
+      if (platform == null) return;
+      final dyn = platform as dynamic;
+
+      // ========== BUFFER/MEMÓRIA (OTIMIZADO P/ 1 GB RAM) ==========
+      // Stick de 1 GB: o padrão do mpv (250 MB + 100 MB back) estoura a RAM
+      // e o sistema mata o app (LMK). Valores reduzidos com margem de segurança.
+      await dyn
+          .setProperty('demuxer-max-bytes', '48MiB')
+          .timeout(const Duration(seconds: 5));
+      await dyn
+          .setProperty('demuxer-max-back-bytes', '8MiB')
+          .timeout(const Duration(seconds: 5));
+
+      // 4K/10-bit: buffer um pouco maior evita micro-travadas no demux.
+      if (_is4K) {
+        await dyn
+            .setProperty('demuxer-max-bytes', '64MiB')
+            .timeout(const Duration(seconds: 5));
       }
-    }, onError: (e) {
-      debugPrint('[Player] playing stream error: $e');
-    }));
-    _subs.add(_player!.stream.position.listen((pos) {
-      // Throttle: só rebuild quando o segundo muda e não está arrastando.
-      if (_isSeeking) return;
-      // Após um seek, ignora posições antigas até o mpv alcançar o alvo.
-      if (_shouldIgnoreStalePosition(pos)) return;
-      if (mounted && pos.inSeconds != _position.inSeconds) {
-        setState(() => _position = pos);
+
+      // Cache de rede: menor = menos RAM, mas pode travar em rede instável
+      // 8s é equilíbrio para HLS live; VOD busca sob demanda
+      await dyn
+          .setProperty('cache-secs', '8')
+          .timeout(const Duration(seconds: 3));
+      await dyn
+          .setProperty('cache-pause', 'yes')
+          .timeout(const Duration(seconds: 3));
+
+      // ========== ESTABILIDADE DE REDE ==========
+      await dyn
+          .setProperty('network-timeout', '20')
+          .timeout(const Duration(seconds: 3));
+      await dyn
+          .setProperty('reconnect-streamed', 'yes')
+          .timeout(const Duration(seconds: 3));
+      await dyn
+          .setProperty('reconnect-delay-max', '5')
+          .timeout(const Duration(seconds: 3));
+
+      // ========== HLS ESPECÍFICO ==========
+      await dyn
+          .setProperty('hls-bitrate', 'auto')
+          .timeout(const Duration(seconds: 3));
+      await dyn
+          .setProperty('hls-max-bitrate', '5000000')
+          .timeout(const Duration(seconds: 3));
+
+      // ========== BAIXA LATÊNCIA (LIVE) ==========
+      await dyn
+          .setProperty('cache-pause-initial', 'yes')
+          .timeout(const Duration(seconds: 3));
+
+      // ========== 4K / CODECS DE ALTO RISCO ==========
+      // `vd-lavc-dr=no` desliga o direct rendering: é o que corrige o
+      // "glitch verde com linhas" em HEVC 10-bit/AV1 em várias TVs.
+      await dyn
+          .setProperty('vd-lavc-dr', _is4K ? 'no' : 'auto')
+          .timeout(const Duration(seconds: 3));
+      if (_is4K) {
+        // Filtro de escala simples reduz a carga da GPU fraca sem mudar
+        // a resolução da stream (o downscale final continua no display).
+        await dyn
+            .setProperty('scale', 'bilinear')
+            .timeout(const Duration(seconds: 3));
+        await dyn
+            .setProperty('dscale', 'bilinear')
+            .timeout(const Duration(seconds: 3));
       }
-      // Sinal de vida para o watchdog (mesmo sem rebuild).
+      if (_decodeAttempt > 0) {
+        // Decodificação por software: limita threads para não saturar
+        // CPU/RAM do stick e evitar freeze.
+        await dyn
+            .setProperty('vd-lavc-threads', '2')
+            .timeout(const Duration(seconds: 3));
+      }
+    } catch (e) {
+      // Aparelho sem suporte a uma propriedade: segue com as demais.
+      debugPrint('[Player] mpv setup warning: $e');
+    }
+  }
+
+  /// Reaplica hwdec/DR antes de abrir outro item (zapping no playlist).
+  Future<void> _applyVideoPipelineProperties() async {
+    final platform = _player?.platform;
+    if (platform == null) return;
+    try {
+      final dyn = platform as dynamic;
+      final hwdec = _hwdecMode;
+      if (hwdec != null) {
+        await dyn
+            .setProperty('hwdec', hwdec)
+            .timeout(const Duration(seconds: 4));
+      }
+      await dyn
+          .setProperty('vd-lavc-dr', _is4K ? 'no' : 'auto')
+          .timeout(const Duration(seconds: 3));
+    } catch (e) {
+      debugPrint('[Player] pipeline property warning: $e');
+    }
+  }
+
+  String get _codecUnsupportedMessage {
+    final kind = _is4K ? '4K (HEVC/H.265 ou AV1)' : 'codificado (HEVC/AV1)';
+    return 'Este vídeo $kind não pôde ser decodificado neste aparelho. '
+        'Tente a versão Full HD do filme ou use "Modo compatível".';
+  }
+
+  bool _isCodecError(String message) {
+    final m = message.toLowerCase();
+    return m.contains('could not open codec') ||
+        m.contains('failed to initialize decoder') ||
+        m.contains('decoding error') ||
+        m.contains('decode error') ||
+        m.contains('error while decoding') ||
+        m.contains('hardware decoder') ||
+        m.contains('hwdec') ||
+        m.contains('vo/gpu') ||
+        m.contains('context lost') ||
+        m.contains('no video decoder') ||
+        m.contains('unsupported video') ||
+        m.contains('invalid video parameters') ||
+        (m.contains('codec') &&
+            (m.contains('not supported') || m.contains('unsupported')));
+  }
+
+  /// Recria o player com um pipeline mais conservador.
+  ///
+  /// [advance] = false é usado quando o 4K foi descoberto só depois do
+  /// primeiro frame: troca auto-safe -> mediacodec-copy sem consumir uma
+  /// tentativa de fallback.
+  Future<void> _switchDecodeMode({
+    String reason = '',
+    bool manual = false,
+    bool advance = true,
+  }) async {
+    if (!mounted || _isWebPreview || _switchingDecoder) return;
+
+    if (!manual && _decodeAttempt >= _maxDecodeAttempts) {
+      _fail(_codecUnsupportedMessage);
+      return;
+    }
+
+    if (manual) {
+      // Manual: garante o modo por software, mesmo depois de esgotadas
+      // as tentativas automáticas.
+      if (_decodeAttempt == 0) _decodeAttempt = 1;
+    } else if (advance && _decodeAttempt < _maxDecodeAttempts) {
+      _decodeAttempt++;
+    }
+
+    _switchingDecoder = true;
+    _watchdogActive = false;
+    _stallTimer?.cancel();
+    _hideTimer?.cancel();
+
+    final resumeAt = _isLive ? Duration.zero : _position;
+    final wasPlaying = _isPlaying;
+
+    debugPrint(
+      '[Player] Alternando decodificação (attempt=$_decodeAttempt, '
+      'is4K=$_is4K, reason=$reason)',
+    );
+
+    if (mounted) {
+      setState(() {
+        _hasError = false;
+        _errorMessage = '';
+        _isBuffering = true;
+        _showControls = true;
+      });
+    }
+
+    try {
+      for (final s in _subs) {
+        await s.cancel();
+      }
+      _subs.clear();
+
+      final old = _player;
+      _player = null;
+      if (mounted) setState(() => _videoController = null);
+      await old?.dispose();
+
+      await _createNativePlayer();
+      if (!mounted) return;
+
+      _retryCount = 0;
+      _watchdogActive = true;
+      _bufferingSince = DateTime.now();
       _lastProgressAt = DateTime.now();
-    }, onError: (e) {
-      debugPrint('[Player] position stream error: $e');
-    }));
-    _subs.add(_player!.stream.duration.listen((dur) {
-      if (mounted) setState(() => _duration = dur);
-    }, onError: (e) {
-      debugPrint('[Player] duration stream error: $e');
-    }));
-    _subs.add(_player!.stream.buffering.listen((buffering) {
-      if (mounted) setState(() => _isBuffering = buffering);
-      if (buffering) {
-        _bufferingSince ??= DateTime.now();
-      } else {
-        _bufferingSince = null;
-        _lastProgressAt = DateTime.now();
+      _startStallWatchdog();
+
+      await _open(_currentItem.streamUrl);
+      if (!mounted || _hasError) return;
+
+      if (resumeAt > const Duration(seconds: 2)) {
+        await _player?.seek(resumeAt);
       }
-    }, onError: (e) {
-      debugPrint('[Player] buffering stream error: $e');
-    }));
-    _subs.add(_player!.stream.tracks.listen((tracks) {
-      if (mounted) setState(() => _tracks = tracks);
-    }, onError: (e) {
-      debugPrint('[Player] tracks stream error: $e');
-    }));
-    _subs.add(_player!.stream.error.listen((error) {
-      if (error.isNotEmpty) _onPlayerError(error);
-    }, onError: (e) {
-      debugPrint('[Player] error stream error: $e');
-    }));
-    _subs.add(_player!.stream.completed.listen((completed) {
-      if (completed && mounted) _onCompleted();
-    }, onError: (e) {
-      debugPrint('[Player] completed stream error: $e');
-    }));
+      if (!wasPlaying) await _player?.pause();
+    } catch (e) {
+      debugPrint('[Player] decode fallback failed: $e');
+      if (mounted && !_hasError) {
+        _fail('Não foi possível ativar o modo de compatibilidade: $e');
+      }
+    } finally {
+      _switchingDecoder = false;
+    }
+  }
+
+  void _subscribe() {
+    _subs.add(
+      _player!.stream.playing.listen(
+        (playing) {
+          if (mounted && playing != _isPlaying) {
+            setState(() => _isPlaying = playing);
+            if (playing) _resetControlsTimeout();
+          }
+        },
+        onError: (e) {
+          debugPrint('[Player] playing stream error: $e');
+        },
+      ),
+    );
+    _subs.add(
+      _player!.stream.position.listen(
+        (pos) {
+          // Throttle: só rebuild quando o segundo muda e não está arrastando.
+          if (_isSeeking) return;
+          // Após um seek, ignora posições antigas até o mpv alcançar o alvo.
+          if (_shouldIgnoreStalePosition(pos)) return;
+          if (mounted && pos.inSeconds != _position.inSeconds) {
+            setState(() => _position = pos);
+          }
+          // Sinal de vida para o watchdog (mesmo sem rebuild).
+          _lastProgressAt = DateTime.now();
+        },
+        onError: (e) {
+          debugPrint('[Player] position stream error: $e');
+        },
+      ),
+    );
+    _subs.add(
+      _player!.stream.duration.listen(
+        (dur) {
+          if (mounted) setState(() => _duration = dur);
+        },
+        onError: (e) {
+          debugPrint('[Player] duration stream error: $e');
+        },
+      ),
+    );
+    _subs.add(
+      _player!.stream.buffering.listen(
+        (buffering) {
+          if (mounted) setState(() => _isBuffering = buffering);
+          if (buffering) {
+            _bufferingSince ??= DateTime.now();
+          } else {
+            _bufferingSince = null;
+            _lastProgressAt = DateTime.now();
+          }
+        },
+        onError: (e) {
+          debugPrint('[Player] buffering stream error: $e');
+        },
+      ),
+    );
+    _subs.add(
+      _player!.stream.tracks.listen(
+        (tracks) {
+          if (mounted) setState(() => _tracks = tracks);
+        },
+        onError: (e) {
+          debugPrint('[Player] tracks stream error: $e');
+        },
+      ),
+    );
+    // 4K não anunciado no nome/categoria: detecta pela resolução real e
+    // muda preventivamente para o pipeline seguro (cópia/software).
+    _subs.add(
+      _player!.stream.videoParams.listen(
+        (params) {
+          final w = params.w ?? 0;
+          final h = params.h ?? 0;
+          final uhd = w >= 3000 || h >= 1700;
+          final tenBit =
+              '${params.pixelformat ?? ''} ${params.hwPixelformat ?? ''}'
+                  .toLowerCase()
+                  .contains('10');
+          if (!uhd && !tenBit) return;
+          if (!_is4K) {
+            _is4K = true;
+            if (mounted) setState(() {});
+          }
+          if (_isAndroid && _decodeAttempt == 0 && !_autoTuned4K) {
+            _autoTuned4K = true;
+            _switchDecodeMode(
+              reason: 'detectado 4K/10-bit em runtime',
+              advance: false,
+            );
+          }
+        },
+        onError: (e) {
+          debugPrint('[Player] video params stream error: $e');
+        },
+      ),
+    );
+    _subs.add(
+      _player!.stream.error.listen(
+        (error) {
+          if (error.isNotEmpty) _onPlayerError(error);
+        },
+        onError: (e) {
+          debugPrint('[Player] error stream error: $e');
+        },
+      ),
+    );
+    _subs.add(
+      _player!.stream.completed.listen(
+        (completed) {
+          if (completed && mounted) _onCompleted();
+        },
+        onError: (e) {
+          debugPrint('[Player] completed stream error: $e');
+        },
+      ),
+    );
   }
 
   void _startStallWatchdog() {
@@ -318,7 +582,13 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _stallPositionCount = 0;
     _watchdogActive = true;
     _stallTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      if (!mounted || _isWebPreview || _hasError || _player == null || !_watchdogActive) return;
+      if (!mounted ||
+          _isWebPreview ||
+          _hasError ||
+          _player == null ||
+          !_watchdogActive) {
+        return;
+      }
       final now = DateTime.now();
 
       // 1) Buffering infinito: nunca saiu do loading.
@@ -333,7 +603,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       // 2) Frame congelado (apenas VOD): tocando, sem buffering, mas posição parada.
       // Em canais ao vivo (HLS/MPEG-TS), a posição costuma ficar estática em 0.
       if (!_isLive && _isPlaying && !_isBuffering) {
-        final atEnd = _duration.inSeconds > 0 &&
+        final atEnd =
+            _duration.inSeconds > 0 &&
             _position.inSeconds >= _duration.inSeconds - 1;
         if (!atEnd && now.difference(_lastProgressAt) >= _stallTimeout) {
           _lastProgressAt = now;
@@ -341,7 +612,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         }
         return;
       }
-      
+
       // 3) Live stream com timestamp parado (às vezes HLS para de atualizar posição)
       // Detecta se a posição não muda por muito tempo em stream ao vivo
       if (_isLive && _isPlaying && !_isBuffering) {
@@ -349,7 +620,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         if (currentPos == _lastKnownPosition) {
           _stallPositionCount++;
           // Se posição não muda por 30s em live, pode ser stream travado
-          if (_stallPositionCount >= 15) { // 15 * 2s = 30s
+          if (_stallPositionCount >= 15) {
+            // 15 * 2s = 30s
             _stallPositionCount = 0;
             _lastKnownPosition = -1;
             _autoReconnect('stream ao vivo sem progresso');
@@ -366,7 +638,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     if (!mounted || _hasError || !_watchdogActive) return;
     if (_retryCount >= _maxRetries) {
       _fail(
-          'Conexão instável ($motivo após ${_maxRetries + 1} tentativas). Toque em Tentar Novamente.');
+        'Conexão instável ($motivo após ${_maxRetries + 1} tentativas). Toque em Tentar Novamente.',
+      );
       return;
     }
     _retryCount++;
@@ -390,6 +663,9 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     final gen = ++_openGeneration;
     _lastProgressAt = DateTime.now();
     _bufferingSince = DateTime.now();
+    // Cada item do playlist pode ter codec/resolução diferente: recalcula
+    // o pipeline (4K -> cópia/software) antes de abrir a nova stream.
+    _is4K = _looksLike4K(_currentItem);
     if (mounted) {
       setState(() {
         _hasError = false;
@@ -418,6 +694,9 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         }
       }
 
+      // Reaplica hwdec/DR para o item atual (o mpv aplica na próxima mídia).
+      await _applyVideoPipelineProperties();
+
       await _player!
           .open(Media(cleanUrl, httpHeaders: headers), play: true)
           .timeout(
@@ -443,28 +722,45 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         if (mounted) return _open(url, isRetry: true);
       }
       if (mounted) {
-        _fail('Tempo esgotado (tentativa ${_retryCount + 1}/${_maxRetries + 1}). Verifique a internet ou reconecte.');
+        _fail(
+          'Tempo esgotado (tentativa ${_retryCount + 1}/${_maxRetries + 1}). Verifique a internet ou reconecte.',
+        );
       }
     } catch (e) {
       if (!mounted || gen != _openGeneration) return;
       final msg = e.toString().replaceAll('Exception:', '').trim();
-      
+
+      // Codec/decodificação: rede não resolve. Troca para o próximo
+      // pipeline (cópia -> software) antes de desistir.
+      if (_isCodecError(msg)) {
+        if (!_switchingDecoder && _decodeAttempt < _maxDecodeAttempts) {
+          await _switchDecodeMode(reason: msg);
+        } else if (mounted) {
+          _fail(_codecUnsupportedMessage);
+        }
+        return;
+      }
+
       // Erro definitivo (DNS, servidor fora, bloqueio, auth): repetir não
       // adianta — mostra a falha na hora em vez de enrolar no retry.
       if (_isFatalError(msg)) {
         if (mounted) _fail('Falha ao conectar: $msg');
         return;
       }
-      
+
       // Erro transitório (timeout, 5xx, rede instável): tenta retry com backoff
       if (_isTransientError(msg) && _retryCount < _maxRetries && mounted) {
         _retryCount++;
-        final delay = Duration(seconds: _retryCount * 2); // backoff exponencial simples: 2s, 4s, 6s
-        debugPrint('[Player] Transient error, retry $_retryCount/$_maxRetries in ${delay.inSeconds}s: $msg');
+        final delay = Duration(
+          seconds: _retryCount * 2,
+        ); // backoff exponencial simples: 2s, 4s, 6s
+        debugPrint(
+          '[Player] Transient error, retry $_retryCount/$_maxRetries in ${delay.inSeconds}s: $msg',
+        );
         await Future.delayed(delay);
         if (mounted) return _open(url, isRetry: true);
       }
-      
+
       // Outros erros: tenta retry simples uma vez
       if (_retryCount < _maxRetries && mounted) {
         _retryCount++;
@@ -490,10 +786,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         m.contains('http error 401') ||
         m.contains('http error 403') ||
         m.contains('http error 404') ||
-        m.contains('http error 410') ||    // Gone
-        m.contains('http error 503') ||    // Service Unavailable
-        m.contains('ssl handshake') ||     // SSL/TLS falhou
-        m.contains('certificate verify');  // Certificado inválido
+        m.contains('http error 410') || // Gone
+        m.contains('http error 503') || // Service Unavailable
+        m.contains('ssl handshake') || // SSL/TLS falhou
+        m.contains('certificate verify'); // Certificado inválido
   }
 
   /// Verifica se o erro é temporário e vale retry (rede instável, timeout)
@@ -504,34 +800,54 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         m.contains('connection reset') ||
         m.contains('broken pipe') ||
         m.contains('eof') ||
-        m.contains('http error 500') ||    // Internal server error
-        m.contains('http error 502') ||    // Bad gateway
-        m.contains('http error 504');      // Gateway timeout
+        m.contains('http error 500') || // Internal server error
+        m.contains('http error 502') || // Bad gateway
+        m.contains('http error 504'); // Gateway timeout
   }
 
   void _onPlayerError(String error) {
-    if (!mounted || _hasError || !_watchdogActive) return;
+    if (!mounted || _hasError || !_watchdogActive || _switchingDecoder) {
+      return;
+    }
+
+    // Erro de codec/hardware (inclusive o "glitch verde" que derruba o
+    // decoder): tenta o pipeline seguro automaticamente.
+    if (_isCodecError(error)) {
+      if (_decodeAttempt < _maxDecodeAttempts && !_switchingDecoder) {
+        _switchDecodeMode(reason: error);
+      } else {
+        _fail(_codecUnsupportedMessage);
+      }
+      return;
+    }
+
     if (_isFatalError(error)) {
       _fail(error.length > 220 ? '${error.substring(0, 220)}...' : error);
       return;
     }
-    
+
     // Erro transitório: usa backoff exponencial
     if (_isTransientError(error) && _retryCount < _maxRetries) {
       _retryCount++;
       final delay = Duration(seconds: _retryCount * 2);
-      debugPrint('[Player] Stream error (transient), retry $_retryCount/$_maxRetries in ${delay.inSeconds}s: $error');
+      debugPrint(
+        '[Player] Stream error (transient), retry $_retryCount/$_maxRetries in ${delay.inSeconds}s: $error',
+      );
       Future.delayed(delay, () {
-        if (mounted && _watchdogActive) _open(_currentItem.streamUrl, isRetry: true);
+        if (mounted && _watchdogActive) {
+          _open(_currentItem.streamUrl, isRetry: true);
+        }
       });
       return;
     }
-    
+
     // Outros erros: retry simples
     if (_retryCount < _maxRetries) {
       _retryCount++;
       Future.delayed(Duration(seconds: _retryCount), () {
-        if (mounted && _watchdogActive) _open(_currentItem.streamUrl, isRetry: true);
+        if (mounted && _watchdogActive) {
+          _open(_currentItem.streamUrl, isRetry: true);
+        }
       });
     } else {
       _fail(error.length > 220 ? '${error.substring(0, 220)}...' : error);
@@ -584,7 +900,9 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
 
   int? get _prevTarget {
     if (!_hasPlaylist) return null;
-    if (_isLive) return (_currentIndex - 1 + _playlist.length) % _playlist.length;
+    if (_isLive) {
+      return (_currentIndex - 1 + _playlist.length) % _playlist.length;
+    }
     return previousIndex(_currentIndex, _playlist.length);
   }
 
@@ -654,7 +972,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-            'Preview web: reprodução com vídeo disponível no Windows/Android.'),
+          'Preview web: reprodução com vídeo disponível no Windows/Android.',
+        ),
         behavior: SnackBarBehavior.floating,
         duration: Duration(seconds: 2),
       ),
@@ -781,7 +1100,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _resetControlsTimeout();
   }
 
-  Future<void> _handleVerticalDragUpdate(DragUpdateDetails details, double screenWidth) async {
+  Future<void> _handleVerticalDragUpdate(
+    DragUpdateDetails details,
+    double screenWidth,
+  ) async {
     final isLeft = details.globalPosition.dx < (screenWidth / 2);
     final delta = -details.primaryDelta! / 250;
     if (isLeft) {
@@ -831,27 +1153,52 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Faixas de áudio / legendas',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                const Text(
+                  'Faixas de áudio / legendas',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
                 const SizedBox(height: 12),
-                const Text('Áudio', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-                ...tracks.audio.map((t) => ListTile(
-                      dense: true,
-                      title: Text(t.title ?? t.language ?? t.id,
-                          style: const TextStyle(color: Colors.white, fontSize: 13)),
-                      trailing: _player!.state.track.audio.id == t.id
-                          ? const Icon(Icons.check, color: AppColors.primary)
-                          : null,
-                      onTap: () {
-                        _player!.setAudioTrack(t);
-                        Navigator.pop(context);
-                      },
-                    )),
+                const Text(
+                  'Áudio',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+                ...tracks.audio.map(
+                  (t) => ListTile(
+                    dense: true,
+                    title: Text(
+                      t.title ?? t.language ?? t.id,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                    trailing: _player!.state.track.audio.id == t.id
+                        ? const Icon(Icons.check, color: AppColors.primary)
+                        : null,
+                    onTap: () {
+                      _player!.setAudioTrack(t);
+                      Navigator.pop(context);
+                    },
+                  ),
+                ),
                 const SizedBox(height: 8),
-                const Text('Legendas', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                const Text(
+                  'Legendas',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
                 ListTile(
                   dense: true,
-                  title: const Text('Desativadas', style: TextStyle(color: Colors.white, fontSize: 13)),
+                  title: const Text(
+                    'Desativadas',
+                    style: TextStyle(color: Colors.white, fontSize: 13),
+                  ),
                   trailing: _player!.state.track.subtitle.id == 'no'
                       ? const Icon(Icons.check, color: AppColors.primary)
                       : null,
@@ -860,18 +1207,22 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                     Navigator.pop(context);
                   },
                 ),
-                ...tracks.subtitle.map((t) => ListTile(
-                      dense: true,
-                      title: Text(t.title ?? t.language ?? t.id,
-                          style: const TextStyle(color: Colors.white, fontSize: 13)),
-                      trailing: _player!.state.track.subtitle.id == t.id
-                          ? const Icon(Icons.check, color: AppColors.primary)
-                          : null,
-                      onTap: () {
-                        _player!.setSubtitleTrack(t);
-                        Navigator.pop(context);
-                      },
-                    )),
+                ...tracks.subtitle.map(
+                  (t) => ListTile(
+                    dense: true,
+                    title: Text(
+                      t.title ?? t.language ?? t.id,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                    trailing: _player!.state.track.subtitle.id == t.id
+                        ? const Icon(Icons.check, color: AppColors.primary)
+                        : null,
+                    onTap: () {
+                      _player!.setSubtitleTrack(t);
+                      Navigator.pop(context);
+                    },
+                  ),
+                ),
               ],
             ),
           ),
@@ -897,6 +1248,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _back10Node.dispose();
     _fwd10Node.dispose();
     _sliderNode.dispose();
+    _compatNode.dispose();
     _errorBackNode.dispose();
     _errorRetryNode.dispose();
     _player?.dispose();
@@ -919,85 +1271,97 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     final size = MediaQuery.of(context).size;
     return buildWithBackGuard(
       child: Scaffold(
-      backgroundColor: Colors.black,
-      body: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.select): _onSelectKey,
-          const SingleActivator(LogicalKeyboardKey.enter): _onSelectKey,
-          const SingleActivator(LogicalKeyboardKey.mediaPlayPause): _togglePlay,
-          const SingleActivator(LogicalKeyboardKey.mediaPlay): _play,
-          const SingleActivator(LogicalKeyboardKey.mediaPause): _pause,
-          const SingleActivator(LogicalKeyboardKey.mediaRewind): () =>
-              _seekBy(-10),
-          const SingleActivator(LogicalKeyboardKey.mediaFastForward): () =>
-              _seekBy(10),
-          const SingleActivator(LogicalKeyboardKey.channelUp): _zapPrev,
-          const SingleActivator(LogicalKeyboardKey.channelDown): _zapNext,
-          if (_arrowKeysSeek) ...{
-            const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+        backgroundColor: Colors.black,
+        body: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.select): _onSelectKey,
+            const SingleActivator(LogicalKeyboardKey.enter): _onSelectKey,
+            const SingleActivator(LogicalKeyboardKey.mediaPlayPause):
+                _togglePlay,
+            const SingleActivator(LogicalKeyboardKey.mediaPlay): _play,
+            const SingleActivator(LogicalKeyboardKey.mediaPause): _pause,
+            const SingleActivator(LogicalKeyboardKey.mediaRewind): () =>
                 _seekBy(-10),
-            const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+            const SingleActivator(LogicalKeyboardKey.mediaFastForward): () =>
                 _seekBy(10),
-            const SingleActivator(LogicalKeyboardKey.arrowUp): _zapPrev,
-            const SingleActivator(LogicalKeyboardKey.arrowDown): _zapNext,
+            const SingleActivator(LogicalKeyboardKey.channelUp): _zapPrev,
+            const SingleActivator(LogicalKeyboardKey.channelDown): _zapNext,
+            if (_arrowKeysSeek) ...{
+              const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+                  _seekBy(-10),
+              const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+                  _seekBy(10),
+              const SingleActivator(LogicalKeyboardKey.arrowUp): _zapPrev,
+              const SingleActivator(LogicalKeyboardKey.arrowDown): _zapNext,
+            },
           },
-        },
-        child: FocusScope(
-          autofocus: true,
-          child: GestureDetector(
-            // Sem onDoubleTap: o reconhecedor de duplo toque do pai vencia a
-            // disputa e anulava o toque dos botões e da barra.
-            onTap: _handleSurfaceTap,
-            onVerticalDragUpdate: (d) => _handleVerticalDragUpdate(d, size.width),
-            onVerticalDragEnd: _handleVerticalDragEnd,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _buildVideoSurface(),
-                if (_isAdjustingBrightness) _buildBrightnessHud(),
-                if (_isAdjustingVolume) _buildVolumeHud(),
-                if (_isBuffering && !_hasError)
-                  Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircularProgressIndicator(
-                            color: AppColors.primary, strokeWidth: 3),
-                        if (_retryCount > 0) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            'Reconectando (tentativa ${_retryCount + 1}/${_maxRetries + 1})…',
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 13),
+          child: FocusScope(
+            autofocus: true,
+            child: GestureDetector(
+              // Sem onDoubleTap: o reconhecedor de duplo toque do pai vencia a
+              // disputa e anulava o toque dos botões e da barra.
+              onTap: _handleSurfaceTap,
+              onVerticalDragUpdate: (d) =>
+                  _handleVerticalDragUpdate(d, size.width),
+              onVerticalDragEnd: _handleVerticalDragEnd,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _buildVideoSurface(),
+                  if (_isAdjustingBrightness) _buildBrightnessHud(),
+                  if (_isAdjustingVolume) _buildVolumeHud(),
+                  if (_isBuffering && !_hasError)
+                    Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(
+                            color: AppColors.primary,
+                            strokeWidth: 3,
+                          ),
+                          if (_retryCount > 0) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              'Reconectando (tentativa ${_retryCount + 1}/${_maxRetries + 1})…',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                          TvFocusable(
+                            borderRadius: BorderRadius.circular(10),
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: AppColors.cardBorder),
+                              ),
+                              child: const Text(
+                                'Cancelar',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
                           ),
                         ],
-                        const SizedBox(height: 16),
-                        TvFocusable(
-                          borderRadius: BorderRadius.circular(10),
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 18, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: AppColors.cardBorder),
-                            ),
-                            child: const Text('Cancelar',
-                                style: TextStyle(
-                                    color: Colors.white, fontSize: 13)),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                if (_hasError) _buildErrorOverlay(),
-                if (_showControls && !_hasError) _buildControlsOverlay(),
-              ],
+                  if (_hasError) _buildErrorOverlay(),
+                  if (_showControls && !_hasError) _buildControlsOverlay(),
+                ],
+              ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -1019,41 +1383,51 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: AppColors.cardBorder),
                 ),
-                child: const Icon(Icons.live_tv_rounded,
-                    color: AppColors.primary, size: 48),
+                child: const Icon(
+                  Icons.live_tv_rounded,
+                  color: AppColors.primary,
+                  size: 48,
+                ),
               ),
               const SizedBox(height: 16),
               Text(
                 _currentItem.name,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold),
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 _currentItem.category,
-                style:
-                    const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
+                ),
               ),
               const SizedBox(height: 16),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                      color: AppColors.primary.withValues(alpha: 0.4)),
+                    color: AppColors.primary.withValues(alpha: 0.4),
+                  ),
                 ),
                 child: const Text(
                   'PREVIEW WEB — vídeo liberado no app Windows/Android',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                      color: AppColors.primary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold),
+                    color: AppColors.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -1069,7 +1443,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       // mpv; no 1º frame ele ainda é nulo e `_videoController!` quebraria
       // o build (flash de "Oops" ao entrar no player).
       return const Center(
-        child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 3),
+        child: CircularProgressIndicator(
+          color: AppColors.primary,
+          strokeWidth: 3,
+        ),
       );
     }
     return Center(
@@ -1121,14 +1498,19 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   }
 
   Widget _buildControlsOverlay() {
-    final maxSeconds =
-        _duration.inSeconds > 0 ? _duration.inSeconds.toDouble() : 1.0;
-    final currentSeconds = (_seekPreview ??
-            (_position.inSeconds > 0 ? _position.inSeconds.toDouble() : 0.0))
-        .clamp(0.0, maxSeconds)
-        .toDouble();
-    final shownPosition =
-        _seekPreview != null ? Duration(seconds: _seekPreview!.round()) : _position;
+    final maxSeconds = _duration.inSeconds > 0
+        ? _duration.inSeconds.toDouble()
+        : 1.0;
+    final currentSeconds =
+        (_seekPreview ??
+                (_position.inSeconds > 0
+                    ? _position.inSeconds.toDouble()
+                    : 0.0))
+            .clamp(0.0, maxSeconds)
+            .toDouble();
+    final shownPosition = _seekPreview != null
+        ? Duration(seconds: _seekPreview!.round())
+        : _position;
 
     return Container(
       color: Colors.black.withValues(alpha: 0.45),
@@ -1136,271 +1518,362 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         child: FocusTraversalGroup(
           policy: ReadingOrderTraversalPolicy(),
           child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  TvFocusable(
-                    focusNode: _backNode,
-                    borderRadius: BorderRadius.circular(20),
-                    onPressed: handleBackButton,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Icon(Icons.arrow_back, color: Colors.white),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _currentItem.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          _hasPlaylist
-                              ? '${_currentItem.category} • ${_currentIndex + 1}/${_playlist.length}'
-                              : _currentItem.category,
-                          maxLines: 1,
-                          style: const TextStyle(
-                              color: AppColors.textSecondary, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_tracks != null &&
-                      (_tracks!.audio.length > 1 ||
-                          _tracks!.subtitle.isNotEmpty))
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
                     TvFocusable(
-                      borderRadius: BorderRadius.circular(8),
-                      onPressed: _showTracksSheet,
+                      focusNode: _backNode,
+                      borderRadius: BorderRadius.circular(20),
+                      onPressed: handleBackButton,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: Colors.black54,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.cardBorder),
+                          borderRadius: BorderRadius.circular(20),
                         ),
-                        child: const Icon(Icons.closed_caption,
-                            color: AppColors.primary, size: 16),
+                        child: const Icon(
+                          Icons.arrow_back,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
-                  const SizedBox(width: 8),
-                  TvFocusable(
-                    focusNode: _aspectNode,
-                    borderRadius: BorderRadius.circular(8),
-                    onPressed: _cycleAspectRatio,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppColors.cardBorder),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.aspect_ratio,
-                              color: AppColors.primary, size: 16),
-                          const SizedBox(width: 6),
                           Text(
-                            _currentAspect.label,
+                            _currentItem.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            _hasPlaylist
+                                ? '${_currentItem.category} • ${_currentIndex + 1}/${_playlist.length}'
+                                : _currentItem.category,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
                               fontSize: 12,
-                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  TvFocusable(
-                    focusNode: _reconnectNode,
-                    borderRadius: BorderRadius.circular(8),
-                    onPressed: _reconnect,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.black54,
+                    if (_tracks != null &&
+                        (_tracks!.audio.length > 1 ||
+                            _tracks!.subtitle.isNotEmpty))
+                      TvFocusable(
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppColors.cardBorder),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.refresh,
-                              color: AppColors.primary, size: 16),
-                          SizedBox(width: 4),
-                          Text('Reconectar',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (_hasPlaylist) ...[
-                    _circleControl(
-                      node: _prevNode,
-                      icon: Icons.skip_previous_rounded,
-                      onPressed: _canPrev ? _zapPrev : null,
-                    ),
-                    const SizedBox(width: 20),
-                  ],
-                  if (!_isLive) ...[
-                    _circleControl(
-                      node: _back10Node,
-                      icon: Icons.replay_10,
-                      onPressed: () => _seekBy(-10),
-                    ),
-                    const SizedBox(width: 20),
-                  ],
-                  _circleControl(
-                    node: _playPauseNode,
-                    icon: _isPlaying
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded,
-                    onPressed: _togglePlay,
-                    primary: true,
-                    autofocus: true,
-                  ),
-                  if (!_isLive) ...[
-                    const SizedBox(width: 20),
-                    _circleControl(
-                      node: _fwd10Node,
-                      icon: Icons.forward_10,
-                      onPressed: () => _seekBy(10),
-                    ),
-                  ],
-                  if (_hasPlaylist) ...[
-                    const SizedBox(width: 20),
-                    _circleControl(
-                      node: _nextNode,
-                      icon: Icons.skip_next_rounded,
-                      onPressed: _canNext ? _zapNext : null,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: _isLive
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
+                        onPressed: _showTracksSheet,
+                        child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
-                            color: AppColors.accentLive,
-                            borderRadius: BorderRadius.circular(4),
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.cardBorder),
+                          ),
+                          child: const Icon(
+                            Icons.closed_caption,
+                            color: AppColors.primary,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    TvFocusable(
+                      focusNode: _aspectNode,
+                      borderRadius: BorderRadius.circular(8),
+                      onPressed: _cycleAspectRatio,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.cardBorder),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.aspect_ratio,
+                              color: AppColors.primary,
+                              size: 16,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _currentAspect.label,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TvFocusable(
+                      focusNode: _reconnectNode,
+                      borderRadius: BorderRadius.circular(8),
+                      onPressed: _reconnect,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.cardBorder),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.refresh,
+                              color: AppColors.primary,
+                              size: 16,
+                            ),
+                            SizedBox(width: 4),
+                            Text(
+                              'Reconectar',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (_is4K) ...[
+                      const SizedBox(width: 8),
+                      TvFocusable(
+                        focusNode: _compatNode,
+                        enabled: !_switchingDecoder,
+                        borderRadius: BorderRadius.circular(8),
+                        onPressed: () => _switchDecodeMode(
+                          reason: 'modo compatível manual',
+                          manual: true,
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.accentGreen.withValues(
+                              alpha: 0.14,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: AppColors.accentGreen.withValues(
+                                alpha: 0.55,
+                              ),
+                            ),
                           ),
                           child: const Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.fiber_manual_record,
-                                  color: Colors.white, size: 10),
+                              Icon(
+                                Icons.memory_rounded,
+                                color: AppColors.accentGreen,
+                                size: 16,
+                              ),
                               SizedBox(width: 4),
                               Text(
-                                'TRANSMISSÃO AO VIVO',
+                                'Compatível',
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        Text(
-                          'mpv • HLS/TS',
-                          style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.6),
-                              fontSize: 12),
-                        ),
-                      ],
-                    )
-                  : Column(
-                      children: [
-                        SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            activeTrackColor: AppColors.primary,
-                            inactiveTrackColor: Colors.white24,
-                            thumbColor: AppColors.primary,
-                            thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 8),
-                            overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 18),
-                            trackHeight: 4,
-                          ),
-                          child: Slider(
-                            focusNode: _sliderNode,
-                            value: currentSeconds,
-                            max: maxSeconds,
-                            // Sem duração ainda não há como buscar: desativa
-                            // em vez de mandar o vídeo para o segundo 1.
-                            onChangeStart: _duration.inSeconds > 0
-                                ? (v) {
-                                    _hideTimer?.cancel();
-                                    setState(() {
-                                      _isSeeking = true;
-                                      _seekPreview = v;
-                                    });
-                                  }
-                                : null,
-                            onChanged: _duration.inSeconds > 0
-                                ? (v) {
-                                    setState(() => _seekPreview = v);
-                                  }
-                                : null,
-                            onChangeEnd: _duration.inSeconds > 0
-                                ? (v) => _seekTo(
-                                    Duration(seconds: v.round()))
-                                : null,
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Row(
-                            mainAxisAlignment:
-                                MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(_formatDuration(shownPosition),
-                                  style: const TextStyle(
-                                      color: Colors.white70, fontSize: 12)),
-                              Text(_formatDuration(_duration),
-                                  style: const TextStyle(
-                                      color: Colors.white70, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_hasPlaylist) ...[
+                      _circleControl(
+                        node: _prevNode,
+                        icon: Icons.skip_previous_rounded,
+                        onPressed: _canPrev ? _zapPrev : null,
+                      ),
+                      const SizedBox(width: 20),
+                    ],
+                    if (!_isLive) ...[
+                      _circleControl(
+                        node: _back10Node,
+                        icon: Icons.replay_10,
+                        onPressed: () => _seekBy(-10),
+                      ),
+                      const SizedBox(width: 20),
+                    ],
+                    _circleControl(
+                      node: _playPauseNode,
+                      icon: _isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      onPressed: _togglePlay,
+                      primary: true,
+                      autofocus: true,
                     ),
-            ),
-          ],
+                    if (!_isLive) ...[
+                      const SizedBox(width: 20),
+                      _circleControl(
+                        node: _fwd10Node,
+                        icon: Icons.forward_10,
+                        onPressed: () => _seekBy(10),
+                      ),
+                    ],
+                    if (_hasPlaylist) ...[
+                      const SizedBox(width: 20),
+                      _circleControl(
+                        node: _nextNode,
+                        icon: Icons.skip_next_rounded,
+                        onPressed: _canNext ? _zapNext : null,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 8,
+                ),
+                child: _isLive
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.accentLive,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(
+                                  Icons.fiber_manual_record,
+                                  color: Colors.white,
+                                  size: 10,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'TRANSMISSÃO AO VIVO',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            'mpv • HLS/TS',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              activeTrackColor: AppColors.primary,
+                              inactiveTrackColor: Colors.white24,
+                              thumbColor: AppColors.primary,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 8,
+                              ),
+                              overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 18,
+                              ),
+                              trackHeight: 4,
+                            ),
+                            child: Slider(
+                              focusNode: _sliderNode,
+                              value: currentSeconds,
+                              max: maxSeconds,
+                              // Sem duração ainda não há como buscar: desativa
+                              // em vez de mandar o vídeo para o segundo 1.
+                              onChangeStart: _duration.inSeconds > 0
+                                  ? (v) {
+                                      _hideTimer?.cancel();
+                                      setState(() {
+                                        _isSeeking = true;
+                                        _seekPreview = v;
+                                      });
+                                    }
+                                  : null,
+                              onChanged: _duration.inSeconds > 0
+                                  ? (v) {
+                                      setState(() => _seekPreview = v);
+                                    }
+                                  : null,
+                              onChangeEnd: _duration.inSeconds > 0
+                                  ? (v) => _seekTo(Duration(seconds: v.round()))
+                                  : null,
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _formatDuration(shownPosition),
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                Text(
+                                  _formatDuration(_duration),
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1417,71 +1890,123 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         child: FocusScope(
           autofocus: true,
           child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline_rounded,
-                  color: Colors.redAccent, size: 54),
-              const SizedBox(height: 12),
-              const Text(
-                'Falha na Reprodução',
-                style: TextStyle(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.error_outline_rounded,
+                  color: Colors.redAccent,
+                  size: 54,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Falha na Reprodução',
+                  style: TextStyle(
                     color: Colors.white,
                     fontSize: 18,
-                    fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _errorMessage,
-                textAlign: TextAlign.center,
-                maxLines: 3,
-                style:
-                    const TextStyle(color: AppColors.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TvFocusable(
-                    focusNode: _errorBackNode,
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceLight,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Text('Voltar',
-                          style: TextStyle(color: Colors.white)),
-                    ),
+                    fontWeight: FontWeight.bold,
                   ),
-                  const SizedBox(width: 14),
-                  TvFocusable(
-                    focusNode: _errorRetryNode,
-                    autofocus: true,
-                    onPressed: _reconnect,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(10),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _errorMessage,
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TvFocusable(
+                      focusNode: _compatNode,
+                      onPressed: () => _switchDecodeMode(
+                        reason: 'modo compatível manual',
+                        manual: true,
                       ),
-                      child: const Text(
-                        'Tentar Novamente',
-                        style: TextStyle(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentGreen.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: AppColors.accentGreen.withValues(alpha: 0.6),
+                          ),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.memory_rounded,
+                              color: AppColors.accentGreen,
+                              size: 17,
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              'Modo compatível',
+                              style: TextStyle(
+                                color: AppColors.accentGreen,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    TvFocusable(
+                      focusNode: _errorBackNode,
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text(
+                          'Voltar',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    TvFocusable(
+                      focusNode: _errorRetryNode,
+                      autofocus: true,
+                      onPressed: _reconnect,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text(
+                          'Tentar Novamente',
+                          style: TextStyle(
                             color: Colors.black,
-                            fontWeight: FontWeight.bold),
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
         ),
       ),
     );
@@ -1493,10 +2018,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       top: 0,
       bottom: 0,
       child: Center(
-        child: _buildHudIndicator(
-          icon: Icons.brightness_6,
-          value: _brightness,
-        ),
+        child: _buildHudIndicator(icon: Icons.brightness_6, value: _brightness),
       ),
     );
   }
@@ -1536,8 +2058,9 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
               child: LinearProgressIndicator(
                 value: value,
                 backgroundColor: Colors.white24,
-                valueColor:
-                    const AlwaysStoppedAnimation<Color>(AppColors.primary),
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                  AppColors.primary,
+                ),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),

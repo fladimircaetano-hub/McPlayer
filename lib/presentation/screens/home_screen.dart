@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../../core/theme/app_theme.dart';
 import '../../data/models/stream_item.dart';
 import '../controllers/iptv_controller.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/double_back_to_exit.dart';
 import '../widgets/duplicate_prompt_host.dart';
+import '../widgets/exit_confirmation_dialog.dart';
 import '../widgets/starfield_background.dart';
 import '../widgets/tv_focusable.dart';
 import 'content_section_screen.dart';
@@ -62,10 +64,8 @@ class HomeScreen extends StatelessWidget {
         final isWide = size.width >= 900;
         final deviceId = controller.storageService.getDeviceId();
         final mac = controller.storageService.getDeviceMac();
-        final hidden =
-            controller.storageService.getHiddenSections();
-        final showCounts =
-            controller.storageService.getShowCounts();
+        final hidden = controller.storageService.getHiddenSections();
+        final showCounts = controller.storageService.getShowCounts();
 
         final buttons = [
           if (!hidden.contains('live'))
@@ -118,140 +118,204 @@ class HomeScreen extends StatelessWidget {
         return DuplicatePromptHost(
           controller: controller,
           child: DoubleBackToExit(
-          child: Scaffold(
-          body: StarfieldBackground(
-            child: SafeArea(
-              child: Stack(
-                children: [
-                  Center(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 24, vertical: 16),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          AppLogo(
-                            iconSize: isWide ? 64 : 52,
-                            titleSize: isWide ? 38 : 30,
+            child: Scaffold(
+              body: StarfieldBackground(
+                child: SafeArea(
+                  child: Stack(
+                    children: [
+                      Center(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
                           ),
-                          SizedBox(height: isWide ? 40 : 28),
-                          if (isWide)
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                for (var i = 0; i < buttons.length; i++) ...[
-                                  _MenuCircle(entry: buttons[i]),
-                                  if (i < buttons.length - 1)
-                                    const SizedBox(width: 28),
-                                ],
-                              ],
-                            )
-                          else
-                            Wrap(
-                              alignment: WrapAlignment.center,
-                              spacing: 20,
-                              runSpacing: 20,
-                              children: [
-                                for (final b in buttons)
-                                  _MenuCircle(entry: b, compact: true),
-                              ],
-                            ),
-                          SizedBox(height: isWide ? 36 : 28),
-                          // Botão Recarregar
-                          TvFocusable(
-                            borderRadius: BorderRadius.circular(24),
-                            onPressed: () => _reload(context),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 40, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(24),
-                                border: Border.all(
-                                    color: Colors.white
-                                        .withValues(alpha: 0.25)),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              AppLogo(
+                                iconSize: isWide ? 64 : 52,
+                                titleSize: isWide ? 38 : 30,
                               ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
+                              SizedBox(height: isWide ? 40 : 28),
+                              if (isWide)
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    for (
+                                      var i = 0;
+                                      i < buttons.length;
+                                      i++
+                                    ) ...[
+                                      _MenuCircle(entry: buttons[i]),
+                                      if (i < buttons.length - 1)
+                                        const SizedBox(width: 28),
+                                    ],
+                                  ],
+                                )
+                              else
+                                Wrap(
+                                  alignment: WrapAlignment.center,
+                                  spacing: 20,
+                                  runSpacing: 20,
+                                  children: [
+                                    for (final b in buttons)
+                                      _MenuCircle(entry: b, compact: true),
+                                  ],
+                                ),
+                              SizedBox(height: isWide ? 36 : 28),
+                              // Recarregar + Sair (fecha o app com confirmação,
+                              // sem depender do botão Home do controle).
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 14,
+                                runSpacing: 12,
                                 children: [
-                                  Icon(Icons.refresh_rounded,
-                                      color: Colors.white, size: 22),
-                                  SizedBox(width: 12),
-                                  Text(
-                                    'Recarregar',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
+                                  TvFocusable(
+                                    borderRadius: BorderRadius.circular(24),
+                                    onPressed: () => _reload(context),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 32,
+                                        vertical: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.14,
+                                        ),
+                                        borderRadius: BorderRadius.circular(24),
+                                        border: Border.all(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.25,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.refresh_rounded,
+                                            color: Colors.white,
+                                            size: 22,
+                                          ),
+                                          SizedBox(width: 10),
+                                          Text(
+                                            'Recarregar',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  TvFocusable(
+                                    borderRadius: BorderRadius.circular(24),
+                                    onPressed: () => confirmExitApp(context),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 32,
+                                        vertical: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.accentLive.withValues(
+                                          alpha: 0.16,
+                                        ),
+                                        borderRadius: BorderRadius.circular(24),
+                                        border: Border.all(
+                                          color: AppColors.accentLive
+                                              .withValues(alpha: 0.65),
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.power_settings_new_rounded,
+                                            color: AppColors.accentLive,
+                                            size: 21,
+                                          ),
+                                          SizedBox(width: 10),
+                                          Text(
+                                            'Sair',
+                                            style: TextStyle(
+                                              color: AppColors.accentLive,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
+                              const SizedBox(height: 56),
+                            ],
                           ),
-                          const SizedBox(height: 56),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                  // Identificação do aparelho (canto inferior direito, como no modelo)
-                  Positioned(
-                    right: 16,
-                    bottom: 12,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          'Chave do dispositivo: $deviceId',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        InkWell(
-                          onTap: () => _copyMac(context, mac),
-                          child: Text(
-                            'Endereço Mac: $mac',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Loading overlay
-                  if (controller.isLoading)
-                    Container(
-                      color: Colors.black.withValues(alpha: 0.7),
-                      child: Center(
+                      // Identificação do aparelho (canto inferior direito, como no modelo)
+                      Positioned(
+                        right: 16,
+                        bottom: 12,
                         child: Column(
-                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            const CircularProgressIndicator(
-                                color: AppColors.primary),
-                            const SizedBox(height: 16),
                             Text(
-                              controller.loadingStatus.isNotEmpty
-                                  ? controller.loadingStatus
-                                  : 'Carregando...',
+                              'Chave do dispositivo: $deviceId',
                               style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            InkWell(
+                              onTap: () => _copyMac(context, mac),
+                              child: Text(
+                                'Endereço Mac: $mac',
+                                style: const TextStyle(
                                   color: Colors.white,
-                                  fontWeight: FontWeight.bold),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                ],
+                      // Loading overlay
+                      if (controller.isLoading)
+                        Container(
+                          color: Colors.black.withValues(alpha: 0.7),
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const CircularProgressIndicator(
+                                  color: AppColors.primary,
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  controller.loadingStatus.isNotEmpty
+                                      ? controller.loadingStatus
+                                      : 'Carregando...',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
-          ),
           ),
         );
       },

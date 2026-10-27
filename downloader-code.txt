@@ -1,7 +1,24 @@
 McPlayer — códigos Downloader (Firestick / Android TV / celular)
 ================================================================
-Código público atual (arm64, v1.0.10+2025): (gerar no go.aftvnews.com)
+Código público atual (arm64, v1.0.11+2026): (gerar no go.aftvnews.com)
 Uso: app Downloader > digitar o código > Go
+
+v1.0.11+2026 (27/10/2026) — 4K, sair do app, busca e seleção em 1 clique:
+- 4K/HEVC/AV1: hwdec mediacodec-copy + vd-lavc-dr=no e fallback automático para
+  software (fim da tela verde/quadriculada) + botão "Modo compatível".
+- Botão "Sair" na Home e em Playlists, com confirmação (não precisa do Home do controle).
+- Busca: Back esconde teclado/tira o foco e botões "Cancelar busca"/"Cancelar".
+- Um único OK/clique já seleciona/abre (aceita gameButtonA e espaço).
+- versionCode 4026 (arm64) / 3026 (arm32) — instala por cima do v1.0.10 sem desinstalar.
+- Links (GitHub Releases, conferidos byte a byte em 27/10/2026):
+  - arm64-v8a (TV box/celular novo, 31,7 MB):
+    https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.11/mcplayer_v1.0.11_2026_arm64.apk
+    33.243.659 bytes | SHA-256 8250C8BA42A3D4E6286E67B89A5BEB8CB9E3F17237D8A3CCA2F8FBA9FD120551
+  - armeabi-v7a / arm32 (Fire TV / stick / box antigo, 28,7 MB):
+    https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.11/mcplayer_v1.0.11_2026_arm32.apk
+    30.081.007 bytes | SHA-256 CEAF8BA52B50C3CB1E0780266D1D82A0B0F7003856236CA1CE9DC49F7B5A4A76
+- Cópia local: dist\2026-10-27_v1.0.11+2026\
+- PENDENTE: gerar os 2 códigos no go.aftvnews.com para os links acima.
 
 v1.0.10+2025 (26/10/2026) — CORRIGE "Ativação remota DESLIGADA":
 - Causa: o APK publicado do v1.0.9 foi compilado sem SUPABASE_URL/SUPABASE_ANON_KEY,

@@ -1,6 +1,6 @@
 McPlayer — códigos Downloader (Firestick / Android TV / celular)
 ================================================================
-Código público atual (arm64, v1.0.14+2029): (gerar no go.aftvnews.com)
+Código público atual (arm64, v1.0.14+2029): 2405837  (http://aftv.news/2405837)
 Uso: app Downloader > digitar o código > Go
 
 v1.0.14+2029 (30/10/2026) — grupo "Adulto" com PIN + ativação da Fire TV:
@@ -17,12 +17,15 @@ v1.0.14+2029 (30/10/2026) — grupo "Adulto" com PIN + ativação da Fire TV:
   - arm64-v8a (TV box/celular novo, 32,5 MB):
     https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.14/mcplayer_v1.0.14_2029_arm64.apk
     34.099.811 bytes | SHA-256 538C84157155BAA7BB2027015AC784F469808E72B72195BBAC0F06358E6C8758
+    atalho: http://aftv.news/2405837  (código Downloader 2405837)
   - armeabi-v7a / arm32 (Fire TV / stick / box antigo, 29,5 MB):
     https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.14/mcplayer_v1.0.14_2029_arm32.apk
     30.969.927 bytes | SHA-256 1FDD12FE0F015B7DCAEEBAB0ACB82D5DC177E8F6C237C6A6B11D4222E1B23311
+    atalho: http://aftv.news/4804264  (código Downloader 4804264)
 - Release: https://github.com/fladimircaetano-hub/McPlayer/releases/tag/v1.0.14
 - Cópia local: dist\2026-10-30_v1.0.14+2029\
-- PENDENTE: gerar os 2 códigos no go.aftvnews.com para os links acima.
+- Códigos verificados em 30/10/2026: 2405837 -> mcplayer_v1.0.14_2029_arm64.apk
+  e 4804264 -> mcplayer_v1.0.14_2029_arm32.apk (ambos apontando para o GitHub Releases).
 
 v1.0.11+2026 (27/10/2026) — 4K, sair do app, busca e seleção em 1 clique:
 - 4K/HEVC/AV1: hwdec mediacodec-copy + vd-lavc-dr=no e fallback automático para

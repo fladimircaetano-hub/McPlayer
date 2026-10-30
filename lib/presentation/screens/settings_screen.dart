@@ -279,7 +279,14 @@ class _SettingsScreenState extends State<SettingsScreen> with BackNavigationMixi
             _testResult = 'Aparelho bloqueado no dashboard';
             break;
           case ActivationStatus.notFound:
-            _testResult = 'Dispositivo nao registrado (check-in enviado)';
+            final httpStatus = service.lastHttpStatus;
+            final detail = service.lastError ?? result.message;
+            _testResult = httpStatus != null
+                ? 'Falha no check-in (HTTP $httpStatus)'
+                : 'Sem resposta do painel';
+            if (detail != null && detail.isNotEmpty) {
+              _testResult += ': $detail';
+            }
             break;
           case ActivationStatus.disabled:
             _testResult = tr('test_unconfigured');

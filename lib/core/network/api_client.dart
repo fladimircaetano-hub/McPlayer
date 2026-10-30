@@ -72,15 +72,27 @@ class ApiClient {
         bytes = bytes.sublist(3);
       }
 
-      // Decodificação com fallback inteligente (UTF-8 -> Latin-1 -> UTF-8 tolerante)
+      // Decodificação com fallback inteligente (UTF-8 -> UTF-8 tolerante
+      // -> Latin-1).
+      //
+      // Cuidado: algumas listas têm 1 ou 2 linhas em Latin-1 no meio de
+      // milhares em UTF-8. Trocar a lista inteira para Latin-1 nesse caso
+      // transforma todos os acentos em mojibake ("Três" -> "TrÃªs"), então
+      // só caímos para Latin-1 quando o UTF-8 tolerante estraga muito texto.
       String data;
       try {
         data = utf8.decode(bytes);
       } on FormatException {
-        try {
-          data = latin1.decode(bytes);
-        } catch (_) {
-          data = utf8.decode(bytes, allowMalformed: true);
+        final tolerant = utf8.decode(bytes, allowMalformed: true);
+        final broken = '\uFFFD'.allMatches(tolerant).length;
+        if (broken * 10000 <= bytes.length) {
+          data = tolerant;
+        } else {
+          try {
+            data = latin1.decode(bytes);
+          } catch (_) {
+            data = tolerant;
+          }
         }
       } catch (_) {
         data = utf8.decode(bytes, allowMalformed: true);

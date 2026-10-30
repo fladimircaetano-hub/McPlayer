@@ -45,16 +45,23 @@ class ActivationResult {
   final String? approvedAt;
   final String appName;
 
+  /// Motivo da falha quando [status] é [ActivationStatus.notFound]
+  /// (ex.: "HTTP 404: Could not find the function public.device_checkin").
+  /// Serve para mostrar no aparelho por que o check-in não chegou ao painel.
+  final String? message;
+
   const ActivationResult({
     required this.status,
     this.listData,
     this.approvedAt,
     this.appName = '',
+    this.message,
   });
 
   const ActivationResult.disabled()
       : status = ActivationStatus.disabled,
         listData = null,
         approvedAt = null,
-        appName = '';
+        appName = '',
+        message = null;
 }

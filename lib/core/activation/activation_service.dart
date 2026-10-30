@@ -58,6 +58,73 @@ class ActivationService {
     if (debugLog) debugPrint('[ActivationService] $msg');
   }
 
+  /// Último erro de comunicação (HTTP ou rede). A tela de ativação usa isso
+  /// para mostrar no próprio aparelho por que o check-in não chegou ao painel
+  /// — inclusive o código HTTP (ex.: 404 quando a URL/projeto está errado).
+  String? _lastError;
+  int? _lastHttpStatus;
+
+  String? get lastError => _lastError;
+  int? get lastHttpStatus => _lastHttpStatus;
+
+  void _setError(String? message, [int? status]) {
+    _lastError = message;
+    _lastHttpStatus = status;
+  }
+
+  void _clearError() => _setError(null, null);
+
+  /// Mensagem curta para exibir na TV (sem stack trace do Dio).
+  String _describeNetworkError(DioException e) {
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+      case DioExceptionType.transformTimeout:
+        return 'Tempo de conexao esgotado com o painel';
+      case DioExceptionType.connectionError:
+        return 'Sem conexao com o painel (verifique a internet/TV)';
+      case DioExceptionType.badResponse:
+        return 'Painel respondeu HTTP ${e.response?.statusCode}';
+      case DioExceptionType.badCertificate:
+        return 'Certificado do painel invalido (data/hora da TV)';
+      case DioExceptionType.cancel:
+        return 'Conexao cancelada';
+      case DioExceptionType.unknown:
+        return 'Falha de rede: ${e.message ?? e.error ?? 'desconhecida'}';
+    }
+  }
+
+  /// Executa o RPC com novas tentativas apenas quando vale a pena:
+  /// sem resposta/5xx (rede instavel, comum na Fire TV logo ao ligar).
+  /// Erros 4xx (404 = função/URL errada) são definitivos e não repetem.
+  Future<Map<String, dynamic>?> _rpcWithRetry(
+    String name,
+    Map<String, dynamic> body, {
+    int attempts = 3,
+  }) async {
+    for (var attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        final res = await _rpc(name, body);
+        if (res != null) return res;
+        final status = _lastHttpStatus;
+        if (status != null && status >= 400 && status < 500) return null;
+      } on DioException catch (e) {
+        _setError(_describeNetworkError(e), e.response?.statusCode);
+        if (e.response?.statusCode != null &&
+            e.response!.statusCode! >= 400 &&
+            e.response!.statusCode! < 500) {
+          return null;
+        }
+      }
+      if (attempt < attempts) {
+        _log('rpc $name: nova tentativa ${attempt + 1}/$attempts em ${attempt * 2}s');
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
+      }
+    }
+    return null;
+  }
+
   /// Registra este aparelho como pendente e devolve o estado atual.
   /// Usa o RPC `device_checkin`, que valida código/MAC no banco e é o único
   /// caminho liberado para a chave anon (a tabela devices tem RLS).
@@ -76,17 +143,21 @@ class ActivationService {
       'checkIn: deviceId=$deviceId, mac=$mac, appName=${ActivationConfig.appName}',
     );
     _log('base URL: $_base');
+    _clearError();
     var id = deviceId;
     try {
       for (var attempt = 1; attempt <= _maxCreateAttempts; attempt++) {
-        final res = await _rpc('device_checkin', {
+        final res = await _rpcWithRetry('device_checkin', {
           'p_app': ActivationConfig.appName,
           'p_code': id,
           'p_mac': mac,
         });
         if (res == null) {
           _log('checkIn: RPC indisponível (rode o 001_schema.sql no Supabase)');
-          return const ActivationResult(status: ActivationStatus.notFound);
+          return ActivationResult(
+            status: ActivationStatus.notFound,
+            message: _lastError,
+          );
         }
         if (res['ok'] != true) {
           if (res['error'] == 'conflict' &&
@@ -98,15 +169,31 @@ class ActivationService {
             );
             continue;
           }
+          final hint = res['hint']?.toString();
+          _setError(
+            'check-in recusado: ${res['error'] ?? 'erro desconhecido'}'
+            '${hint != null && hint.isNotEmpty ? ' ($hint)' : ''}',
+          );
           _log('checkIn: rpc error=${res['error']}');
-          return const ActivationResult(status: ActivationStatus.notFound);
+          return ActivationResult(
+            status: ActivationStatus.notFound,
+            message: _lastError,
+          );
         }
+        _clearError();
         return _resultFromRpc(res);
       }
-      return const ActivationResult(status: ActivationStatus.notFound);
+      return ActivationResult(
+        status: ActivationStatus.notFound,
+        message: _lastError ?? 'Nao foi possivel registrar a chave $id',
+      );
     } catch (e) {
       _log('checkIn: error=$e');
-      return const ActivationResult(status: ActivationStatus.notFound);
+      _setError(e is DioException ? _describeNetworkError(e) : e.toString());
+      return ActivationResult(
+        status: ActivationStatus.notFound,
+        message: _lastError,
+      );
     }
   }
 
@@ -121,7 +208,21 @@ class ActivationService {
       data: body,
     );
     _log('rpc $name: status=${res.statusCode}, data=${res.data}');
-    if ((res.statusCode ?? 500) >= 400) return null;
+    if ((res.statusCode ?? 500) >= 400) {
+      String? detail;
+      final data = res.data;
+      if (data is Map) {
+        detail =
+            (data['message'] ?? data['hint'] ?? data['error_description'])
+                ?.toString();
+      }
+      _setError(
+        'HTTP ${res.statusCode}${detail != null ? ': $detail' : ''}',
+        res.statusCode,
+      );
+      return null;
+    }
+    _clearError();
     if (res.data is Map) return Map<String, dynamic>.from(res.data as Map);
     return null;
   }
@@ -175,17 +276,21 @@ class ActivationService {
       });
       if (res == null || res['ok'] != true) {
         _log('fetchStatus: rpc indisponível ou erro');
-        return const ActivationResult(
+        return ActivationResult(
           status: ActivationStatus.notFound,
           appName: '',
+          message: _lastError,
         );
       }
+      _clearError();
       return _resultFromRpc(res);
     } catch (e) {
       _log('fetchStatus: error=$e');
-      return const ActivationResult(
+      _setError(e is DioException ? _describeNetworkError(e) : e.toString());
+      return ActivationResult(
         status: ActivationStatus.notFound,
         appName: '',
+        message: _lastError,
       );
     }
   }

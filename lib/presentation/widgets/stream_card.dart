@@ -10,12 +10,17 @@ class StreamCard extends StatefulWidget {
   final VoidCallback onToggleFavorite;
   final bool isVod;
 
+  /// Chamado quando o card ganha/perde foco. A grade usa isso para rolar até
+  /// deixar a capa inteira visível com um único toque no D-pad.
+  final ValueChanged<bool>? onFocusChange;
+
   const StreamCard({
     super.key,
     required this.item,
     required this.onTap,
     required this.onToggleFavorite,
     this.isVod = false,
+    this.onFocusChange,
   });
 
   @override
@@ -45,6 +50,7 @@ class _StreamCardState extends State<StreamCard> {
   Widget build(BuildContext context) {
     return TvFocusable(
       onPressed: _onCardTap,
+      onFocusChange: widget.onFocusChange,
       borderRadius: BorderRadius.circular(14),
       child: Container(
         decoration: BoxDecoration(

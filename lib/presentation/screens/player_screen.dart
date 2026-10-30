@@ -79,29 +79,72 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   int _openGeneration = 0;
 
   // ===== Pipeline de vídeo (4K / HEVC / AV1) =====
-  // TV boxes baratas costumam renderizar "verde/quadriculado" quando o
-  // MediaCodec entrega frames direto na superfície (direct rendering).
-  // Para conteúdo 4K começamos em `mediacodec-copy` e, se ainda falhar,
-  // caímos para decodificação 100% por software.
+  // O decoder MediaCodec da Allwinner (Cedar) devolve frames 4K 10-bit em
+  // AFBC/recortados quando o mpv pede cópia (`mediacodec-copy`): o resultado
+  // é a tela "verde com listras". No modo direto (`mediacodec`) quem consome
+  // o buffer nativo é a SurfaceTexture, e a imagem sai correta. Se o direto
+  // falhar, tentamos cópia e, por último, software.
   bool _is4K = false;
   int _decodeAttempt = 0;
   bool _switchingDecoder = false;
   bool _autoTuned4K = false;
-  static const int _maxDecodeAttempts = 2;
+
+  /// Escolha manual (botão "Dec: ...") — tem prioridade sobre a cadeia
+  /// automática e sobrevive à troca de item.
+  _DecodeMode? _decodeOverride;
+
+  /// Diagnóstico mostrado no player (ajuda a identificar o pipeline em uso).
+  String _hwdecCurrent = '';
+  String _videoInfo = '';
 
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  /// Codec/renderização que será aplicada antes de cada `open()`.
+  /// Ordem de tentativas. Fora do Android o mpv já é estável; em 1080p/HLS
+  /// no Android mantemos o padrão do media_kit (auto-safe).
+  List<_DecodeMode> get _decodeChain {
+    if (!_isAndroid) return const [_DecodeMode.auto, _DecodeMode.software];
+    if (_is4K) {
+      return const [
+        _DecodeMode.direct,
+        _DecodeMode.copy,
+        _DecodeMode.software,
+      ];
+    }
+    return const [_DecodeMode.auto];
+  }
+
+  _DecodeMode get _decodeMode {
+    final chain = _decodeChain;
+    final index = _decodeAttempt.clamp(0, chain.length - 1);
+    return _decodeOverride ?? chain[index];
+  }
+
+  String get _decodeModeLabel {
+    switch (_decodeMode) {
+      case _DecodeMode.auto:
+        return 'Automático';
+      case _DecodeMode.direct:
+        return 'Direto';
+      case _DecodeMode.copy:
+        return 'Cópia';
+      case _DecodeMode.software:
+        return 'Software';
+    }
+  }
+
+  /// `hwdec` do mpv aplicado antes de cada `open()`.
   String? get _hwdecMode {
-    if (!_isAndroid) {
-      // Windows/Linux/macOS: usa o padrão na 1ª tentativa e software na 2ª.
-      return _decodeAttempt == 0 ? null : 'no';
+    switch (_decodeMode) {
+      case _DecodeMode.auto:
+        return _isAndroid ? 'auto-safe' : null;
+      case _DecodeMode.direct:
+        return 'mediacodec';
+      case _DecodeMode.copy:
+        return 'mediacodec-copy';
+      case _DecodeMode.software:
+        return 'no';
     }
-    if (_decodeAttempt == 0) {
-      return _is4K ? 'mediacodec-copy' : 'auto-safe';
-    }
-    return 'no';
   }
 
   static final RegExp _uhdPattern = RegExp(
@@ -210,6 +253,12 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   Future<void> _initNativePlayer() async {
     await _createNativePlayer();
     if (!mounted) return;
+    // O mpv só consegue abrir o decodificador direto (MediaCodec -> Surface)
+    // quando a surface do Flutter já existe. Sem esta espera o `open()`
+    // acontece antes do `Video` widget montar e o mpv responde
+    // "Could not open codec.".
+    await _waitForAndroidSurface(const Duration(milliseconds: 4000));
+    if (!mounted) return;
     _open(_currentItem.streamUrl);
     _startStallWatchdog();
   }
@@ -221,23 +270,56 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     await _applyMpvProperties(_player!);
     if (!mounted) return;
 
+    // 4K no Android: `mediacodec_embed` desenha os frames direto na Surface,
+    // sem passar pelo `vo=gpu` (é o mesmo caminho do player nativo da TV, que
+    // reproduz estes filmes sem as listras verdes). Nos demais casos
+    // seguimos com `vo=gpu`, que é o padrão estável do media_kit.
+    final useEmbed = _isAndroid && _decodeMode == _DecodeMode.direct;
     final controller = VideoController(
       _player!,
       configuration: VideoControllerConfiguration(
-        // Android: `gpu` é o único vo estável com o surface do media_kit.
-        vo: _isAndroid ? 'gpu' : null,
-        // A configuração do controller sobrepõe o que foi definido antes:
-        // é aqui que o 4K realmente troca para mediacodec-copy/no.
-        hwdec: _hwdecMode,
+        vo: _isAndroid ? (useEmbed ? 'mediacodec_embed' : 'gpu') : null,
+        // Na criação o media_kit usa `vo=null` (a surface ainda não existe).
+        // Passar `mediacodec` aqui falha com "Could not open codec."; o modo
+        // real é aplicado por [_applyVideoPipelineProperties] antes do
+        // `open()`, quando a surface já está anexada.
+        hwdec: _isAndroid ? 'auto-safe' : _hwdecMode,
         // Aceleração de GPU (render), não confundir com decode por HW.
         enableHardwareAcceleration: true,
-        // Só anexa a surface depois de conhecer a resolução real: evita
-        // stride/tamanho errado no primeiro frame de streams 4K.
-        androidAttachSurfaceAfterVideoParameters: true,
       ),
     );
     setState(() => _videoController = controller);
     _subscribe();
+  }
+
+  /// Espera a Surface do `Video` widget ficar disponível (Android).
+  ///
+  /// Enquanto `wid` for nulo o mpv está com `vo=null`; abrir mídia nesse
+  /// estado impede o caminho zero-copy (`mediacodec_embed`).
+  Future<void> _waitForAndroidSurface(Duration timeout) async {
+    if (!_isAndroid) return;
+    final platform = _videoController?.platform;
+    if (platform == null) return;
+    dynamic wid;
+    try {
+      wid = (platform as dynamic).wid;
+    } catch (_) {
+      return;
+    }
+    if (wid == null || wid.value != null) return;
+    final completer = Completer<void>();
+    void listener() {
+      if (wid.value != null && !completer.isCompleted) completer.complete();
+    }
+
+    wid.addListener(listener);
+    try {
+      await completer.future.timeout(timeout);
+    } catch (_) {
+      debugPrint('[Player] surface não anexou em ${timeout.inSeconds}s');
+    } finally {
+      wid.removeListener(listener);
+    }
   }
 
   /// Propriedades de rede/memória/hardware do mpv.
@@ -313,11 +395,11 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
             .setProperty('dscale', 'bilinear')
             .timeout(const Duration(seconds: 3));
       }
-      if (_decodeAttempt > 0) {
+      if (_decodeMode == _DecodeMode.software) {
         // Decodificação por software: limita threads para não saturar
         // CPU/RAM do stick e evitar freeze.
         await dyn
-            .setProperty('vd-lavc-threads', '2')
+            .setProperty('vd-lavc-threads', '4')
             .timeout(const Duration(seconds: 3));
       }
     } catch (e) {
@@ -339,7 +421,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
             .timeout(const Duration(seconds: 4));
       }
       await dyn
-          .setProperty('vd-lavc-dr', _is4K ? 'no' : 'auto')
+          .setProperty(
+            'vd-lavc-dr',
+            _decodeMode == _DecodeMode.direct ? 'yes' : (_is4K ? 'no' : 'auto'),
+          )
           .timeout(const Duration(seconds: 3));
     } catch (e) {
       debugPrint('[Player] pipeline property warning: $e');
@@ -370,28 +455,30 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
             (m.contains('not supported') || m.contains('unsupported')));
   }
 
-  /// Recria o player com um pipeline mais conservador.
+  /// Recria o player com o modo escolhido ou com o próximo da cadeia.
   ///
-  /// [advance] = false é usado quando o 4K foi descoberto só depois do
-  /// primeiro frame: troca auto-safe -> mediacodec-copy sem consumir uma
-  /// tentativa de fallback.
+  /// [target] = modo explícito (ciclo manual "Dec: ...").
+  /// [advance] = false quando o 4K foi descoberto só depois do primeiro
+  /// frame: reaproveita a cadeia nova sem consumir uma tentativa.
   Future<void> _switchDecodeMode({
     String reason = '',
     bool manual = false,
+    _DecodeMode? target,
     bool advance = true,
   }) async {
     if (!mounted || _isWebPreview || _switchingDecoder) return;
 
-    if (!manual && _decodeAttempt >= _maxDecodeAttempts) {
-      _fail(_codecUnsupportedMessage);
-      return;
-    }
-
-    if (manual) {
+    if (target != null) {
+      _decodeOverride = target;
+    } else if (manual) {
       // Manual: garante o modo por software, mesmo depois de esgotadas
       // as tentativas automáticas.
       if (_decodeAttempt == 0) _decodeAttempt = 1;
-    } else if (advance && _decodeAttempt < _maxDecodeAttempts) {
+    } else if (advance) {
+      if (_decodeAttempt >= _decodeChain.length - 1) {
+        _fail(_codecUnsupportedMessage);
+        return;
+      }
       _decodeAttempt++;
     }
 
@@ -404,8 +491,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     final wasPlaying = _isPlaying;
 
     debugPrint(
-      '[Player] Alternando decodificação (attempt=$_decodeAttempt, '
-      'is4K=$_is4K, reason=$reason)',
+      '[Player] Alternando decodificação (modo=$_decodeModeLabel, '
+      'attempt=$_decodeAttempt, is4K=$_is4K, reason=$reason)',
     );
 
     if (mounted) {
@@ -430,6 +517,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
 
       await _createNativePlayer();
       if (!mounted) return;
+      // A nova surface do `Video` widget precisa existir antes do `open()`
+      // para o modo direto (`mediacodec_embed`) funcionar.
+      await _waitForAndroidSurface(const Duration(milliseconds: 4000));
+      if (!mounted) return;
 
       _retryCount = 0;
       _watchdogActive = true;
@@ -451,6 +542,58 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       }
     } finally {
       _switchingDecoder = false;
+    }
+  }
+
+  /// Ciclo manual do decodificador (botão "Dec: ..." no player).
+  Future<void> _cycleDecodeMode() async {
+    const order = [
+      _DecodeMode.auto,
+      _DecodeMode.direct,
+      _DecodeMode.copy,
+      _DecodeMode.software,
+    ];
+    final current = order.indexOf(_decodeMode);
+    final next = order[(current + 1) % order.length];
+    await _switchDecodeMode(reason: 'manual (${next.name})', target: next);
+  }
+
+  /// Lê do mpv o decoder e o formato reais depois do primeiro frame.
+  ///
+  /// Serve para o usuário confirmar no player (e para o log) qual pipeline
+  /// entrou em uso — sem isso é impossível saber se o 4K caiu em software.
+  Future<void> _refreshVideoDiagnostics(int gen) async {
+    try {
+      await Future.delayed(const Duration(milliseconds: 1500));
+      if (!mounted || gen != _openGeneration || _player == null) return;
+      // `videoParams` do media_kit é confiável (via stream do mpv); o
+      // `getProperty` só funciona em algumas builds.
+      final params = _player!.state.videoParams;
+      String hw = '';
+      try {
+        final platform = _player!.platform;
+        if (platform != null) {
+          final value = await (platform as dynamic)
+              .getProperty('hwdec-current')
+              .timeout(const Duration(seconds: 2));
+          hw = '${value ?? ''}'.trim();
+        }
+      } catch (_) {}
+      final resolution = (params.w != null && params.h != null)
+          ? '${params.w}x${params.h}'
+          : '';
+      final fmt = (params.pixelformat ?? '').trim();
+      debugPrint(
+        '[Player] diag modo=$_decodeModeLabel is4K=$_is4K '
+        'hwdec=$hw res=$resolution fmt=$fmt',
+      );
+      if (!mounted || gen != _openGeneration) return;
+      setState(() {
+        _hwdecCurrent = hw == 'yes' || hw.isEmpty ? '' : hw;
+        _videoInfo = [resolution, fmt].where((s) => s.isNotEmpty).join(' ');
+      });
+    } catch (e) {
+      debugPrint('[Player] diag falhou: $e');
     }
   }
 
@@ -535,11 +678,17 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                   .toLowerCase()
                   .contains('10');
           if (!uhd && !tenBit) return;
-          if (!_is4K) {
+          // Só troca o pipeline quando o 4K NÃO era esperado pelo nome/
+          // categoria: nesse caso o player já nasceu com o modo 4K certo.
+          final discovered = !_is4K;
+          if (discovered) {
             _is4K = true;
             if (mounted) setState(() {});
           }
-          if (_isAndroid && _decodeAttempt == 0 && !_autoTuned4K) {
+          if (discovered &&
+              _isAndroid &&
+              !_autoTuned4K &&
+              _decodeOverride == null) {
             _autoTuned4K = true;
             _switchDecodeMode(
               reason: 'detectado 4K/10-bit em runtime',
@@ -705,12 +854,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
           );
       if (!mounted || gen != _openGeneration) return;
       await _player!.setVolume(_volume * 100);
-      try {
-        final _ = await (_player!.platform as dynamic)
-            .getProperty('hwdec-current')
-            .timeout(const Duration(seconds: 3));
-        // debugPrint('[Player] hwdec-current=$current url=${_currentItem.streamUrl}');
-      } catch (_) {}
+      unawaited(_refreshVideoDiagnostics(gen));
       if (mounted) {
         _resetControlsTimeout();
       }
@@ -733,7 +877,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       // Codec/decodificação: rede não resolve. Troca para o próximo
       // pipeline (cópia -> software) antes de desistir.
       if (_isCodecError(msg)) {
-        if (!_switchingDecoder && _decodeAttempt < _maxDecodeAttempts) {
+        if (!_switchingDecoder && _decodeAttempt < _decodeChain.length - 1) {
           await _switchDecodeMode(reason: msg);
         } else if (mounted) {
           _fail(_codecUnsupportedMessage);
@@ -813,7 +957,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     // Erro de codec/hardware (inclusive o "glitch verde" que derruba o
     // decoder): tenta o pipeline seguro automaticamente.
     if (_isCodecError(error)) {
-      if (_decodeAttempt < _maxDecodeAttempts && !_switchingDecoder) {
+      if (_decodeAttempt < _decodeChain.length - 1 && !_switchingDecoder) {
         _switchDecodeMode(reason: error);
       } else {
         _fail(_codecUnsupportedMessage);
@@ -1076,6 +1220,16 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     if (!_showControls) _toggleControls();
   }
 
+  /// D-pad com o overlay escondido: mostra os controles sem consumir a
+  /// navegação quando eles já estão visíveis.
+  void _showControlsAgain() {
+    if (!mounted || _hasError) return;
+    if (!_showControls) {
+      setState(() => _showControls = true);
+    }
+    _resetControlsTimeout();
+  }
+
   void _resetControlsTimeout() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 5), () {
@@ -1293,6 +1447,18 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                   _seekBy(10),
               const SingleActivator(LogicalKeyboardKey.arrowUp): _zapPrev,
               const SingleActivator(LogicalKeyboardKey.arrowDown): _zapNext,
+            } else if (!_showControls) ...{
+              // TV/box: com o overlay escondido, a primeira seta só revela
+              // os controles. Antes era preciso apertar OK (as setas pareciam
+              // "mortas" e o botão do decoder ficava inalcançável).
+              const SingleActivator(LogicalKeyboardKey.arrowUp):
+                  _showControlsAgain,
+              const SingleActivator(LogicalKeyboardKey.arrowDown):
+                  _showControlsAgain,
+              const SingleActivator(LogicalKeyboardKey.arrowLeft):
+                  _showControlsAgain,
+              const SingleActivator(LogicalKeyboardKey.arrowRight):
+                  _showControlsAgain,
             },
           },
           child: FocusScope(
@@ -1567,6 +1733,22 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                               fontSize: 12,
                             ),
                           ),
+                          // Diagnóstico do pipeline (suporte em TV box): mostra
+                          // o decoder que o mpv REALMENTE escolheu.
+                          if (_hwdecCurrent.isNotEmpty)
+                            Text(
+                              [
+                                'Dec: $_decodeModeLabel',
+                                _hwdecCurrent,
+                                _videoInfo,
+                              ].where((s) => s.isNotEmpty).join(' • '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 10,
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -1670,10 +1852,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                         focusNode: _compatNode,
                         enabled: !_switchingDecoder,
                         borderRadius: BorderRadius.circular(8),
-                        onPressed: () => _switchDecodeMode(
-                          reason: 'modo compatível manual',
-                          manual: true,
-                        ),
+                        onPressed: _cycleDecodeMode,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
@@ -1690,18 +1869,20 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                               ),
                             ),
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.memory_rounded,
                                 color: AppColors.accentGreen,
                                 size: 16,
                               ),
-                              SizedBox(width: 4),
+                              const SizedBox(width: 4),
                               Text(
-                                'Compatível',
-                                style: TextStyle(
+                                _switchingDecoder
+                                    ? 'Trocando…'
+                                    : 'Dec: $_decodeModeLabel',
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 12,
                                 ),
@@ -1926,7 +2107,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                       focusNode: _compatNode,
                       onPressed: () => _switchDecodeMode(
                         reason: 'modo compatível manual',
-                        manual: true,
+                        target: _DecodeMode.software,
                       ),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -1940,18 +2121,18 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                             color: AppColors.accentGreen.withValues(alpha: 0.6),
                           ),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.memory_rounded,
                               color: AppColors.accentGreen,
                               size: 17,
                             ),
-                            SizedBox(width: 6),
+                            const SizedBox(width: 6),
                             Text(
-                              'Modo compatível',
-                              style: TextStyle(
+                              'Modo compatível (Dec: $_decodeModeLabel)',
+                              style: const TextStyle(
                                 color: AppColors.accentGreen,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -2088,3 +2269,6 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     return '$m:$s';
   }
 }
+
+/// Modos de decodificação do mpv usados no Android/desktop.
+enum _DecodeMode { auto, direct, copy, software }

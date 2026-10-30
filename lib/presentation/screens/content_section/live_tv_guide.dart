@@ -555,11 +555,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(width: 250, child: _buildCategoryCol()),
+                    Expanded(flex: 2, child: _buildCategoryCol()),
                     const SizedBox(width: 12),
-                    SizedBox(width: 300, child: _buildChannelCol()),
+                    Expanded(flex: 3, child: _buildChannelCol()),
                     const SizedBox(width: 12),
-                    Expanded(child: _buildCenter()),
+                    Expanded(flex: 5, child: _buildCenter()),
                   ],
                 ),
               ),
@@ -1205,7 +1205,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                       ),
                     ),
 
-                  // Overlay superior discreto translúcido (Canal + Categoria + Badge tela cheia)
+                  // Overlay superior (Canal + Logo miniatura + Categoria + Badge tela cheia)
                   if (ch != null)
                     Positioned(
                       top: 0,
@@ -1221,13 +1221,14 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
-                              Colors.black.withValues(alpha: 0.85),
+                              Colors.black.withValues(alpha: 0.9),
                               Colors.transparent,
                             ],
                           ),
                         ),
                         child: Row(
                           children: [
+                            // Número do canal
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 7,
@@ -1247,6 +1248,35 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                               ),
                             ),
                             const SizedBox(width: 8),
+                            // Logo miniatura do canal
+                            Container(
+                              width: 44,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: (logo != null && logo.isNotEmpty)
+                                  ? CachedNetworkImage(
+                                      imageUrl: logo,
+                                      fit: BoxFit.contain,
+                                      memCacheWidth: 88,
+                                      memCacheHeight: 64,
+                                      errorWidget: (_, _, _) => const Icon(
+                                        Icons.tv_rounded,
+                                        color: Colors.white60,
+                                        size: 18,
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.tv_rounded,
+                                      color: Colors.white60,
+                                      size: 18,
+                                    ),
+                            ),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1259,7 +1289,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 13,
+                                      fontSize: 14,
                                     ),
                                   ),
                                   Text(
@@ -1308,6 +1338,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                         ),
                       ),
                     ),
+
 
                   // Overlay inferior translúcido com info do programa atual e barra de progresso EPG
                   Positioned(

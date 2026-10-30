@@ -1,16 +1,19 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/back_navigation_mixin.dart';
+import '../../../core/utils/media_quality.dart';
 import '../../../data/models/iptv_category.dart';
 import '../../../data/models/stream_item.dart';
 import '../../controllers/iptv_controller.dart';
 import '../../widgets/stream_card.dart';
 import '../../widgets/tv_focusable.dart';
+import '../hardware_player_screen.dart';
 import '../player_screen.dart';
 import 'category_tree.dart';
 import 'episodes_sheet.dart';
@@ -310,14 +313,30 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   // ---------- ações ----------
 
   void _openPlayer(List<StreamItem> playlist, int index) {
+    final item = playlist[index];
+    // 4K no Android: player de hardware (ExoPlayer/Surface). O mpv entrega
+    // frames 4K pela textura do Flutter e em TV boxes Allwinner isso vira
+    // listra verde / tela preta.
+    final useHardware = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        looksLikeUhd(item);
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          item: playlist[index],
-          playlist: playlist,
-          initialIndex: index,
-          keepScreenOn: widget.controller.storageService.getKeepScreenOn(),
-        ),
+        builder: (_) => useHardware
+            ? HardwarePlayerScreen(
+                item: item,
+                playlist: playlist,
+                initialIndex: index,
+                keepScreenOn:
+                    widget.controller.storageService.getKeepScreenOn(),
+              )
+            : PlayerScreen(
+                item: item,
+                playlist: playlist,
+                initialIndex: index,
+                keepScreenOn:
+                    widget.controller.storageService.getKeepScreenOn(),
+              ),
       ),
     );
   }
@@ -455,8 +474,8 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     );
   }
 
-  /// TV: categorias + subcategorias + busca à esquerda, pôsteres à direita
-  /// (mesmo padrão do guia de TV ao vivo).
+  /// TV: categorias + subcategorias + busca à esquerda, pôsteres à direita.
+  /// Colunas proporcionais: categoria e subcategoria = 1/3 cada, grade = 2/3.
   Widget _buildTvBody() {
     final node = _selectedNode;
     final showSubs = node != null && node.hasSubs && !_showOnlyFavorites;
@@ -465,13 +484,16 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 230, child: _buildCategorySidebar()),
+          // Quando há subcategorias: cada coluna lateral ocupa flex:2 (1/5 da tela cada)
+          // e a grade ocupa flex:6 (3/5 = 60%). Sem subcategorias: flex:2 e flex:8.
+          Expanded(flex: 2, child: _buildCategorySidebar()),
           const SizedBox(width: 12),
           if (showSubs) ...[
-            SizedBox(width: 230, child: _buildSubcategorySidebar(node)),
+            Expanded(flex: 2, child: _buildSubcategorySidebar(node)),
             const SizedBox(width: 12),
-          ],
-          Expanded(child: _buildGridPanel()),
+            Expanded(flex: 6, child: _buildGridPanel()),
+          ] else
+            Expanded(flex: 8, child: _buildGridPanel()),
         ],
       ),
     );
@@ -1359,7 +1381,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
         childAspectRatio: 0.68, // pôster 2:3
@@ -1372,11 +1394,19 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
         // StreamCard já é um TvFocusable: um único clique pressiona OK,
         // abre o player e desenha o foco. O wrapper externo duplicava os
         // eventos e exigia um segundo toque em alguns controles.
-        return StreamCard(
-          item: item,
-          onTap: () => _openPlayer(items, i),
-          onToggleFavorite: () => widget.controller.toggleFavorite(item),
-          isVod: true,
+        return Builder(
+          builder: (cardContext) => StreamCard(
+            item: item,
+            onTap: () => _openPlayer(items, i),
+            onToggleFavorite: () => widget.controller.toggleFavorite(item),
+            isVod: true,
+            // Garante que a capa fique INTEIRA na tela já no primeiro toque:
+            // sem isso o GridView só revela parte do card e o usuário tem de
+            // apertar de novo para ver o resto.
+            onFocusChange: (focused) {
+              if (focused) _revealCard(cardContext);
+            },
+          ),
         );
       },
     );
@@ -1399,7 +1429,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
         childAspectRatio: 0.68,
@@ -1419,13 +1449,28 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               ? _seriesCardSubtitle(group.category)
               : '${group.episodes.length} episódios',
         );
-        return StreamCard(
-          item: displayItem,
-          onTap: () => _onSeriesTap(group),
-          onToggleFavorite: () => widget.controller.toggleFavorite(group.rep),
-          isVod: true,
+        return Builder(
+          builder: (cardContext) => StreamCard(
+            item: displayItem,
+            onTap: () => _onSeriesTap(group),
+            onToggleFavorite: () => widget.controller.toggleFavorite(group.rep),
+            isVod: true,
+            onFocusChange: (focused) {
+              if (focused) _revealCard(cardContext);
+            },
+          ),
         );
       },
+    );
+  }
+
+  /// Centraliza o card focado para que a capa apareça completa.
+  void _revealCard(BuildContext cardContext) {
+    Scrollable.ensureVisible(
+      cardContext,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
     );
   }
 }

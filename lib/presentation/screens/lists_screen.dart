@@ -29,7 +29,8 @@ class ListsScreen extends StatefulWidget {
   State<ListsScreen> createState() => _ListsScreenState();
 }
 
-class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
+class _ListsScreenState extends State<ListsScreen>
+    with BackNavigationMixin, WidgetsBindingObserver {
   IptvController get controller => widget.controller;
 
   // Ativação remota via Dashboard (Supabase), silenciosa: sem aviso
@@ -42,6 +43,12 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   bool get _activationDisabled => _activation == null;
   Timer? _pollTimer;
   bool _autoActivating = false;
+
+  /// Estado do registro no painel (mostrado no rodapé da tela).
+  bool _registering = false;
+  bool _registered = false;
+  String? _activationError;
+  int? _activationErrorStatus;
 
   // Exponential backoff para polling: 10s -> 20s -> 30s -> 30s (max)
   int _pollAttempt = 0;
@@ -56,13 +63,25 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _setupActivation();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Na Fire TV o app volta do background pelo controle. Se o primeiro
+    // check-in falhou (Wi-Fi ainda subindo), sem isto ele nunca mais era
+    // enviado e o aparelho não aparecia no painel. Registra de novo.
+    if (state == AppLifecycleState.resumed) {
+      _setupActivation();
+    }
   }
 
   /// Calcula o intervalo de polling com exponential backoff
@@ -87,18 +106,165 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
   Future<void> _setupActivation() async {
     final activation = _activation;
     if (activation == null || !activation.isEnabled) return;
+    if (_registering) return;
+    _registering = true;
     _pollAttempt = 0; // reset no início
+    if (mounted) setState(() {});
+
     final result = await activation.checkIn(
       deviceId: _deviceId,
       mac: _deviceMac,
       regenerateDeviceId: controller.storageService.newDeviceId,
     );
     if (!mounted) return;
-    if (result.status == ActivationStatus.approved && result.listData != null) {
-      _applyRemoteApproval(result.listData!);
-      return;
+    _registering = false;
+
+    switch (result.status) {
+      case ActivationStatus.approved:
+        _registered = true;
+        _activationError = null;
+        _activationErrorStatus = null;
+        setState(() {});
+        if (result.listData != null) {
+          _applyRemoteApproval(result.listData!);
+          return;
+        }
+        _scheduleNextPoll();
+      case ActivationStatus.pending:
+        _registered = true;
+        _activationError = null;
+        _activationErrorStatus = null;
+        setState(() {});
+        _scheduleNextPoll();
+      case ActivationStatus.rejected:
+      case ActivationStatus.blocked:
+        _registered = true;
+        _activationError = null;
+        _activationErrorStatus = null;
+        setState(() {});
+        _pollTimer?.cancel();
+      case ActivationStatus.notFound:
+        // O painel não confirmou o registro (rede, URL/projeto errado ou
+        // RPC ausente). Guarda o motivo para mostrar na TV e tenta de novo
+        // no próximo polling — antes o app só consultava e nunca reenviava.
+        _registered = false;
+        _activationError = result.message ?? activation.lastError;
+        _activationErrorStatus = activation.lastHttpStatus;
+        setState(() {});
+        _pollAttempt++;
+        _scheduleNextPoll();
+      case ActivationStatus.disabled:
+        break;
     }
-    _scheduleNextPoll();
+  }
+
+  /// Reenvia o check-in manualmente (botão "Tentar novamente" do rodapé).
+  Future<void> _retryActivation() => _setupActivation();
+
+  /// Aviso do rodapé: mostra no próprio aparelho se o registro no painel
+  /// falhou (com o código HTTP) e permite reenviar sem reinstalar o APK.
+  Widget _activationStatusBanner() {
+    if (_registering) {
+      return _banner(
+        color: Colors.white54,
+        icon: Icons.cloud_upload_outlined,
+        child: const Text(
+          'Registrando este aparelho no painel...',
+          style: TextStyle(
+            color: Colors.white70,
+            fontWeight: FontWeight.w600,
+            fontSize: 12,
+          ),
+        ),
+      );
+    }
+    if (_activationError != null) {
+      final status = _activationErrorStatus;
+      return _banner(
+        color: Colors.orange,
+        icon: Icons.cloud_off_rounded,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Não foi possível registrar no painel'
+                '${status != null ? ' (HTTP $status)' : ''}: $_activationError',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.orange,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            TvFocusable(
+              borderRadius: BorderRadius.circular(8),
+              onPressed: _retryActivation,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange),
+                ),
+                child: const Text(
+                  'Tentar novamente',
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_registered) {
+      return _banner(
+        color: Colors.lightGreenAccent,
+        icon: Icons.cloud_done_outlined,
+        child: const Text(
+          'Aparelho registrado no painel. Aguardando aprovação.',
+          style: TextStyle(
+            color: Colors.lightGreenAccent,
+            fontWeight: FontWeight.w600,
+            fontSize: 12,
+          ),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  Widget _banner({
+    required Color color,
+    required IconData icon,
+    required Widget child,
+  }) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(child: child),
+        ],
+      ),
+    );
   }
 
   Future<void> _pollActivation() async {
@@ -107,15 +273,29 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
     final result = await activation.fetchStatus(_deviceId);
     if (!mounted || _autoActivating) return;
     if (result.status == ActivationStatus.approved && result.listData != null) {
+      _registered = true;
+      _activationError = null;
+      _activationErrorStatus = null;
+      setState(() {});
       _pollTimer?.cancel();
       _applyRemoteApproval(result.listData!);
     } else if (result.status == ActivationStatus.rejected ||
         result.status == ActivationStatus.blocked) {
+      _registered = true;
       _pollTimer?.cancel();
       // Dispositivo rejeitado/bloqueado: para de fazer polling permanentemente
       // (o usuário terá que falar com o suporte / adicionar lista manualmente)
+    } else if (result.status == ActivationStatus.notFound) {
+      // Não está (ou deixou de estar) no painel — o 1º check-in pode ter
+      // falhado antes do Wi-Fi subir. Refaz o REGISTRO, não só a consulta.
+      _activationError = result.message ?? activation.lastError;
+      _activationErrorStatus = activation.lastHttpStatus;
+      await _setupActivation();
     } else {
       // Ainda pendente: agenda próximo polling com backoff
+      _registered = true;
+      _activationError = null;
+      _activationErrorStatus = null;
       _pollAttempt++;
       _scheduleNextPoll();
     }
@@ -494,6 +674,7 @@ class _ListsScreenState extends State<ListsScreen> with BackNavigationMixin {
                             );
                           }),
                         const Spacer(),
+                        if (!_activationDisabled) _activationStatusBanner(),
                         if (_activationDisabled)
                           Container(
                             width: double.infinity,

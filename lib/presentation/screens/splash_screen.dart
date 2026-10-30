@@ -54,12 +54,29 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     if (ActivationConfig.isEnabled) {
       final activation = sl.activationService;
       if (activation == null) return;
-      final result = await activation.checkIn(
-        deviceId: deviceId,
-        mac: mac,
-        regenerateDeviceId: storage.newDeviceId,
+      // Fire TV liga o Wi-Fi alguns segundos depois do app abrir. Uma única
+      // tentativa podia falhar e o aparelho nunca aparecia no painel.
+      // Repetimos só em erro de rede/5xx (4xx é definitivo).
+      ActivationResult result = const ActivationResult(
+        status: ActivationStatus.notFound,
       );
-      if (!mounted) return;
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        result = await activation.checkIn(
+          deviceId: deviceId,
+          mac: mac,
+          regenerateDeviceId: storage.newDeviceId,
+        );
+        if (!mounted) return;
+        if (result.status != ActivationStatus.notFound) break;
+        final httpStatus = activation.lastHttpStatus;
+        if (httpStatus != null && httpStatus >= 400 && httpStatus < 500) {
+          break;
+        }
+        if (attempt < 3) {
+          await Future<void>.delayed(Duration(seconds: attempt * 2));
+          if (!mounted) return;
+        }
+      }
 
       if (result.status == ActivationStatus.approved && result.listData != null) {
         final list = result.listData!;

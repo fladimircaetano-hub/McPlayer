@@ -1,7 +1,28 @@
 McPlayer — códigos Downloader (Firestick / Android TV / celular)
 ================================================================
-Código público atual (arm64, v1.0.11+2026): (gerar no go.aftvnews.com)
+Código público atual (arm64, v1.0.14+2029): (gerar no go.aftvnews.com)
 Uso: app Downloader > digitar o código > Go
+
+v1.0.14+2029 (30/10/2026) — grupo "Adulto" com PIN + ativação da Fire TV:
+- Canais, filmes e séries de categorias adultas ficam juntos em "Adulto";
+  as categorias do provedor (XXX, Pornô, +18...) aparecem como subcategorias
+  depois de entrar no grupo.
+- PIN pedido na 1ª abertura de conteúdo adulto da sessão; padrão 0000 (ou o
+  PIN definido em Configurações > Código PIN). TV ao vivo não abre o preview
+  do canal adulto antes do PIN (cadeado no lugar do vídeo).
+- Inclui o v1.0.13: ativação da Fire TV com retry/check-in, banner de erro HTTP
+  com "Tentar novamente", splash 3 tentativas e player 4K por hardware.
+- versionCode 4029 (arm64) / 3029 (arm32) — instala por cima do v1.0.11 sem desinstalar.
+- Links (GitHub Releases, conferidos byte a byte em 30/10/2026):
+  - arm64-v8a (TV box/celular novo, 32,5 MB):
+    https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.14/mcplayer_v1.0.14_2029_arm64.apk
+    34.099.811 bytes | SHA-256 538C84157155BAA7BB2027015AC784F469808E72B72195BBAC0F06358E6C8758
+  - armeabi-v7a / arm32 (Fire TV / stick / box antigo, 29,5 MB):
+    https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.14/mcplayer_v1.0.14_2029_arm32.apk
+    30.969.927 bytes | SHA-256 1FDD12FE0F015B7DCAEEBAB0ACB82D5DC177E8F6C237C6A6B11D4222E1B23311
+- Release: https://github.com/fladimircaetano-hub/McPlayer/releases/tag/v1.0.14
+- Cópia local: dist\2026-10-30_v1.0.14+2029\
+- PENDENTE: gerar os 2 códigos no go.aftvnews.com para os links acima.
 
 v1.0.11+2026 (27/10/2026) — 4K, sair do app, busca e seleção em 1 clique:
 - 4K/HEVC/AV1: hwdec mediacodec-copy + vd-lavc-dr=no e fallback automático para
@@ -18,7 +39,7 @@ v1.0.11+2026 (27/10/2026) — 4K, sair do app, busca e seleção em 1 clique:
     https://github.com/fladimircaetano-hub/McPlayer/releases/download/v1.0.11/mcplayer_v1.0.11_2026_arm32.apk
     30.081.007 bytes | SHA-256 CEAF8BA52B50C3CB1E0780266D1D82A0B0F7003856236CA1CE9DC49F7B5A4A76
 - Cópia local: dist\2026-10-27_v1.0.11+2026\
-- PENDENTE: gerar os 2 códigos no go.aftvnews.com para os links acima.
+- SUBSTITUÍDO pelo v1.0.14+2029: não é mais necessário gerar códigos para esta versão.
 
 v1.0.10+2025 (26/10/2026) — CORRIGE "Ativação remota DESLIGADA":
 - Causa: o APK publicado do v1.0.9 foi compilado sem SUPABASE_URL/SUPABASE_ANON_KEY,

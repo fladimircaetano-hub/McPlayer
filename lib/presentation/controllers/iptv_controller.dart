@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/network/api_client.dart';
 import '../../core/parser/m3u_parser.dart';
 import '../../core/storage/storage_service.dart';
+import '../../core/utils/adult_content.dart';
 import '../../core/utils/duplicates.dart';
 import '../../data/datasources/xtream_api.dart';
 import '../../data/models/iptv_category.dart';
@@ -478,20 +479,33 @@ class IptvController extends ChangeNotifier {
     final Map<String, List<StreamItem>> seriesCatMap = {};
 
     for (final item in items) {
-      item.isFavorite = _favorites.contains(item.id);
+      // Categorias adultas viram "Adulto | <categoria original>" já na carga:
+      // assim TV ao vivo, Filmes e Séries mostram um pai único "Adulto" com
+      // as subcategorias do provedor (XXX, Pornô, +18...), e os filtros por
+      // categoria continuam funcionando sem tratamento especial.
+      var normalized = item;
+      if (isAdultCategoryName(normalized.category)) {
+        final grouped = groupedAdultCategory(normalized.category);
+        if (grouped != normalized.category) {
+          normalized = normalized.copyWith(category: grouped);
+        }
+      }
+      normalized.isFavorite = _favorites.contains(normalized.id);
 
-      switch (item.streamType) {
+      switch (normalized.streamType) {
         case StreamType.live:
-          _liveItems.add(item);
-          liveCatMap.putIfAbsent(item.category, () => []).add(item);
+          _liveItems.add(normalized);
+          liveCatMap.putIfAbsent(normalized.category, () => []).add(normalized);
           break;
         case StreamType.movie:
-          _movieItems.add(item);
-          movieCatMap.putIfAbsent(item.category, () => []).add(item);
+          _movieItems.add(normalized);
+          movieCatMap.putIfAbsent(normalized.category, () => []).add(normalized);
           break;
         case StreamType.series:
-          _seriesItems.add(item);
-          seriesCatMap.putIfAbsent(item.category, () => []).add(item);
+          _seriesItems.add(normalized);
+          seriesCatMap
+              .putIfAbsent(normalized.category, () => [])
+              .add(normalized);
           break;
       }
     }

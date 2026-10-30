@@ -6,11 +6,13 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/adult_content.dart';
 import '../../../core/utils/back_navigation_mixin.dart';
 import '../../../core/utils/media_quality.dart';
 import '../../../data/models/iptv_category.dart';
 import '../../../data/models/stream_item.dart';
 import '../../controllers/iptv_controller.dart';
+import '../../widgets/adult_pin_dialog.dart';
 import '../../widgets/stream_card.dart';
 import '../../widgets/tv_focusable.dart';
 import '../hardware_player_screen.dart';
@@ -38,8 +40,10 @@ const _redundantSectionLabels = {
 const String _releaseTag = String.fromEnvironment('RELEASE_TAG');
 
 /// Subtítulo do cartão de série: esconde o rótulo redundante da seção.
-String _seriesCardSubtitle(String category) =>
-    _redundantSectionLabels.contains(category.trim()) ? '' : category;
+String _seriesCardSubtitle(String category) {
+  final label = displayCategoryName(category);
+  return _redundantSectionLabels.contains(label.trim()) ? '' : label;
+}
 
 /// Sentinela: subcategoria "todas" selecionada (navegação mobile).
 const _kAllSubs = '__ALL_SUBCATEGORIES__';
@@ -312,8 +316,17 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
 
   // ---------- ações ----------
 
-  void _openPlayer(List<StreamItem> playlist, int index) {
+  Future<void> _openPlayer(List<StreamItem> playlist, int index) async {
     final item = playlist[index];
+    // Conteúdo adulto: pede o PIN na primeira abertura da sessão (padrão 0000).
+    if (isAdultCategory(item.category)) {
+      final ok = await ensureAdultAccess(
+        context,
+        storage: widget.controller.storageService,
+        title: item.name,
+      );
+      if (!ok || !mounted) return;
+    }
     // 4K no Android: player de hardware (ExoPlayer/Surface). O mpv entrega
     // frames 4K pela textura do Flutter e em TV boxes Allwinner isso vira
     // listra verde / tela preta.
@@ -342,6 +355,15 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   }
 
   Future<void> _onSeriesTap(SeriesGroup group) async {
+    // Série adulta: libera (ou não) antes de mostrar temporadas/episódios.
+    if (isAdultCategory(group.rep.category)) {
+      final ok = await ensureAdultAccess(
+        context,
+        storage: widget.controller.storageService,
+        title: group.name,
+      );
+      if (!ok || !mounted) return;
+    }
     // Xtream: a lista traz 1 item por série; os episódios vêm da API
     // (get_series_info). Sem isso o toque tentaria tocar a URL da série.
     if (group.seriesId != null && widget.controller.currentAccount != null) {

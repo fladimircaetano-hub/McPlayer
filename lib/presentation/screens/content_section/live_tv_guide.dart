@@ -7,11 +7,13 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/adult_content.dart';
 import '../../../core/utils/back_navigation_mixin.dart';
 import '../../../data/models/iptv_category.dart';
 import '../../../data/models/stream_item.dart';
 import '../../../data/services/epg_service.dart';
 import '../../controllers/iptv_controller.dart';
+import '../../widgets/adult_pin_dialog.dart';
 import '../../widgets/tv_focusable.dart';
 import '../player_screen.dart';
 import 'category_tree.dart';
@@ -49,6 +51,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   int _previewToken = 0;
   bool _previewLoading = false;
   bool _previewError = false;
+
+  /// Canal adulto focado sem PIN: não abre o preview; mostra o cadeado e
+  /// pede a senha só quando o usuário confirma (OK).
+  bool _previewLocked = false;
 
   // Navegação: categorias filtram, canais dão preview.
   String? _selectedCategory;
@@ -266,6 +272,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       _channelChosen = false;
       _previewLoading = false;
       _previewError = false;
+      _previewLocked = false;
       _epgDayOffset = 0;
       _epg = const [];
     });
@@ -281,6 +288,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     _previewToken++;
     _previewLoading = false;
     _previewError = false;
+    _previewLocked = false;
   }
 
   void _selectMobileParent(CategoryNode node) {
@@ -409,7 +417,16 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     _focusPreviewDebounce = Timer(delay, () {
       if (!mounted || !_channelChosen || _selectedIndex != i) return;
       final ch = _selectedChannel;
-      if (ch != null) _startPreview(ch);
+      if (ch == null) return;
+      // Canal adulto: não abre o preview sem o PIN. O cadeado aparece no
+      // lugar do vídeo e o PIN é pedido quando o usuário aperta OK.
+      if (isAdultCategory(ch.category) && !adultContentUnlocked) {
+        _stopPreview();
+        if (mounted) setState(() => _previewLocked = true);
+        return;
+      }
+      setState(() => _previewLocked = false);
+      _startPreview(ch);
     });
   }
 
@@ -462,6 +479,17 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
 
   Future<void> _openPlayer(List<StreamItem> playlist, int index) async {
     _focusPreviewDebounce?.cancel();
+    final item = playlist[index];
+    // Canal adulto: pede o PIN na primeira abertura da sessão (padrão 0000).
+    if (isAdultCategory(item.category)) {
+      final ok = await ensureAdultAccess(
+        context,
+        storage: widget.controller.storageService,
+        title: item.name,
+      );
+      if (!ok || !mounted) return;
+      if (_previewLocked) setState(() => _previewLocked = false);
+    }
     try {
       await _previewPlayer?.pause();
     } catch (_) {}
@@ -479,9 +507,15 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     if (!mounted) return;
     final ch = _selectedChannel;
     if (ch != null) {
-      try {
-        await _previewPlayer?.play();
-      } catch (_) {}
+      if (isAdultCategory(ch.category) && adultContentUnlocked) {
+        // Saiu do player com o canal adulto já liberado: abre o preview dele
+        // (antes ficava o vídeo do canal anterior).
+        _startPreview(ch);
+      } else {
+        try {
+          await _previewPlayer?.play();
+        } catch (_) {}
+      }
     }
   }
 
@@ -1159,11 +1193,43 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                 fit: StackFit.expand,
                 children: [
                   // Vídeo ou poster/placeholder
-                  if (_channelChosen && _previewVideoController != null)
+                  if (_channelChosen &&
+                      !_previewLocked &&
+                      _previewVideoController != null)
                     Video(
                       controller: _previewVideoController!,
                       fit: BoxFit.contain,
                       controls: NoVideoControls,
+                    )
+                  else if (_channelChosen && _previewLocked)
+                    Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.lock_rounded,
+                            color: Colors.white70,
+                            size: 34,
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Conteúdo adulto',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Aperte OK e digite o PIN',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.7),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
                     )
                   else if (logo != null && logo.isNotEmpty)
                     CachedNetworkImage(

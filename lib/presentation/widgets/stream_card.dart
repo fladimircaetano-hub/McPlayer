@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/adult_content.dart';
 import '../../data/models/stream_item.dart';
 import 'tv_focusable.dart';
 
@@ -143,7 +144,7 @@ class _StreamCardState extends State<StreamCard> {
               if (item.category.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Text(
-                  item.category,
+                  displayCategoryName(item.category),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -216,7 +217,7 @@ class _StreamCardState extends State<StreamCard> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        item.category,
+                        displayCategoryName(item.category),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(

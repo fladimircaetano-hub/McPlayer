@@ -159,11 +159,52 @@
         notes: device.notes || null,
         block_reason: device.block_reason || null
       });
+      if ('start_date' in device) payload.start_date = device.start_date || null;
+      if ('client_phone' in device) payload.client_phone = device.client_phone || null;
+      if ('device_type' in device) payload.device_type = device.device_type || null;
+      if ('device_brand' in device) payload.device_brand = device.device_brand || null;
 
-      if (device.id) {
-        return sb.from('devices').update(payload).eq('id', device.id).select().single().then(unwrap);
+      function run(data, id) {
+        if (id) {
+          return sb.from('devices').update(data).eq('id', id).select().single().then(unwrap);
+        }
+        return sb.from('devices').insert(data).select().single().then(unwrap);
       }
-      return sb.from('devices').insert(payload).select().single().then(unwrap);
+
+      // Antes de rodar o 005_access_reset.sql as colunas novas não existem.
+      // Salva o resto do aparelho e deixa os campos novos para depois.
+      function attempt(data, remaining, id) {
+        return run(data, id).catch(function (err) {
+          var message = (err && err.message) || '';
+          var next = Object.assign({}, data);
+          var removed = false;
+          ['start_date', 'client_phone', 'device_type', 'device_brand'].forEach(function (column) {
+            if (new RegExp(column, 'i').test(message) && column in next) {
+              delete next[column];
+              removed = true;
+            }
+          });
+          if (removed && remaining > 0) return attempt(next, remaining - 1, id);
+
+          // O app pode ter registrado o aparelho (check-in) enquanto o
+          // formulário estava aberto: atualiza o cadastro existente.
+          if (!id && /devices_app_code_key|duplicate key.*device_id/i.test(message)) {
+            return sb
+              .from('devices')
+              .select('id')
+              .eq('app_name', data.app_name)
+              .eq('device_id', data.device_id)
+              .maybeSingle()
+              .then(function (res) {
+                if (res.error || !res.data) throw err;
+                return attempt(data, remaining, res.data.id);
+              });
+          }
+          throw err;
+        });
+      }
+
+      return attempt(payload, 4, device.id || null);
     },
 
     setDeviceStatus: function (id, status, reason) {

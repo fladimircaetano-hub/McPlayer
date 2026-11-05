@@ -142,6 +142,9 @@
     if (/JWT|token.*expired|not authenticated/i.test(msg)) {
       return 'Sessão expirada. Entre novamente.';
     }
+    if (/start_date|client_phone|device_type|device_brand/i.test(msg)) {
+      return 'Faltam colunas novas. Rode o dashboard/sql/005_access_reset.sql no Supabase.';
+    }
     if (/relation .* does not exist|Could not find the table|schema cache/i.test(msg)) {
       return 'Estrutura do banco não encontrada. Rode os scripts SQL (001_schema.sql) no Supabase.';
     }

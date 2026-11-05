@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261103g">
 </head>
 <body>
 
@@ -105,10 +105,9 @@
 
   <nav class="nav-tabs">
     <button type="button" class="nav-btn active" data-tab="overview">📊 Visão geral</button>
-    <button type="button" class="nav-btn" data-tab="devices">📱 Aparelhos <span class="count-tag" id="countDevices">0</span></button>
     <button type="button" class="nav-btn" data-tab="playlists">🎬 Listas <span class="count-tag" id="countPlaylists">0</span></button>
     <button type="button" class="nav-btn" data-tab="clients">👥 Clientes <span class="count-tag" id="countClients">0</span></button>
-    <button type="button" class="nav-btn" data-tab="audit">🧾 Auditoria <span class="count-tag" id="countAudit">0</span></button>
+    <button type="button" class="nav-btn" data-tab="audit">🔓 Acesso / Auditoria</button>
     <button type="button" class="nav-btn" data-tab="settings">⚙️ Configuração</button>
   </nav>
 
@@ -126,7 +125,7 @@
         <div class="card">
           <div class="card-head">
             <div><h2>Últimos aparelhos</h2><p>Mais recentes em todos os apps</p></div>
-            <button type="button" class="btn-outline btn-sm" data-goto="devices">Ver todos</button>
+            <button type="button" class="btn-outline btn-sm" data-goto="audit">Abrir aparelho</button>
           </div>
           <div id="overviewDevices" class="card-list"></div>
         </div>
@@ -138,24 +137,6 @@
           <div id="overviewAudit"></div>
         </div>
       </div>
-    </section>
-
-    <!-- ---------------------------- DEVICES ----------------------------- -->
-    <section id="tab-devices" class="tab-panel">
-      <div class="toolbar">
-        <div class="grow">
-          <input type="search" id="searchDevices" placeholder="🔍 Buscar por código ou MAC (parcial)..." autocomplete="off">
-        </div>
-        <select id="filterDeviceApp" aria-label="Filtrar por app"></select>
-        <select id="filterDeviceStatus" aria-label="Filtrar por status">
-          <option value="all">Todos os status</option>
-          <option value="pending">Pendentes</option>
-          <option value="approved">Aprovados</option>
-          <option value="blocked">Bloqueados</option>
-        </select>
-        <button type="button" class="btn-primary" id="btnNewDevice">+ Novo aparelho</button>
-      </div>
-      <div id="devicesList" class="card-list"></div>
     </section>
 
     <!-- ---------------------------- PLAYLISTS --------------------------- -->
@@ -182,30 +163,66 @@
       <div id="clientsList" class="card-list"></div>
     </section>
 
-    <!-- ----------------------------- AUDIT ------------------------------ -->
+    <!-- ----------------------------- AUDIT / ACESSO ---------------------- -->
     <section id="tab-audit" class="tab-panel">
-      <div class="toolbar">
-        <div class="grow">
-          <input type="search" id="searchAudit" placeholder="🔍 Buscar por código, MAC ou e-mail..." autocomplete="off">
+      <div class="card access-card">
+        <div class="card-head">
+          <div>
+            <h2>Acessar aparelho com MAC + código</h2>
+            <p>Digite os dois para abrir o formulário completo: dispositivo em uso, lista M3U/Xtream, datas e cliente. Ao aprovar, o aparelho já vai aprovado para a aba Clientes.</p>
+          </div>
+          <span class="pill-soft">acesso do administrador</span>
         </div>
-        <select id="filterAuditApp" aria-label="Filtrar por app"></select>
-        <select id="filterAuditAction" aria-label="Filtrar por ação">
-          <option value="all">Todas as ações</option>
-          <option value="insert">Inserir</option>
-          <option value="update">Editar</option>
-          <option value="delete">Excluir</option>
-          <option value="approve">Aprovar</option>
-          <option value="block">Bloquear</option>
-          <option value="unblock">Liberar</option>
-          <option value="link_mac">Vincular MAC</option>
-          <option value="unlink_mac">Desvincular MAC</option>
-          <option value="change_mac">Editar MAC</option>
-          <option value="change_code">Editar código</option>
-          <option value="list_change">Trocar lista</option>
-        </select>
-        <button type="button" class="btn-outline" id="btnReloadAudit">↻ Atualizar</button>
+        <form id="accessForm" class="access-form">
+          <div class="field">
+            <label for="accessMac">MAC do aparelho</label>
+            <input id="accessMac" maxlength="17" autocomplete="off" spellcheck="false" placeholder="AA:BB:CC:DD:EE:FF">
+            <small>Aceita com hífen, sem separador ou minúsculo.</small>
+          </div>
+          <div class="field">
+            <label for="accessCode">Código do app (ID)</label>
+            <input id="accessCode" maxlength="16" autocomplete="off" spellcheck="false" placeholder="000000">
+            <small>Mesmo código que o cliente digita no app.</small>
+          </div>
+          <div class="field">
+            <label for="accessApp">App</label>
+            <select id="accessApp" aria-label="Filtrar o acesso por app"></select>
+            <small>Deixe em “Todos os apps” para procurar nos dois.</small>
+          </div>
+          <div class="access-submit">
+            <button type="submit" class="btn-primary" id="btnAccessDevice">🔓 Abrir aparelho</button>
+          </div>
+        </form>
+        <div id="accessMsg" class="auth-msg hidden"></div>
       </div>
-      <div id="auditList" class="card"></div>
+
+      <div id="accessResult"></div>
+
+      <details class="card audit-history">
+        <summary>🧾 Histórico de ações (auditoria)</summary>
+        <div class="toolbar">
+          <div class="grow">
+            <input type="search" id="searchAudit" placeholder="🔍 Buscar por código, MAC ou e-mail..." autocomplete="off">
+          </div>
+          <select id="filterAuditApp" aria-label="Filtrar por app"></select>
+          <select id="filterAuditAction" aria-label="Filtrar por ação">
+            <option value="all">Todas as ações</option>
+            <option value="insert">Inserir</option>
+            <option value="update">Editar</option>
+            <option value="delete">Excluir</option>
+            <option value="approve">Aprovar</option>
+            <option value="block">Bloquear</option>
+            <option value="unblock">Liberar</option>
+            <option value="link_mac">Vincular MAC</option>
+            <option value="unlink_mac">Desvincular MAC</option>
+            <option value="change_mac">Editar MAC</option>
+            <option value="change_code">Editar código</option>
+            <option value="list_change">Trocar lista</option>
+          </select>
+          <button type="button" class="btn-outline" id="btnReloadAudit">↻ Atualizar</button>
+        </div>
+        <div id="auditList" class="audit-list"></div>
+      </details>
     </section>
 
     <!-- ---------------------------- SETTINGS ---------------------------- -->
@@ -258,15 +275,23 @@
       </div>
 
       <div class="card danger-zone">
-        <div class="card-head"><div><h2>Limpeza / recomeçar do zero</h2></div></div>
+        <div class="card-head">
+          <div>
+            <h2>Exclusão de aparelhos</h2>
+            <p>Abra o aparelho por <b>MAC + código</b> na aba <b>Acesso / Auditoria</b> e use "Excluir". Listas e clientes são preservados.</p>
+          </div>
+          <button type="button" class="btn-outline btn-sm" data-goto="audit">Ir para Acesso</button>
+        </div>
         <p class="secondary small" style="margin-bottom:10px;">
-          A exclusão em massa não é feita pelo navegador. Use os scripts SQL, na ordem,
-          com o backup em mãos. O <b>002_cleanup.sql</b> só deve rodar após confirmação.
+          Cada aparelho é excluído individualmente, com o código digitado de novo para confirmar.
+          A data de entrada e o WhatsApp do cliente dependem do
+          <b>005_access_reset.sql</b>, que deve ser rodado uma vez no SQL Editor do Supabase.
         </p>
-        <div class="code-box">dashboard/sql/001_schema.sql   -> cria a estrutura nova (não apaga os dados antigos)
-dashboard/sql/002_cleanup.sql  -> apaga devices/playlists/clients antigos + log de ativações
-dashboard/sql/003_admin.sql    -> confere/adiciona administradores
-dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
+        <div class="code-box">dashboard/sql/001_schema.sql       -> estrutura base (apps, aparelhos, listas, clientes, auditoria)
+dashboard/sql/005_access_reset.sql -> data de entrada + telefone do cliente
+dashboard/sql/002_cleanup.sql      -> apaga as tabelas legadas (opcional, com backup)
+dashboard/sql/003_admin.sql        -> confere/adiciona administradores
+dashboard/sql/004_rollback.sql     -> volta atrás (somente antes do 002)</div>
       </div>
 
       <div class="card">
@@ -293,13 +318,27 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
           <label for="devApp">App *</label>
           <select id="devApp"></select>
         </div>
+      </div>
+
+      <div class="form-grid">
         <div class="field">
-          <label for="devStatus">Status</label>
-          <select id="devStatus">
-            <option value="pending">Pendente</option>
-            <option value="approved">Aprovado</option>
-            <option value="blocked">Bloqueado</option>
+          <label for="devDeviceType">Dispositivo em uso</label>
+          <select id="devDeviceType">
+            <option value="">— escolha —</option>
+            <option value="Smartphone">Smartphone</option>
+            <option value="Smart TV">Smart TV</option>
+            <option value="TV Box">TV Box</option>
+            <option value="Computador">Computador</option>
+            <option value="Notebook">Notebook</option>
+            <option value="Xbox">Xbox</option>
+            <option value="PlayStation">PlayStation</option>
+            <option value="Outro">Outro</option>
           </select>
+        </div>
+        <div class="field">
+          <label for="devDeviceBrand">Marca / modelo</label>
+          <input id="devDeviceBrand" placeholder="Ex.: Samsung, LG, Fire TV Stick, Xbox Series S">
+          <small>Aparece junto das informações do aparelho na aba Clientes.</small>
         </div>
       </div>
 
@@ -328,7 +367,19 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
           <input id="devClientName" placeholder="Ex.: Carlos Silva">
         </div>
         <div class="field">
-          <label for="devExpires">Vencimento</label>
+          <label for="devClientPhone">WhatsApp / telefone do cliente</label>
+          <input id="devClientPhone" placeholder="Ex.: 11 99999-9999" autocomplete="off">
+          <small>Usado no cadastro automático da aba Clientes.</small>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="devStart">Data de entrada</label>
+          <input type="date" id="devStart">
+        </div>
+        <div class="field">
+          <label for="devExpires">Data de saída / vencimento</label>
           <input type="date" id="devExpires">
         </div>
       </div>
@@ -337,11 +388,7 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
         <div class="field">
           <label for="devPlaylist">Playlist vinculada (opcional)</label>
           <select id="devPlaylist"><option value="">— Nenhuma —</option></select>
-          <small>Escolher aqui preenche a lista abaixo.</small>
-        </div>
-        <div class="field">
-          <label for="devBlockReason">Motivo do bloqueio</label>
-          <input id="devBlockReason" placeholder="Só quando o status for Bloqueado">
+          <small>Escolher aqui adiciona a lista à relação abaixo, sem apagar as que já existem.</small>
         </div>
       </div>
 
@@ -352,40 +399,14 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
 
       <div class="card-flat">
         <div class="card-head" style="margin-bottom:10px;">
-          <div><h3>Lista / conteúdo</h3></div>
-          <span id="devListSummary" class="pill-soft">sem lista</span>
+          <div>
+            <h3>Listas / conteúdo</h3>
+            <p class="small muted">Adicione quantas listas quiser. Cada uma pode ser excluída individualmente.</p>
+          </div>
+          <button type="button" class="btn-outline btn-sm" id="btnAddDevList">➕ Adicionar lista</button>
         </div>
-        <div class="form-grid">
-          <div class="field">
-            <label for="devListType">Tipo</label>
-            <select id="devListType">
-              <option value="">Sem lista</option>
-              <option value="m3u">M3U (URL)</option>
-              <option value="xtream">Xtream Codes</option>
-            </select>
-          </div>
-          <div class="field" id="devM3uBox">
-            <label for="devM3uUrl">URL M3U</label>
-            <input id="devM3uUrl" placeholder="https://servidor/lista.m3u" autocomplete="off">
-          </div>
-        </div>
-        <div class="form-grid-3" id="devXtreamBox">
-          <div class="field">
-            <label for="devServer">Servidor</label>
-            <input id="devServer" placeholder="http://servidor:8080" autocomplete="off">
-          </div>
-          <div class="field">
-            <label for="devUser">Usuário</label>
-            <input id="devUser" placeholder="usuario" autocomplete="off">
-          </div>
-          <div class="field">
-            <label for="devPass">Senha</label>
-            <div class="pw-wrap">
-              <input id="devPass" type="password" placeholder="senha" autocomplete="new-password">
-              <button type="button" class="pw-toggle" data-pw="devPass" title="Mostrar senha" aria-label="Mostrar senha" aria-pressed="false">👁</button>
-            </div>
-          </div>
-        </div>
+        <div id="devLists"></div>
+        <p class="small muted" id="devListsEmpty">Nenhuma lista. Clique em "Adicionar lista".</p>
       </div>
 
       <p class="small muted" style="margin-top:10px;">
@@ -396,7 +417,7 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
       <button type="button" class="btn-danger btn-sm" id="btnDeleteDeviceFromModal" style="display:none;">🗑️ Excluir</button>
       <span class="spacer"></span>
       <button type="button" class="btn-outline" data-close="modalDevice">Cancelar</button>
-      <button type="button" class="btn-primary" id="btnSaveDevice">Salvar aparelho</button>
+      <button type="button" class="btn-success" id="btnApproveDevice">✅ Aprovar e enviar</button>
     </div>
   </div>
 </div>
@@ -631,10 +652,10 @@ dashboard/sql/004_rollback.sql -> volta atrás (somente antes do 002)</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="js/config.js"></script>
-<script src="js/validation.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/api.js"></script>
-<script src="js/app.js"></script>
+<script src="js/config.js?v=20261103g"></script>
+<script src="js/validation.js?v=20261103g"></script>
+<script src="js/ui.js?v=20261103g"></script>
+<script src="js/api.js?v=20261103g"></script>
+<script src="js/app.js?v=20261103g"></script>
 </body>
 </html>

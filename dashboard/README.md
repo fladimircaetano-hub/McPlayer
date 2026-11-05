@@ -9,7 +9,7 @@ McPlayer e NexPlay é apenas a linha correspondente na tabela `public.apps`
 
 | Arquivo | Para que serve |
 | --- | --- |
-| `index.html` | Estrutura das telas (login, visão geral, aparelhos, listas, clientes, auditoria e configuração). |
+| `index.html` | Estrutura das telas (login, visão geral, acesso/auditoria, listas, clientes e configuração). |
 | `styles.css` | Tema escuro e layout responsivo. |
 | `js/config.js` | URL do Supabase e **anon key** (pública). Nunca coloque a `service_role` aqui. |
 | `js/validation.js` | Normalização/validação de código e MAC, geração de código, datas e WhatsApp. |
@@ -20,6 +20,7 @@ McPlayer e NexPlay é apenas a linha correspondente na tabela `public.apps`
 | `sql/002_cleanup.sql` | Limpeza definitiva das tabelas antigas. **Só depois do backup e da confirmação.** |
 | `sql/003_admin.sql` | Consultas para conferir/adicionar/remover administradores. |
 | `sql/004_rollback.sql` | Volta para as tabelas antigas (somente antes do `002`). |
+| `sql/005_access_reset.sql` | Cria `devices.start_date` (entrada), `devices.client_phone` (WhatsApp do cliente), `devices.device_type` (Smartphone, Smart TV, TV Box, Computador, Xbox...) e `devices.device_brand` (marca/modelo); remove as RPCs antigas de exclusão em massa. Não mexe em dados. |
 | `backups/` | Backups JSON locais. **Não versionar** (contém credenciais de listas). |
 
 ## Ordem de implantação
@@ -73,10 +74,28 @@ Em produção, publique a pasta `dashboard/` inteira (não só o `index.html`).
 1. **Login**
    - Entrar com a conta admin.
    - Tentar entrar com uma conta que não está em `admins` (deve recusar).
-2. **Aparelhos**
-   - Criar aparelho McPlayer com código numérico de 6 dígitos.
-   - Criar aparelho NexPlay com código alfanumérico de 6 caracteres em
-     minúsculas; conferir que foi salvo em MAIÚSCULAS.
+2. **Aparelho (aba Acesso / Auditoria)**
+   - Digitar MAC + código de um aparelho existente e clicar em
+     **Abrir aparelho**: o formulário completo deve abrir já preenchido.
+   - Digitar MAC + código inexistente: aparece o cartão de "nenhum aparelho"
+     com o botão **Cadastrar este aparelho**, que abre o formulário vazio com
+     MAC e código preenchidos.
+   - No formulário, preencher **Dispositivo em uso** (Smartphone, Smart TV,
+     TV Box, Computador, Xbox...) e **Marca / modelo** (ex.: Samsung, LG,
+     Fire TV Stick).
+   - A seção **Listas / conteúdo** aceita **quantas listas quiser**:
+     **➕ Adicionar lista** cria uma linha M3U ou Xtream, cada linha pode ser
+     editada e excluída individualmente (🗑️ Excluir). Escolher uma playlist na
+     relação **não apaga** as listas existentes; ela é acrescentada. Nada é
+     trocado automaticamente — a remoção só acontece clicando em Excluir.
+   - Formato salvo em `list_data`: com **1 lista** continua o formato antigo
+     (`{ type, url }` ou `{ type, serverUrl, ... }`), que o app já lê. Com
+     **2 ou mais**, os campos da primeira ficam no topo e todas vão também em
+     `lists: [...]`. O app atual lê a primeira lista; exibir todas no aparelho
+     exige atualização do APK.
+   - Cadastrar McPlayer com código numérico de 6 dígitos.
+   - Cadastrar NexPlay com código alfanumérico de 6 caracteres em minúsculas;
+     conferir que foi salvo em MAIÚSCULAS.
    - Tentar código inválido (letras no McPlayer / 5 caracteres) e conferir a
      mensagem.
    - Repetir o mesmo código no mesmo app (deve recusar) e no outro app
@@ -84,10 +103,14 @@ Em produção, publique a pasta `dashboard/` inteira (não só o `index.html`).
    - Vincular MAC com hífen/minúsculo e conferir o formato
      `AA:BB:CC:DD:EE:FF`.
    - Repetir o mesmo MAC no mesmo app (deve recusar).
-   - Desvincular o MAC, salvar e conferir que o código continua funcionando.
-   - Buscar por código parcial e por MAC parcial.
-   - Bloquear e liberar; conferir o motivo do bloqueio.
-   - Excluir digitando o código exato (o botão só habilita com o código certo).
+   - Desvincular o MAC e aprovar; conferir que o código continua funcionando.
+   - Preencher data de entrada, data de saída/vencimento, lista/servidor e
+     cliente no mesmo formulário e clicar no único botão,
+     **Aprovar e enviar**.
+   - Bloquear e liberar pela aba Acesso / Auditoria; conferir o motivo do
+     bloqueio.
+   - Excluir um aparelho pelo botão **Excluir** do formulário digitando o
+     código exato (o botão só habilita com o código certo).
 3. **Listas**
    - Criar lista M3U e lista Xtream.
    - Editar e excluir (com confirmação).
@@ -96,17 +119,53 @@ Em produção, publique a pasta `dashboard/` inteira (não só o `index.html`).
    - Criar cliente vinculado a um aparelho.
    - Usar “+30 dias” e o atalho de WhatsApp.
    - Excluir o cliente.
-5. **Tempo real**
+5. **Visão geral**
+   - Clicar em **Aparelhos**, **Pendentes**, **Aprovados** ou **Bloqueados**.
+   - O painel abre a aba Acesso / Auditoria com a lista daquele status.
+   - Clicar em **Abrir formulário** em um item e conferir que o formulário
+     abre preenchido; **Fechar lista** volta ao acesso por MAC + código.
+6. **Tempo real**
    - Abrir o painel em duas abas e alterar um aparelho em uma delas; a outra
      deve atualizar sozinha (Realtime + polling de 20 s).
-6. **Auditoria**
-   - Conferir inserir/editar/excluir/bloquear/liberar/vincular MAC.
-   - Abrir “Ver antes/depois” e filtrar por app, ação e busca.
-7. **Configuração**
+7. **Aprovação → Clientes**
+   - Abrir o aparelho por MAC + código.
+   - Preencher dispositivo em uso, marca/modelo, lista M3U ou Xtream, datas,
+     nome e WhatsApp do cliente, e clicar em
+     **Aprovar e enviar**.
+   - Conferir que o aparelho ficou `approved` e que o cliente apareceu na aba
+     **Clientes** com aparelho, app, MAC, entrada, vencimento e lista.
+   - Editar o cliente (ou usar “+30 dias”) e conferir que a data de saída do
+     aparelho também mudou.
+   - Bloquear e liberar o aparelho: ao liberar, ele volta para Clientes.
+8. **Histórico**
+   - Abrir o “Histórico de ações” recolhido e conferir inserir/editar/excluir/
+     bloquear/liberar/vincular MAC.
+9. **Configuração**
    - Criar um terceiro app com outra regex e conferir que ele aparece nos
      filtros e no formulário sem alterar o código.
    - Editar e excluir um app sem registros (apps em uso são protegidos).
    - Baixar o backup JSON.
+
+## Excluir aparelhos e recadastrar
+
+1. Rode `sql/005_access_reset.sql` uma vez no SQL Editor do Supabase.
+   Ele cria `start_date`, `client_phone`, `device_type` e `device_brand` e
+   remove as RPCs antigas de exclusão em massa (`admin_reset_devices` e
+   `admin_delete_devices`). Não altera dados.
+2. Entre no painel → **Acesso / Auditoria** e digite MAC + código do aparelho.
+3. No formulário, clique em **Excluir** e digite o código exato do aparelho.
+   Listas e clientes são preservados (o cliente fica sem aparelho) e o
+   histórico da auditoria não é apagado.
+4. Para voltar a cadastrar, digite o mesmo MAC + código: o painel mostra
+   **Cadastrar este aparelho** e abre o formulário já preenchido.
+
+> A aba "Aparelhos" foi removida. Não existe lista fixa de aparelhos: cada
+> aparelho é aberto por MAC + código, e os cartões da **Visão geral**
+> (Aparelhos, Pendentes, Aprovados, Bloqueados) abrem a lista daquele status
+> quando você clica. O formulário reúne dispositivo em uso, marca/modelo,
+> lista M3U ou Xtream, datas, cliente e status, com um único botão:
+> **Aprovar e enviar**. Ao aprovar, o cliente é criado ou atualizado
+> automaticamente na aba **Clientes**.
 
 ## Recadastrar os aparelhos
 
@@ -121,8 +180,11 @@ Em produção, publique a pasta `dashboard/` inteira (não só o `index.html`).
      --dart-define=APP_NAME=McPlayer
    ```
    Para o NexPlay, troque apenas `APP_NAME=NexPlay`.
-3. Abra o app: ele gera a chave e aparece em **Aparelhos → Pendentes**.
-4. No painel, edite o aparelho, vincule uma lista (M3U ou Xtream) e aprove.
+3. Abra o app: ele gera a chave (código) e faz o check-in. No painel, o
+   aparelho aparece no seletor **Dispositivo em uso** e nos contadores da
+   Visão geral.
+4. No painel, abra o aparelho, vincule uma lista (M3U ou Xtream), informe
+   nome e WhatsApp do cliente e clique em **Aprovar e enviar para Clientes**.
 5. O app recebe a lista no próximo polling (10 a 30 segundos, com backoff).
 6. Se o aparelho não enviar MAC, o código continua valendo; vincule o MAC
    manualmente depois, se quiser.

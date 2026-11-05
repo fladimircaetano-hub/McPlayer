@@ -31,8 +31,8 @@
     editPlaylist: null,
     editClient: null,
     editApp: null,
+    access: { mac: '', code: '', app: 'all', deviceId: null, matches: [], statusFilter: '' },
     filters: {
-      devices: { q: '', app: 'all', status: 'all' },
       playlists: { q: '', app: 'all' },
       clients: { q: '', app: 'all' },
       audit: { q: '', app: 'all', action: 'all' }
@@ -271,18 +271,18 @@
     renderCounts();
     renderFilterOptions();
     renderOverview();
-    renderDevices();
     renderPlaylists();
     renderClients();
+    renderAccess();
     renderAudit();
     renderSettings();
   }
 
   function renderCounts() {
-    document.getElementById('countDevices').textContent = state.devices.length;
-    document.getElementById('countPlaylists').textContent = state.playlists.length;
-    document.getElementById('countClients').textContent = state.clients.length;
-    document.getElementById('countAudit').textContent = state.audit.length;
+    var playlists = document.getElementById('countPlaylists');
+    var clients = document.getElementById('countClients');
+    if (playlists) playlists.textContent = state.playlists.length;
+    if (clients) clients.textContent = state.clients.length;
   }
 
   function fillAppSelect(id, current, includeAll, includeInactive) {
@@ -303,10 +303,10 @@
   }
 
   function renderFilterOptions() {
-    fillAppSelect('filterDeviceApp', state.filters.devices.app, true, true);
     fillAppSelect('filterPlaylistApp', state.filters.playlists.app, true, true);
     fillAppSelect('filterClientApp', state.filters.clients.app, true, true);
     fillAppSelect('filterAuditApp', state.filters.audit.app, true, true);
+    fillAppSelect('accessApp', state.access.app, true, true);
   }
 
   function appByName(name) {
@@ -352,6 +352,130 @@
     return { type: 'm3u', url: p.url || '' };
   }
 
+  // Listas do aparelho. Formato atual: list_data com { lists: [...] } quando há
+  // mais de uma; uma lista só continua salva no formato antigo { type, url }.
+  function deviceLists(device) {
+    if (!device || !device.list_data) return [];
+    var ld = device.list_data;
+    if (Array.isArray(ld.lists)) return ld.lists.slice();
+    if (ld.type) return [ld];
+    return [];
+  }
+
+  function listRowHtml(data) {
+    var isXtream = data && String(data.type || '').toLowerCase() === 'xtream';
+    var url = data ? data.url || '' : '';
+    var server = data ? data.serverUrl || data.server_url || '' : '';
+    var user = data ? data.username || '' : '';
+    var pass = data ? data.password || '' : '';
+    return (
+      '<div class="list-entry" data-list-row>' +
+      '<div class="list-entry-head">' +
+      '<div><h4>Lista <span data-list-index>1</span></h4></div>' +
+      '<button type="button" class="btn-danger btn-sm" data-remove-list>🗑️ Excluir</button>' +
+      '</div>' +
+      '<div class="form-grid">' +
+      '<div class="field"><label>Tipo</label>' +
+      '<select data-list-type>' +
+      '<option value="m3u"' + (isXtream ? '' : ' selected') + '>M3U (URL)</option>' +
+      '<option value="xtream"' + (isXtream ? ' selected' : '') + '>Xtream Codes</option>' +
+      '</select></div>' +
+      '</div>' +
+      '<div class="field" data-list-m3u>' +
+      '<label>URL da lista M3U</label>' +
+      '<input data-list-url placeholder="https://servidor/lista.m3u" autocomplete="off" value="' + U.esc(url) + '">' +
+      '</div>' +
+      '<div class="form-grid-3" data-list-xtream>' +
+      '<div class="field"><label>Servidor</label>' +
+      '<input data-list-server placeholder="http://servidor:8080" autocomplete="off" value="' + U.esc(server) + '"></div>' +
+      '<div class="field"><label>Usuário</label>' +
+      '<input data-list-user placeholder="usuario" autocomplete="off" value="' + U.esc(user) + '"></div>' +
+      '<div class="field"><label>Senha</label>' +
+      '<input data-list-pass type="password" placeholder="senha" autocomplete="new-password" value="' + U.esc(pass) + '"></div>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  function updateListRow(row) {
+    var type = row.querySelector('[data-list-type]').value;
+    row.querySelector('[data-list-m3u]').style.display = type === 'm3u' ? '' : 'none';
+    row.querySelector('[data-list-xtream]').style.display = type === 'xtream' ? '' : 'none';
+  }
+
+  function renumberListRows() {
+    var rows = document.querySelectorAll('#devLists [data-list-row]');
+    Array.prototype.forEach.call(rows, function (row, i) {
+      var label = row.querySelector('[data-list-index]');
+      if (label) label.textContent = i + 1;
+    });
+    var empty = document.getElementById('devListsEmpty');
+    if (empty) empty.style.display = rows.length ? 'none' : '';
+  }
+
+  function addDeviceListRow(data) {
+    var wrap = document.getElementById('devLists');
+    if (!wrap) return null;
+    var holder = document.createElement('div');
+    holder.innerHTML = listRowHtml(data);
+    var row = holder.firstChild;
+    wrap.appendChild(row);
+    row.querySelector('[data-list-type]').addEventListener('change', function () {
+      updateListRow(row);
+    });
+    row.querySelector('[data-remove-list]').addEventListener('click', function () {
+      row.remove();
+      renumberListRows();
+    });
+    updateListRow(row);
+    renumberListRows();
+    return row;
+  }
+
+  function renderDeviceLists(device) {
+    var wrap = document.getElementById('devLists');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    var lists = deviceLists(device);
+    if (!lists.length && device && device.playlist_id) {
+      var pl = playlistById(device.playlist_id);
+      if (pl) lists = [listDataFromPlaylist(pl)];
+    }
+    lists.forEach(function (l) { addDeviceListRow(l); });
+    renumberListRows();
+  }
+
+  function collectDeviceLists() {
+    var rows = document.querySelectorAll('#devLists [data-list-row]');
+    var lists = [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var type = row.querySelector('[data-list-type]').value;
+      var n = i + 1;
+      if (type === 'xtream') {
+        var server = row.querySelector('[data-list-server]').value.trim();
+        var user = row.querySelector('[data-list-user]').value.trim();
+        var pass = row.querySelector('[data-list-pass]').value;
+        if (!server && !user && !pass) continue;
+        if (!server || !user || !pass) {
+          return { error: 'Complete servidor, usuário e senha da lista ' + n + '.' };
+        }
+        lists.push({ type: 'xtream', serverUrl: server, server_url: server, username: user, password: pass });
+      } else {
+        var url = row.querySelector('[data-list-url]').value.trim();
+        if (!url) return { error: 'Informe a URL da lista ' + n + ' (ou exclua a lista).' };
+        lists.push({ type: 'm3u', url: url });
+      }
+    }
+    return { lists: lists };
+  }
+
+  function packListData(lists) {
+    if (!lists.length) return null;
+    if (lists.length === 1) return lists[0];
+    return Object.assign({}, lists[0], { lists: lists });
+  }
+
   function expiryBadge(iso) {
     var days = V.daysUntil(iso);
     if (days === null) return '';
@@ -362,9 +486,13 @@
   }
 
   function listSummary(device) {
-    var ld = device.list_data;
+    var lists = deviceLists(device);
+    var ld = lists[0] || null;
     var pl = device.playlist_id ? playlistById(device.playlist_id) : null;
     var plText = pl ? ' <span class="pill-soft">playlist: ' + U.esc(pl.name) + '</span>' : '';
+    var extraText = lists.length > 1
+      ? ' <span class="pill-soft">' + lists.length + ' listas</span>'
+      : '';
 
     if (!ld) {
       return '<div class="list-summary"><span class="warn">Sem lista vinculada.</span>' + plText + '</div>';
@@ -374,12 +502,12 @@
         '<div class="list-summary"><b>Xtream:</b> <span class="mono">' +
         U.esc(ld.serverUrl || ld.server_url || '—') +
         '</span> · usuário <b>' + U.esc(ld.username || '—') +
-        '</b> · senha <b>••••••••</b>' + plText + '</div>'
+        '</b> · senha <b>••••••••</b>' + extraText + plText + '</div>'
       );
     }
     return (
       '<div class="list-summary"><b>M3U:</b> <span class="mono">' +
-      U.esc(ld.url || '—') + '</span>' + plText + '</div>'
+      U.esc(ld.url || '—') + '</span>' + extraText + plText + '</div>'
     );
   }
 
@@ -392,10 +520,10 @@
     var withoutMac = total - withMac;
 
     document.getElementById('overviewStats').innerHTML =
-      statCard('Aparelhos', total, state.apps.length + ' app(s) monitorado(s)', '') +
-      statCard('Pendentes', pending, 'aguardando aprovação', pending ? 'warn' : '') +
-      statCard('Aprovados', approved, 'com acesso liberado', 'ok') +
-      statCard('Bloqueados', blocked, 'acesso cancelado', blocked ? 'danger' : '');
+      statCard('Aparelhos', total, state.apps.length + ' app(s) monitorado(s)', '', 'all') +
+      statCard('Pendentes', pending, 'aguardando aprovação', pending ? 'warn' : '', 'pending') +
+      statCard('Aprovados', approved, 'com acesso liberado', 'ok', 'approved') +
+      statCard('Bloqueados', blocked, 'acesso cancelado', blocked ? 'danger' : '', 'blocked');
 
     document.getElementById('overviewApps').innerHTML = state.apps
       .map(function (app) {
@@ -424,7 +552,7 @@
     var recent = state.devices.slice(0, 6);
     document.getElementById('overviewDevices').innerHTML = recent.length
       ? recent.map(miniDevice).join('')
-      : emptyState('Nenhum aparelho', 'Clique em Aparelhos → Novo aparelho.');
+      : emptyState('Nenhum aparelho', 'Digite o MAC + código em Acesso / Auditoria para abrir ou cadastrar.');
 
     var audit = state.audit.slice(0, 5);
     document.getElementById('overviewAudit').innerHTML = audit.length
@@ -438,13 +566,13 @@
     }
   }
 
-  function statCard(label, value, foot, cls) {
+  function statCard(label, value, foot, cls, status) {
     return (
-      '<div class="stat ' + (cls || '') + '">' +
-      '<div class="stat-label">' + U.esc(label) + '</div>' +
-      '<div class="stat-value">' + U.esc(value) + '</div>' +
-      '<div class="stat-foot">' + U.esc(foot) + '</div>' +
-      '</div>'
+      '<button type="button" class="stat ' + (cls || '') + '" data-stat-status="' + U.esc(status) + '">' +
+      '<span class="stat-label">' + U.esc(label) + '</span>' +
+      '<span class="stat-value">' + U.esc(value) + '</span>' +
+      '<span class="stat-foot">' + U.esc(foot) + '</span>' +
+      '</button>'
     );
   }
 
@@ -460,75 +588,6 @@
       (d.client_name ? U.esc(d.client_name) + ' · ' : '') +
       'criado em ' + U.formatDateTime(d.created_at) +
       '</div></div>'
-    );
-  }
-
-  /* ------------------------------- devices -------------------------------- */
-
-  function filteredDevices() {
-    var f = state.filters.devices;
-    var q = f.q.trim();
-    return state.devices.filter(function (d) {
-      if (f.app !== 'all' && d.app_name !== f.app) return false;
-      if (f.status !== 'all' && d.status !== f.status) return false;
-      if (!q) return true;
-      return (
-        V.codeMatches(d.device_id, q) ||
-        V.macMatches(d.mac, q) ||
-        String(d.client_name || '').toLowerCase().indexOf(q.toLowerCase()) !== -1
-      );
-    });
-  }
-
-  function renderDevices() {
-    var list = filteredDevices();
-    var el = document.getElementById('devicesList');
-
-    if (!list.length) {
-      el.innerHTML = state.devices.length
-        ? emptyState('Nenhum aparelho com esses filtros', 'Ajuste a busca, o app ou o status.')
-        : emptyState('Nenhum aparelho cadastrado', 'Clique em "+ Novo aparelho" ou aguarde o check-in dos apps.');
-      return;
-    }
-
-    el.innerHTML = list.map(deviceCard).join('');
-  }
-
-  function deviceCard(d) {
-    var blocked = d.status === 'blocked';
-    var toggledLabel = blocked ? '🔓 Liberar' : '⛔ Bloquear';
-    var expiry = d.expires_at
-      ? U.esc(V.formatDateBR(d.expires_at)) + ' ' + expiryBadge(d.expires_at)
-      : '—';
-
-    return (
-      '<div class="device-card">' +
-      '<div class="device-top">' +
-      '<div>' +
-      '<div class="device-idline">' +
-      '<span class="device-code">' + U.esc(d.device_id) + '</span>' +
-      U.badge(d.status) + U.appChip(d.app_name) +
-      (d.mac
-        ? '<span class="device-mac">MAC ' + U.esc(d.mac) + '</span>'
-        : '<span class="pill-soft">MAC não vinculado</span>') +
-      '</div>' +
-      '<div class="device-meta">' +
-      '<span>Cliente: <b>' + U.esc(d.client_name || '—') + '</b></span>' +
-      '<span>Vencimento: <b>' + expiry + '</b></span>' +
-      '<span>Criado: <b>' + U.formatDateTime(d.created_at) + '</b></span>' +
-      (blocked && d.block_reason ? '<span>Motivo: <b>' + U.esc(d.block_reason) + '</b></span>' : '') +
-      '</div>' +
-      '</div>' +
-      '<div class="device-actions">' +
-      '<button type="button" class="btn-outline btn-sm" data-action="copy-code" data-id="' + U.esc(d.id) + '" title="Copiar o código para enviar ao cliente">📋 Código</button>' +
-      (d.mac ? '<button type="button" class="btn-outline btn-sm" data-action="copy-mac" data-id="' + U.esc(d.id) + '" title="Copiar o MAC">📋 MAC</button>' : '') +
-      '<button type="button" class="btn-outline btn-sm" data-action="edit" data-id="' + U.esc(d.id) + '">✏️ Editar</button>' +
-      '<button type="button" class="btn-outline btn-sm" data-action="toggle" data-id="' + U.esc(d.id) + '">' + toggledLabel + '</button>' +
-      '<button type="button" class="btn-danger btn-sm" data-action="delete" data-id="' + U.esc(d.id) + '">🗑️ Excluir</button>' +
-      '</div>' +
-      '</div>' +
-      listSummary(d) +
-      '</div>'
     );
   }
 
@@ -653,6 +712,8 @@
       return d.app_name === c.app_name && d.device_id === c.device_id;
     })[0];
     var expiry = c.expires_at ? V.formatDateBR(c.expires_at) : '—';
+    var entry = dev && dev.start_date ? V.formatDateBR(dev.start_date) : '—';
+    var playlist = dev && dev.playlist_id ? playlistById(dev.playlist_id) : null;
     var wa = V.whatsappPhone(c.phone);
     var waText = encodeURIComponent(
       'Olá ' + c.name + ', tudo bem? Passando para lembrar do seu acesso ' +
@@ -672,7 +733,10 @@
       '<span>📱 <b>' + U.esc(c.phone) + '</b></span>' +
       '<span>Chave: <b>' + U.esc(c.device_id || 'não vinculada') + '</b></span>' +
       (dev && dev.mac ? '<span>MAC: <b class="mono">' + U.esc(dev.mac) + '</b></span>' : '') +
+      (dev && (dev.device_type || dev.device_brand) ? '<span>Aparelho: <b>' + U.esc(deviceLabel(dev)) + '</b></span>' : '') +
+      '<span>Entrada: <b>' + U.esc(entry) + '</b></span>' +
       '<span>Vencimento: <b>' + U.esc(expiry) + '</b></span>' +
+      (playlist ? '<span>Lista: <b>' + U.esc(playlist.name) + '</b></span>' : '') +
       '</div>' +
       (c.notes ? '<div class="small muted" style="margin-top:5px;">' + U.esc(c.notes) + '</div>' : '') +
       '</div>' +
@@ -684,6 +748,360 @@
       '</div>' +
       '</div></div>'
     );
+  }
+
+  /* --------------------------- acesso MAC + código ----------------------- */
+
+  function accessMsg(message, ok) {
+    var el = document.getElementById('accessMsg');
+    if (!el) return;
+    if (!message) {
+      el.className = 'auth-msg hidden';
+      el.textContent = '';
+      return;
+    }
+    el.textContent = message;
+    el.className = 'auth-msg' + (ok ? ' ok' : '');
+  }
+
+  function clearAccess(keepQuery) {
+    state.access.deviceId = null;
+    state.access.matches = [];
+    if (!keepQuery) {
+      state.access.mac = '';
+      state.access.code = '';
+      state.access.app = 'all';
+      state.access.statusFilter = '';
+      var mac = document.getElementById('accessMac');
+      var code = document.getElementById('accessCode');
+      var app = document.getElementById('accessApp');
+      if (mac) mac.value = '';
+      if (code) code.value = '';
+      if (app) app.value = 'all';
+    }
+    accessMsg('');
+    renderAccess();
+  }
+
+  function onAccessSubmit(e) {
+    e.preventDefault();
+    var macCheck = V.normalizeMac(document.getElementById('accessMac').value);
+    var codeRaw = document.getElementById('accessCode').value.trim();
+    var appName = document.getElementById('accessApp').value || 'all';
+
+    if (!macCheck.ok) {
+      accessMsg(macCheck.message);
+      document.getElementById('accessMac').focus();
+      return;
+    }
+    if (!macCheck.value) {
+      accessMsg('Informe o MAC do aparelho.');
+      document.getElementById('accessMac').focus();
+      return;
+    }
+    if (!codeRaw) {
+      accessMsg('Informe o código do app (ID do aparelho).');
+      document.getElementById('accessCode').focus();
+      return;
+    }
+
+    var code = codeRaw.toUpperCase();
+    var matches = state.devices.filter(function (d) {
+      if (appName !== 'all' && d.app_name !== appName) return false;
+      if (!d.mac || d.mac !== macCheck.value) return false;
+      return String(d.device_id).toUpperCase() === code;
+    });
+
+    state.access.mac = macCheck.value;
+    state.access.code = code;
+    state.access.app = appName;
+    state.access.statusFilter = '';
+    state.access.matches = matches.map(function (d) { return d.id; });
+    state.access.deviceId = matches.length === 1 ? matches[0].id : null;
+
+    if (!matches.length) {
+      accessMsg(
+        'Nenhum aparelho com este MAC + código' +
+        (appName === 'all' ? '.' : ' no app ' + appName + '.') +
+        ' Confira os dados ou cadastre o aparelho abaixo.'
+      );
+      renderAccess();
+      return;
+    }
+
+    if (matches.length > 1) {
+      accessMsg('Encontrei ' + matches.length + ' aparelhos com esses dados. Escolha abaixo.', true);
+      renderAccess();
+      return;
+    }
+
+    accessMsg('');
+    renderAccess();
+    openDeviceModal(matches[0]);
+  }
+
+  function onAccessAction(e) {
+    var pick = e.target.closest('button[data-access-pick]');
+    if (pick) {
+      var picked = deviceById(pick.dataset.accessPick);
+      state.access.deviceId = pick.dataset.accessPick;
+      accessMsg('');
+      renderAccess();
+      if (picked) openDeviceModal(picked);
+      return;
+    }
+
+    var btn = e.target.closest('button[data-access-action]');
+    if (!btn) return;
+    var action = btn.dataset.accessAction;
+    if (action === 'close') return clearAccess(false);
+    if (action === 'close-list') {
+      state.access.statusFilter = '';
+      return renderAccess();
+    }
+
+    if (action === 'create') {
+      var chosenApp;
+      if (state.access.app !== 'all') {
+        chosenApp = state.access.app;
+      } else {
+        var active = state.apps.filter(function (a) { return a.active; });
+        var byCode = active.filter(function (a) {
+          return V.validateCode(a, state.access.code).ok;
+        })[0];
+        chosenApp = (byCode || active[0] || state.apps[0] || {}).name;
+      }
+      // O app pode já ter registrado este código (check-in) com outro MAC,
+      // ou o código existir em outro app. Nesse caso abre o cadastro
+      // existente em vez de tentar inserir de novo.
+      var codeUpper = String(state.access.code).toUpperCase();
+      var candidates = state.devices.filter(function (d) {
+        return String(d.device_id).toUpperCase() === codeUpper;
+      });
+      var sameCode =
+        candidates.filter(function (d) { return state.access.mac && d.mac === state.access.mac; })[0] ||
+        candidates.filter(function (d) { return d.app_name === chosenApp; })[0] ||
+        candidates[0];
+      if (sameCode) {
+        state.access.deviceId = sameCode.id;
+        state.access.matches = [sameCode.id];
+        accessMsg(
+          'Já existe um aparelho ' + sameCode.device_id + ' em ' + sameCode.app_name +
+          '. Abri o cadastro dele para você conferir o MAC e atualizar.',
+          true
+        );
+        renderAccess();
+        openDeviceModal(sameCode);
+        return;
+      }
+      return openDeviceModal(null, {
+        mac: state.access.mac,
+        code: state.access.code,
+        app_name: chosenApp
+      });
+    }
+
+    var d = state.access.deviceId ? deviceById(state.access.deviceId) : null;
+    if (!d) {
+      state.access.matches = [];
+      state.access.deviceId = null;
+      accessMsg('Este aparelho não está mais na lista. Digite o MAC + código de novo.');
+      renderAccess();
+      return;
+    }
+
+    if (action === 'edit') return openDeviceModal(d);
+    if (action === 'list') {
+      openDeviceModal(d);
+      setTimeout(function () {
+        var addBtn = document.getElementById('btnAddDevList');
+        if (addBtn) {
+          addBtn.focus();
+          addBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+      }, 120);
+      return;
+    }
+    if (action === 'toggle') return toggleBlock(d, btn);
+    if (action === 'delete') return openDeleteDeviceModal(d);
+    if (action === 'copy-code') {
+      U.copyText(d.device_id).then(function () {
+        U.toast('Código ' + d.device_id + ' copiado.', 'ok');
+      });
+      return;
+    }
+    if (action === 'copy-mac') {
+      if (!d.mac) return;
+      U.copyText(d.mac).then(function () {
+        U.toast('MAC ' + d.mac + ' copiado.', 'ok');
+      });
+    }
+  }
+
+  function openStatusList(status) {
+    state.access.statusFilter = status;
+    state.access.mac = '';
+    state.access.code = '';
+    state.access.matches = [];
+    state.access.deviceId = null;
+    document.getElementById('accessMac').value = '';
+    document.getElementById('accessCode').value = '';
+    accessMsg('');
+    switchTab('audit');
+    renderAccess();
+  }
+
+  function renderStatusList(el) {
+    var status = state.access.statusFilter;
+    var list = state.devices.filter(function (d) {
+      return status === 'all' || d.status === status;
+    });
+    var titles = {
+      all: 'Todos os aparelhos',
+      pending: 'Aparelhos pendentes',
+      approved: 'Aparelhos aprovados',
+      blocked: 'Aparelhos bloqueados'
+    };
+
+    el.innerHTML =
+      '<div class="card access-device">' +
+      '<div class="card-head">' +
+      '<div><h2>' + U.esc(titles[status] || 'Aparelhos') + ' (' + list.length + ')</h2>' +
+      '<p>Clique em <b>Abrir formulário</b> para ver e editar todas as informações.</p></div>' +
+      '<button type="button" class="btn-outline btn-sm" data-access-action="close-list">Fechar lista</button>' +
+      '</div>' +
+      (list.length
+        ? '<div class="card-list">' + list.map(statusRow).join('') + '</div>'
+        : emptyState('Nenhum aparelho', 'Nada encontrado para este status.')) +
+      '</div>';
+  }
+
+  function statusRow(d) {
+    var meta = [];
+    if (d.client_name) meta.push(U.esc(d.client_name));
+    if (d.device_type || d.device_brand) meta.push(U.esc(deviceLabel(d)));
+    if (d.expires_at) meta.push('vence ' + U.esc(V.formatDateBR(d.expires_at)));
+    return (
+      '<div class="row-card" style="padding:11px 12px;">' +
+      '<div class="device-idline">' +
+      '<span class="tag-mono">' + U.esc(d.device_id) + '</span>' +
+      U.badge(d.status) + U.appChip(d.app_name) +
+      (d.mac ? '<span class="device-mac">' + U.esc(d.mac) + '</span>' : '<span class="pill-soft">sem MAC</span>') +
+      '</div>' +
+      (meta.length ? '<div class="small muted" style="margin-top:6px;">' + meta.join(' · ') + '</div>' : '') +
+      '<div class="device-actions" style="margin-top:8px;">' +
+      '<button type="button" class="btn-primary btn-sm" data-access-pick="' + U.esc(d.id) + '">Abrir formulário</button>' +
+      '</div></div>'
+    );
+  }
+
+  function renderAccess() {
+    var el = document.getElementById('accessResult');
+    if (!el) return;
+
+    if (state.access.statusFilter) {
+      renderStatusList(el);
+      return;
+    }
+
+    var matches = state.access.matches.map(deviceById).filter(Boolean);
+
+    if (!matches.length) {
+      if (!state.access.mac || !state.access.code) {
+        el.innerHTML = '';
+        return;
+      }
+      el.innerHTML =
+        '<div class="card access-device">' +
+        '<div class="card-head">' +
+        '<div><h2>Aparelho não encontrado</h2>' +
+        '<p>MAC <b class="mono">' + U.esc(state.access.mac) + '</b> · código <b class="mono">' +
+        U.esc(state.access.code) + '</b>' +
+        (state.access.app !== 'all' ? ' · ' + U.esc(state.access.app) : '') + '</p></div>' +
+        '</div>' +
+        '<p class="small secondary">Se este é um aparelho novo, cadastre abaixo com os dados já preenchidos. ' +
+        'Se ele já usa o app, confira o MAC e o código.</p>' +
+        '<div class="access-actions">' +
+        '<button type="button" class="btn-primary btn-sm" data-access-action="create">➕ Cadastrar este aparelho</button>' +
+        '</div></div>';
+      return;
+    }
+
+    var device = state.access.deviceId ? deviceById(state.access.deviceId) : null;
+
+    if (!device && matches.length > 1) {
+      el.innerHTML =
+        '<div class="card access-device">' +
+        '<div class="card-head"><div><h2>Escolha o aparelho</h2>' +
+        '<p>O mesmo MAC + código existe em mais de um app.</p></div></div>' +
+        '<div class="card-list">' +
+        matches.map(function (d) {
+          return (
+            '<div class="row-card" style="padding:11px 12px;">' +
+            '<div class="device-idline">' +
+            '<span class="device-code">' + U.esc(d.device_id) + '</span>' +
+            U.badge(d.status) + U.appChip(d.app_name) +
+            '<span class="device-mac">' + U.esc(d.mac) + '</span>' +
+            '</div>' +
+            '<div class="device-actions" style="margin-top:8px;">' +
+            '<button type="button" class="btn-primary btn-sm" data-access-pick="' + U.esc(d.id) + '">Abrir este aparelho</button>' +
+            '</div></div>'
+          );
+        }).join('') +
+        '</div></div>';
+      return;
+    }
+
+    if (!device) {
+      state.access.matches = [];
+      state.access.deviceId = null;
+      el.innerHTML = '';
+      return;
+    }
+
+    var expiry = device.expires_at
+      ? U.esc(V.formatDateBR(device.expires_at)) + ' ' + expiryBadge(device.expires_at)
+      : '—';
+    var entry = device.start_date ? U.esc(V.formatDateBR(device.start_date)) : '—';
+    var playlist = device.playlist_id ? playlistById(device.playlist_id) : null;
+    var blocked = device.status === 'blocked';
+
+    el.innerHTML =
+      '<div class="card access-device">' +
+      '<div class="card-head">' +
+      '<div>' +
+      '<h2><span class="device-code">' + U.esc(device.device_id) + '</span> ' +
+      U.badge(device.status) + ' ' + U.appChip(device.app_name) + '</h2>' +
+      '<p>MAC <b class="mono">' + U.esc(device.mac || '—') + '</b> · cliente <b>' +
+      U.esc(device.client_name || '—') + '</b></p>' +
+      '</div>' +
+      '<button type="button" class="btn-outline btn-sm" data-access-action="close">Fechar acesso</button>' +
+      '</div>' +
+      '<div class="access-grid">' +
+      '<div><span>Data de entrada</span><b>' + entry + '</b></div>' +
+      '<div><span>Data de saída</span><b>' + expiry + '</b></div>' +
+      '<div><span>Status</span><b>' + U.badge(device.status) + '</b></div>' +
+      '<div><span>Dispositivo</span><b>' + U.esc(deviceLabel(device)) + '</b></div>' +
+      '<div><span>Playlist</span><b>' + U.esc(playlist ? playlist.name : '—') + '</b></div>' +
+      '</div>' +
+      listSummary(device) +
+      (blocked && device.block_reason
+        ? '<p class="small" style="color:#fca5a5;margin-top:8px;">Motivo do bloqueio: <b>' +
+          U.esc(device.block_reason) + '</b></p>'
+        : '') +
+      '<div class="access-actions">' +
+      '<button type="button" class="btn-primary btn-sm" data-access-action="edit">✏️ Editar tudo</button>' +
+      '<button type="button" class="btn-outline btn-sm" data-access-action="list">🎬 Inserir / trocar lista</button>' +
+      '<button type="button" class="btn-outline btn-sm" data-access-action="toggle">' +
+      (blocked ? '🔓 Liberar' : '⛔ Bloquear') + '</button>' +
+      '<button type="button" class="btn-outline btn-sm" data-access-action="copy-code">📋 Copiar código</button>' +
+      (device.mac
+        ? '<button type="button" class="btn-outline btn-sm" data-access-action="copy-mac">📋 Copiar MAC</button>'
+        : '') +
+      '<button type="button" class="btn-danger btn-sm" data-access-action="delete">🗑️ Excluir aparelho</button>' +
+      '</div>' +
+      '<p class="small muted" style="margin-top:10px;">O app recebe qualquer mudança em até 10 segundos (polling).</p>' +
+      '</div>';
   }
 
   /* -------------------------------- audit --------------------------------- */
@@ -858,30 +1276,23 @@
     else code.style.textTransform = 'none';
   }
 
-  function updateDeviceListBoxes() {
-    var type = document.getElementById('devListType').value;
-    document.getElementById('devM3uBox').style.display = type === 'm3u' ? '' : 'none';
-    document.getElementById('devXtreamBox').style.display = type === 'xtream' ? '' : 'none';
-    var summary = document.getElementById('devListSummary');
-    if (!type) summary.textContent = 'sem lista';
-    else if (type === 'm3u') summary.textContent = 'M3U';
-    else summary.textContent = 'Xtream';
-  }
+
 
   function resetDeviceForm() {
     document.getElementById('devId').value = '';
-    document.getElementById('devStatus').value = 'pending';
     document.getElementById('devCode').value = '';
     document.getElementById('devMac').value = '';
+    document.getElementById('devDeviceType').value = '';
+    document.getElementById('devDeviceBrand').value = '';
     document.getElementById('devClientName').value = '';
+    document.getElementById('devClientPhone').value = '';
+    document.getElementById('devStart').value = '';
     document.getElementById('devExpires').value = '';
-    document.getElementById('devBlockReason').value = '';
     document.getElementById('devNotes').value = '';
-    document.getElementById('devListType').value = '';
-    document.getElementById('devM3uUrl').value = '';
-    document.getElementById('devServer').value = '';
-    document.getElementById('devUser').value = '';
-    document.getElementById('devPass').value = '';
+    var listWrap = document.getElementById('devLists');
+    if (listWrap) listWrap.innerHTML = '';
+    var listEmpty = document.getElementById('devListsEmpty');
+    if (listEmpty) listEmpty.style.display = '';
     document.getElementById('btnDeleteDeviceFromModal').style.display = 'none';
     var codeHint = document.getElementById('devCodeHint');
     codeHint.className = '';
@@ -889,54 +1300,64 @@
     var macHint = document.getElementById('devMacHint');
     macHint.className = '';
     macHint.textContent = 'Aceita com hífen, sem separador ou minúsculo. Normaliza para AA:BB:CC:DD:EE:FF.';
-    updateDeviceListBoxes();
   }
 
-  function openDeviceModal(device) {
+  function openDeviceModal(device, prefill) {
     state.editDevice = device || null;
     resetDeviceForm();
 
     var firstApp = state.apps.filter(function (a) { return a.active; })[0] || state.apps[0];
-    var appName = device ? device.app_name : firstApp ? firstApp.name : '';
+    var appName = device ? device.app_name : (prefill && prefill.app_name) || (firstApp ? firstApp.name : '');
     fillDeviceAppSelect(appName);
     updateDeviceAppHints();
 
     if (device) {
-      document.getElementById('deviceModalTitle').textContent = 'Editar aparelho ' + device.device_id;
+      document.getElementById('deviceModalTitle').textContent = 'Aparelho ' + device.device_id;
       document.getElementById('devId').value = device.id;
-      document.getElementById('devStatus').value = device.status;
       document.getElementById('devCode').value = device.device_id;
       document.getElementById('devMac').value = device.mac || '';
+      document.getElementById('devDeviceType').value = device.device_type || '';
+      document.getElementById('devDeviceBrand').value = device.device_brand || '';
       document.getElementById('devClientName').value = device.client_name || '';
+      document.getElementById('devClientPhone').value = device.client_phone || linkedClientPhone(device);
+      document.getElementById('devStart').value = device.start_date ? String(device.start_date).slice(0, 10) : '';
       document.getElementById('devExpires').value = device.expires_at ? String(device.expires_at).slice(0, 10) : '';
-      document.getElementById('devBlockReason').value = device.block_reason || '';
       document.getElementById('devNotes').value = device.notes || '';
       document.getElementById('btnDeleteDeviceFromModal').style.display = '';
-
-      var ld = device.list_data || {};
-      var type = String(ld.type || '').toLowerCase();
-      document.getElementById('devListType').value = type === 'xtream' || type === 'm3u' ? type : '';
-      if (type === 'xtream') {
-        document.getElementById('devServer').value = ld.serverUrl || ld.server_url || '';
-        document.getElementById('devUser').value = ld.username || '';
-        document.getElementById('devPass').value = ld.password || '';
-      } else if (type === 'm3u') {
-        document.getElementById('devM3uUrl').value = ld.url || '';
-      }
     } else {
       document.getElementById('deviceModalTitle').textContent = 'Novo aparelho';
+      if (prefill) {
+        document.getElementById('devMac').value = prefill.mac || '';
+        document.getElementById('devCode').value = prefill.code || '';
+        document.getElementById('devCode').dispatchEvent(new Event('input'));
+      }
     }
 
+    renderDeviceLists(device);
     fillPlaylistSelect(document.getElementById('devApp').value, device ? device.playlist_id : '');
-    updateDeviceListBoxes();
     U.openModal('modalDevice');
+  }
+
+  function linkedClientPhone(device) {
+    var c = state.clients.filter(function (x) {
+      return x.app_name === device.app_name && x.device_id === device.device_id;
+    })[0];
+    return c ? c.phone || '' : '';
+  }
+
+  function deviceLabel(device) {
+    var type = String((device && device.device_type) || '').trim();
+    var brand = String((device && device.device_brand) || '').trim();
+    if (type && brand) return type + ' · ' + brand;
+    return type || brand || '—';
   }
 
   async function saveDevice() {
     var app = appByName(document.getElementById('devApp').value);
     var code = document.getElementById('devCode').value;
     var macInput = document.getElementById('devMac').value;
-    var status = document.getElementById('devStatus').value;
+    var clientName = document.getElementById('devClientName').value.trim();
+    var clientPhone = document.getElementById('devClientPhone').value.trim();
     var codeCheck = V.validateCode(app, code);
     var macCheck = V.normalizeMac(macInput);
 
@@ -958,58 +1379,126 @@
     document.getElementById('devMacHint').textContent =
       'Aceita com hífen, sem separador ou minúsculo. Normaliza para AA:BB:CC:DD:EE:FF.';
 
-    var listType = document.getElementById('devListType').value;
-    var listData = null;
-    if (listType === 'm3u') {
-      var url = document.getElementById('devM3uUrl').value.trim();
-      if (!url) return U.toast('Informe a URL da lista M3U.', 'err');
-      listData = { type: 'm3u', url: url };
-    } else if (listType === 'xtream') {
-      var server = document.getElementById('devServer').value.trim();
-      var user = document.getElementById('devUser').value.trim();
-      var pass = document.getElementById('devPass').value;
-      if (!server || !user || !pass) return U.toast('Preencha servidor, usuário e senha do Xtream.', 'err');
-      listData = {
-        type: 'xtream',
-        serverUrl: server,
-        server_url: server,
-        username: user,
-        password: pass
-      };
+    if (!clientName) {
+      document.getElementById('devClientName').focus();
+      return U.toast('Informe o nome do cliente para aprovar o aparelho.', 'err');
+    }
+    if (String(clientPhone).replace(/\D/g, '').length < 10) {
+      document.getElementById('devClientPhone').focus();
+      return U.toast('Informe o WhatsApp do cliente (com DDD) para aprovar.', 'err');
     }
 
-    if (status === 'approved' && !listData) {
+    var collected = collectDeviceLists();
+    if (collected.error) return U.toast(collected.error, 'err');
+    var lists = collected.lists;
+
+    var playlistId = document.getElementById('devPlaylist').value || null;
+    var linkedPlaylist = playlistId ? playlistById(playlistId) : null;
+
+    if (!lists.length && linkedPlaylist) {
+      // Só escolheu a playlist: ela vira a lista do aparelho e vai para o app.
+      lists = [listDataFromPlaylist(linkedPlaylist)];
+    }
+    var listData = packListData(lists);
+
+    if (!listData) {
       if (!confirm('Aprovar este aparelho SEM lista vinculada?\n\nO app vai ficar aprovado, mas sem conteúdo até você enviar uma lista.')) return;
     }
 
+    var existingDevice = state.editDevice || state.devices.filter(function (d) {
+      return d.app_name === app.name &&
+        String(d.device_id).toUpperCase() === String(codeCheck.value).toUpperCase();
+    })[0] || null;
+    var wasCreate = !state.editDevice;
+    if (existingDevice && wasCreate) state.editDevice = existingDevice;
+
     var payload = {
-      id: state.editDevice ? state.editDevice.id : null,
+      id: existingDevice ? existingDevice.id : null,
       app_name: app.name,
       device_id: codeCheck.value,
       mac: macCheck.value,
-      status: status,
+      status: 'approved',
       list_data: listData,
-      playlist_id: document.getElementById('devPlaylist').value || null,
-      client_name: document.getElementById('devClientName').value.trim(),
+      playlist_id: playlistId,
+      device_type: document.getElementById('devDeviceType').value || null,
+      device_brand: document.getElementById('devDeviceBrand').value.trim() || null,
+      client_name: clientName,
+      client_phone: clientPhone,
+      start_date: document.getElementById('devStart').value || null,
       expires_at: document.getElementById('devExpires').value || null,
       notes: document.getElementById('devNotes').value.trim(),
-      block_reason: status === 'blocked'
-        ? document.getElementById('devBlockReason').value.trim()
-        : null
+      block_reason: null
     };
 
-    var btn = document.getElementById('btnSaveDevice');
-    U.setBusy(btn, true, 'Salvando...');
+    var btn = document.getElementById('btnApproveDevice');
+    U.setBusy(btn, true, 'Aprovando...');
     try {
-      await Api.saveDevice(payload);
+      var saved = await Api.saveDevice(payload);
+      var sync = await syncApprovedClient(saved, clientPhone);
       U.closeModal('modalDevice');
-      U.toast('Aparelho ' + payload.device_id + ' salvo. O app recebe em até 10s.', 'ok');
+
+      // Mantém o cartão de acesso apontando para o aparelho salvo,
+      // inclusive no cadastro novo, para o "Editar tudo" continuar disponível.
+      state.access.mac = saved.mac || state.access.mac;
+      state.access.code = saved.device_id || state.access.code;
+      state.access.matches = [saved.id];
+      state.access.deviceId = saved.id;
+      state.access.statusFilter = '';
+
+      var missing = [];
+      if (payload.start_date && !saved.start_date) missing.push('data de entrada');
+      if (payload.device_type && !saved.device_type) missing.push('dispositivo em uso');
+      if (payload.device_brand && !saved.device_brand) missing.push('marca/modelo');
+      if (payload.client_phone && !saved.client_phone) missing.push('WhatsApp no aparelho');
+
+      if (missing.length) {
+        U.toast(
+          (wasCreate && existingDevice
+            ? 'Cadastro existente atualizado, mas não gravou: '
+            : 'Aparelho ' + saved.device_id + ' salvo, mas não gravou: ') + missing.join(', ') + '. ' +
+          'Rode o sql/005_access_reset.sql no Supabase e salve de novo.' +
+          (saved.status === 'approved' && sync.ok ? ' O cliente já está em Clientes.' : ''),
+          'err',
+          12000
+        );
+      } else if (sync.ok) {
+        U.toast(
+          wasCreate && existingDevice
+            ? 'Cadastro existente atualizado e enviado para Clientes.'
+            : 'Aparelho ' + saved.device_id + ' aprovado e enviado para Clientes.',
+          'ok',
+          8000
+        );
+      } else {
+        U.toast('Aparelho ' + saved.device_id + ' aprovado. O app recebe em até 10s.', 'ok');
+      }
       await refreshAll(true);
     } catch (err) {
       U.toast(U.errorMessage(err), 'err', 9000);
     } finally {
       U.setBusy(btn, false);
     }
+  }
+
+  async function syncApprovedClient(device, phone) {
+    if (device.status !== 'approved') return { ok: false, reason: 'not-approved' };
+    var name = String(device.client_name || '').trim();
+    if (!name || !phone) return { ok: false, reason: 'missing' };
+
+    var existing = state.clients.filter(function (c) {
+      return c.app_name === device.app_name && c.device_id === device.device_id;
+    })[0];
+
+    await Api.saveClient({
+      id: existing ? existing.id : null,
+      name: name,
+      phone: phone,
+      app_name: device.app_name,
+      device_id: device.device_id,
+      expires_at: device.expires_at || null,
+      notes: device.notes || ''
+    });
+    return { ok: true, created: !existing };
   }
 
   function openDeleteDeviceModal(device) {
@@ -1035,6 +1524,7 @@
       U.closeModal('modalDeleteDevice');
       U.closeModal('modalDevice');
       state.deleteTarget = null;
+      if (state.access.deviceId === d.id) clearAccess(true);
       U.toast('Aparelho ' + d.device_id + ' excluído. O histórico ficou na auditoria.', 'ok');
       await refreshAll(true);
     } catch (err) {
@@ -1203,6 +1693,7 @@
             list_data: listDataFromPlaylist(saved),
             playlist_id: saved.id,
             client_name: (isChosen ? targetClient : '') || d.client_name || '',
+            start_date: d.start_date,
             expires_at: d.expires_at,
             notes: d.notes,
             block_reason: d.block_reason
@@ -1310,6 +1801,7 @@
     U.setBusy(btn, true, 'Salvando...');
     try {
       await Api.saveClient(payload);
+      await syncDeviceFromClient(payload.app_name, payload.device_id, payload);
       U.closeModal('modalClient');
       U.toast('Cliente salvo.', 'ok');
       await refreshAll(true);
@@ -1318,6 +1810,29 @@
     } finally {
       U.setBusy(btn, false);
     }
+  }
+
+  async function syncDeviceFromClient(appName, deviceCode, client) {
+    if (!appName || !deviceCode) return;
+    var d = state.devices.filter(function (x) {
+      return x.app_name === appName && x.device_id === deviceCode;
+    })[0];
+    if (!d) return;
+    await Api.saveDevice({
+      id: d.id,
+      app_name: d.app_name,
+      device_id: d.device_id,
+      mac: d.mac,
+      status: d.status,
+      list_data: d.list_data,
+      playlist_id: d.playlist_id,
+      client_name: client.name || '',
+      client_phone: client.phone || '',
+      start_date: d.start_date,
+      expires_at: client.expires_at || null,
+      notes: d.notes,
+      block_reason: d.block_reason
+    });
   }
 
   async function deleteClient(client) {
@@ -1337,6 +1852,7 @@
         expires_at: V.addDays(client.expires_at || V.todayISO(), days)
       });
       await Api.saveClient(updated);
+      await syncDeviceFromClient(updated.app_name, updated.device_id, updated);
       U.toast(
         '+' + days + ' dias para ' + client.name + '. Novo vencimento: ' + V.formatDateBR(updated.expires_at),
         'ok'
@@ -1496,22 +2012,12 @@
     U.qsa('[data-goto]').forEach(function (btn) {
       btn.addEventListener('click', function () { switchTab(btn.dataset.goto); });
     });
+    document.getElementById('overviewStats').addEventListener('click', function (e) {
+      var card = e.target.closest('button[data-stat-status]');
+      if (card) openStatusList(card.dataset.statStatus);
+    });
 
     // Filtros
-    var devQ = document.getElementById('searchDevices');
-    devQ.addEventListener('input', function () {
-      state.filters.devices.q = devQ.value;
-      renderDevices();
-    });
-    document.getElementById('filterDeviceApp').addEventListener('change', function () {
-      state.filters.devices.app = this.value;
-      renderDevices();
-    });
-    document.getElementById('filterDeviceStatus').addEventListener('change', function () {
-      state.filters.devices.status = this.value;
-      renderDevices();
-    });
-
     var plQ = document.getElementById('searchPlaylists');
     plQ.addEventListener('input', function () {
       state.filters.playlists.q = plQ.value;
@@ -1549,15 +2055,26 @@
       refreshAll(false);
     });
 
+    // Acesso por MAC + código
+    document.getElementById('accessForm').addEventListener('submit', onAccessSubmit);
+    document.getElementById('accessMac').addEventListener('input', function () {
+      this.value = V.formatMacInput(this.value);
+    });
+    document.getElementById('accessCode').addEventListener('input', function () {
+      this.value = this.value.toUpperCase();
+    });
+    document.getElementById('accessApp').addEventListener('change', function () {
+      state.access.app = this.value;
+    });
+    document.getElementById('accessResult').addEventListener('click', onAccessAction);
+
     // Botões de criação
-    document.getElementById('btnNewDevice').addEventListener('click', function () { openDeviceModal(null); });
     document.getElementById('btnNewPlaylist').addEventListener('click', function () { openPlaylistModal(null); });
     document.getElementById('btnNewClient').addEventListener('click', function () { openClientModal(null); });
     document.getElementById('btnNewApp').addEventListener('click', function () { openAppModal(null); });
     document.getElementById('btnExport').addEventListener('click', exportBackup);
 
     // Ações em listas dinâmicas
-    document.getElementById('devicesList').addEventListener('click', onDeviceAction);
     document.getElementById('playlistsList').addEventListener('click', onPlaylistAction);
     document.getElementById('clientsList').addEventListener('click', onClientAction);
     document.getElementById('appsTableBody').addEventListener('click', function (e) {
@@ -1603,24 +2120,20 @@
       document.getElementById('devMacHint').textContent =
         'MAC desvinculado. Clique em Salvar para aplicar. O histórico do aparelho é preservado.';
     });
-    document.getElementById('devListType').addEventListener('change', updateDeviceListBoxes);
+    document.getElementById('btnAddDevList').addEventListener('click', function () {
+      var row = addDeviceListRow({ type: 'm3u' });
+      if (row) {
+        var input = row.querySelector('[data-list-url]');
+        if (input) input.focus();
+      }
+    });
     document.getElementById('devPlaylist').addEventListener('change', function () {
       var pl = playlistById(this.value);
       if (!pl) return;
-      document.getElementById('devListType').value = pl.type;
-      if (pl.type === 'm3u') document.getElementById('devM3uUrl').value = pl.url || '';
-      else {
-        document.getElementById('devServer').value = pl.server_url || '';
-        document.getElementById('devUser').value = pl.username || '';
-        document.getElementById('devPass').value = pl.password || '';
-      }
-      updateDeviceListBoxes();
-      U.toast('Campos preenchidos com a playlist "' + pl.name + '".', 'ok');
+      addDeviceListRow(listDataFromPlaylist(pl));
+      U.toast('Playlist "' + pl.name + '" adicionada à relação de listas.', 'ok');
     });
-    document.getElementById('devStatus').addEventListener('change', function () {
-      if (this.value !== 'blocked') document.getElementById('devBlockReason').value = '';
-    });
-    document.getElementById('btnSaveDevice').addEventListener('click', saveDevice);
+    document.getElementById('btnApproveDevice').addEventListener('click', saveDevice);
     document.getElementById('btnDeleteDeviceFromModal').addEventListener('click', function () {
       if (state.editDevice) {
         U.closeModal('modalDevice');
@@ -1686,7 +2199,10 @@
     U.qsa('.tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.id === 'tab-' + tab);
     });
-    if (tab === 'audit') renderAudit();
+    if (tab === 'audit') {
+      renderAccess();
+      renderAudit();
+    }
   }
 
   async function onLogin(e) {
@@ -1822,39 +2338,23 @@
     }
   }
 
-  function onDeviceAction(e) {
-    var btn = e.target.closest('button[data-action]');
-    if (!btn) return;
-    var d = deviceById(btn.dataset.id);
-    if (!d) return;
-    var action = btn.dataset.action;
-
-    if (action === 'copy-code') {
-      U.copyText(d.device_id).then(function () {
-        U.toast('Código ' + d.device_id + ' copiado.', 'ok');
-      });
-      return;
-    }
-    if (action === 'copy-mac') {
-      if (!d.mac) return;
-      U.copyText(d.mac).then(function () {
-        U.toast('MAC ' + d.mac + ' copiado.', 'ok');
-      });
-      return;
-    }
-    if (action === 'edit') return openDeviceModal(d);
-    if (action === 'delete') return openDeleteDeviceModal(d);
-    if (action === 'toggle') return toggleBlock(d, btn);
-  }
-
   async function toggleBlock(device, btn) {
     if (device.status === 'blocked') {
       if (!confirm('Liberar o aparelho ' + device.device_id + '?\n\nSe ele tiver lista, volta como aprovado; se não tiver, volta como pendente.')) return;
       var next = device.list_data ? 'approved' : 'pending';
       U.setBusy(btn, true, '...');
       try {
-        await Api.setDeviceStatus(device.id, next, null);
-        U.toast('Aparelho ' + device.device_id + ' liberado.', 'ok');
+        var updated = await Api.setDeviceStatus(device.id, next, null);
+        var sync = updated.status === 'approved'
+          ? await syncApprovedClient(updated, updated.client_phone || linkedClientPhone(updated))
+          : { ok: false };
+        if (updated.status === 'approved' && sync.ok) {
+          U.toast('Aparelho ' + device.device_id + ' liberado e enviado para Clientes.', 'ok');
+        } else if (updated.status === 'approved') {
+          U.toast('Aparelho ' + device.device_id + ' liberado. Informe nome e WhatsApp no cadastro para aparecer em Clientes.', 'err', 9000);
+        } else {
+          U.toast('Aparelho ' + device.device_id + ' liberado.', 'ok');
+        }
         await refreshAll(true);
       } catch (err) {
         U.toast(U.errorMessage(err), 'err');

@@ -167,11 +167,22 @@ a:hover { text-decoration: underline; }
 .card-head p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .card-flat { background: var(--bg-input); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 14px; }
 
+.list-entry { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; background: var(--bg-card); }
+.list-entry + .list-entry { margin-top: 10px; }
+.list-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.list-entry-head h4 { font-size: 13px; font-weight: 700; }
+.list-entry .form-grid, .list-entry .form-grid-3 { margin-bottom: 0; }
+
 .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
 .stat {
+  display: block; width: 100%; text-align: left; font: inherit; color: inherit;
   background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 16px; position: relative; overflow: hidden;
+  padding: 16px; position: relative; overflow: hidden; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.05s;
 }
+.stat:hover { background: var(--bg-card-hover); border-color: var(--accent); }
+.stat:active { transform: translateY(1px); }
+.stat:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .stat::after {
   content: ''; position: absolute; inset: auto 0 0 0; height: 3px;
   background: var(--accent); opacity: 0.7;
@@ -179,9 +190,9 @@ a:hover { text-decoration: underline; }
 .stat.ok::after { background: var(--success); }
 .stat.warn::after { background: var(--warning); }
 .stat.danger::after { background: var(--danger); }
-.stat .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); }
-.stat .stat-value { font-size: 28px; font-weight: 800; line-height: 1.15; margin-top: 6px; font-variant-numeric: tabular-nums; }
-.stat .stat-foot { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.stat .stat-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); }
+.stat .stat-value { display: block; font-size: 28px; font-weight: 800; line-height: 1.15; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.stat .stat-foot { display: block; font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
 
 .app-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 16px; }
 .app-stat {
@@ -335,6 +346,53 @@ tbody tr:hover { background: rgba(148, 163, 184, 0.04); }
 .table-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .nowrap { white-space: nowrap; }
 
+/* --------------------------- acesso MAC + código ------------------------ */
+.access-card { border-color: rgba(59, 130, 246, 0.35); }
+.access-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 190px auto;
+  gap: 12px;
+  align-items: end;
+}
+.access-form .field { margin-bottom: 0; }
+.access-submit { display: flex; }
+.access-submit .btn-primary {
+  width: 100%; white-space: nowrap; padding: 11px 16px;
+}
+.access-card .auth-msg { margin-top: 12px; }
+.access-device { border-color: rgba(59, 130, 246, 0.3); }
+.access-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px; margin: 4px 0 0;
+}
+.access-grid > div {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-input); border: 1px solid var(--border-soft);
+}
+.access-grid span {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.access-grid b { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.access-grid .badge { align-self: flex-start; }
+.access-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.access-device .list-summary { margin-top: 10px; }
+
+.audit-history { padding: 0; overflow: hidden; }
+.audit-history > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  padding: 16px 18px; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+}
+.audit-history > summary::-webkit-details-marker { display: none; }
+.audit-history > summary::before {
+  content: '▸'; display: inline-block; margin-right: 8px;
+  color: var(--text-muted); transition: transform 0.15s;
+}
+.audit-history[open] > summary::before { transform: rotate(90deg); }
+.audit-history > .toolbar { padding: 0 18px 8px; }
+.audit-history > .audit-list { padding: 0 18px 16px; }
+
 /* ------------------------------- audit ---------------------------------- */
 .audit-row { padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
 .audit-row:last-child { border-bottom: 0; }
@@ -426,6 +484,9 @@ pre.json {
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-2 { grid-template-columns: 1fr; }
   .grid-3 { grid-template-columns: 1fr; }
+  .access-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .access-submit { grid-column: 1 / -1; }
+  .access-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
   .topbar { padding: 12px 14px; }
@@ -438,6 +499,8 @@ pre.json {
   .stat .stat-value { font-size: 22px; }
   .app-stat-grid { grid-template-columns: repeat(2, 1fr); }
   .form-grid, .form-grid-3 { grid-template-columns: 1fr; }
+  .access-form { grid-template-columns: 1fr; }
+  .access-grid { grid-template-columns: 1fr 1fr; }
   .device-top { flex-direction: column; }
   .device-actions { width: 100%; }
   .device-actions .btn-primary, .device-actions .btn-danger, .device-actions .btn-outline { flex: 1; }

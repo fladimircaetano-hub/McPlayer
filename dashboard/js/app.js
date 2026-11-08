@@ -26,6 +26,9 @@
     clients: [],
     audit: [],
     admins: [],
+    xtreamServers: [],
+    xtreamClients: [],
+    xtreamMissing: false,
     deleteTarget: null,
     editDevice: null,
     editPlaylist: null,
@@ -208,7 +211,9 @@
         Api.loadPlaylists(),
         Api.loadClients(),
         Api.loadAudit(cfg.auditPageSize || 500),
-        Api.loadAdmins()
+        Api.loadAdmins(),
+        Api.loadXtreamServers().catch(function () { return null; }),
+        Api.loadXtreamClients().catch(function () { return null; })
       ]);
 
       state.apps = rows[0] || [];
@@ -217,6 +222,9 @@
       state.clients = rows[3] || [];
       state.audit = rows[4] || [];
       state.admins = rows[5] || [];
+      state.xtreamServers = rows[6];
+      state.xtreamClients = rows[7];
+      state.xtreamMissing = rows[6] === null || rows[7] === null;
       state.setupError = '';
       hideSetupBanner();
       renderAll();
@@ -273,6 +281,7 @@
     renderOverview();
     renderPlaylists();
     renderClients();
+    renderXtream();
     renderAccess();
     renderAudit();
     renderSettings();
@@ -993,6 +1002,64 @@
       '<button type="button" class="btn-primary btn-sm" data-access-pick="' + U.esc(d.id) + '">Abrir formulário</button>' +
       '</div></div>'
     );
+  }
+
+  /* ----------------------------- contas Xtream ---------------------------- */
+
+  function xtreamStatusBadge(status) {
+    var s = String(status || '').toLowerCase();
+    if (s === 'active') return '<span class="badge badge-approved">Ativo</span>';
+    if (s === 'expired') return '<span class="badge badge-blocked">Vencido</span>';
+    if (s === 'disabled' || s === 'banned') {
+      return '<span class="badge badge-blocked">Bloqueado</span>';
+    }
+    return '<span class="badge badge-neutral">' + U.esc(s || '—') + '</span>';
+  }
+
+  function formatDateOnly(value) {
+    if (!value) return '—';
+    var d = new Date(value);
+    if (isNaN(d.getTime())) return U.esc(value);
+    return d.toLocaleDateString('pt-BR');
+  }
+
+  function renderXtream() {
+    var missing = state.xtreamMissing;
+    var clients = state.xtreamClients || [];
+    var servers = state.xtreamServers || [];
+
+    document.getElementById('countXtream').textContent = missing ? '—' : clients.length;
+
+    document.getElementById('xtreamClientsBody').innerHTML = missing
+      ? '<tr><td colspan="6" class="muted">Rode o dashboard/sql/006_xtream_accounts.sql no Supabase para ativar.</td></tr>'
+      : clients.length
+        ? clients.map(function (c) {
+            var device = [c.mac, c.device_id].filter(Boolean).join(' · ');
+            return '<tr>' +
+              '<td><b>' + U.esc(c.username) + '</b></td>' +
+              '<td class="mono small">' + U.esc(c.server_url) + '</td>' +
+              '<td class="small">' + U.esc(device || '—') + '</td>' +
+              '<td>' + xtreamStatusBadge(c.status) + '</td>' +
+              '<td>' + formatDateOnly(c.exp_date) + '</td>' +
+              '<td>' + U.formatDateTime(c.last_seen_at) + '</td>' +
+              '</tr>';
+          }).join('')
+        : '<tr><td colspan="6" class="muted">Nenhuma conta entrou ainda.</td></tr>';
+
+    document.getElementById('serversTableBody').innerHTML = missing
+      ? '<tr><td colspan="4" class="muted">Rode o dashboard/sql/006_xtream_accounts.sql no Supabase para ativar.</td></tr>'
+      : servers.length
+        ? servers.map(function (s) {
+            return '<tr>' +
+              '<td><b>' + U.esc(s.name) + '</b></td>' +
+              '<td class="mono small">' + U.esc(s.url) + '</td>' +
+              '<td>' + (s.active ? 'Sim' : 'Não') + '</td>' +
+              '<td><button type="button" class="btn-outline btn-xs" data-server-toggle="' + U.esc(s.id) + '">' +
+                (s.active ? 'Desativar' : 'Ativar') + '</button> ' +
+              '<button type="button" class="btn-danger btn-xs" data-server-delete="' + U.esc(s.id) + '">Excluir</button></td>' +
+              '</tr>';
+          }).join('')
+        : '<tr><td colspan="4" class="muted">Nenhum servidor cadastrado.</td></tr>';
   }
 
   function renderAccess() {
@@ -1958,6 +2025,82 @@
     }
   }
 
+  /* --------------------------- servidores Xtream -------------------------- */
+
+  function xtreamSqlMissing() {
+    if (!state.xtreamMissing) return false;
+    U.toast('Rode o dashboard/sql/006_xtream_accounts.sql no Supabase primeiro.', 'err', 9000);
+    return true;
+  }
+
+  async function addXtreamServer() {
+    if (xtreamSqlMissing()) return;
+    var name = document.getElementById('srvName').value.trim();
+    var url = document.getElementById('srvUrl').value.trim();
+    if (!name) return U.toast('Informe o nome do servidor.', 'err');
+    if (!/^https?:\/\//i.test(url)) {
+      return U.toast('Endereço inválido. Use http:// ou https://.', 'err');
+    }
+
+    try {
+      await Api.saveXtreamServer({
+        app_name: 'McPlayer',
+        name: name,
+        url: url,
+        sort_order: 100,
+        active: true
+      });
+      document.getElementById('srvName').value = '';
+      document.getElementById('srvUrl').value = '';
+      U.toast('Servidor adicionado.', 'ok');
+      await refreshAll(true);
+    } catch (err) {
+      U.toast(U.errorMessage(err), 'err', 9000);
+    }
+  }
+
+  async function toggleXtreamServer(id) {
+    if (xtreamSqlMissing()) return;
+    var server = (state.xtreamServers || []).find(function (s) {
+      return String(s.id) === String(id);
+    });
+    if (!server) return;
+
+    try {
+      await Api.saveXtreamServer({
+        id: server.id,
+        app_name: server.app_name,
+        name: server.name,
+        url: server.url,
+        sort_order: server.sort_order,
+        active: !server.active
+      });
+      U.toast(server.active ? 'Servidor desativado.' : 'Servidor ativado.', 'ok');
+      await refreshAll(true);
+    } catch (err) {
+      U.toast(U.errorMessage(err), 'err', 9000);
+    }
+  }
+
+  async function deleteXtreamServer(id) {
+    if (xtreamSqlMissing()) return;
+    var server = (state.xtreamServers || []).find(function (s) {
+      return String(s.id) === String(id);
+    });
+    if (!server) return;
+    if (!confirm('Excluir o servidor "' + server.name + '"?\n\nO app deixa de testar este servidor no login.')) {
+      return;
+    }
+
+    try {
+      await Api.deleteXtreamServer(server.id);
+      U.toast('Servidor excluído.', 'ok');
+      await refreshAll(true);
+    } catch (err) {
+      U.toast(U.errorMessage(err), 'err', 9000);
+    }
+  }
+
   /* ================================ EVENTOS =============================== */
 
   function bindStaticEvents() {
@@ -2176,6 +2319,22 @@
 
     // Modal app
     document.getElementById('btnSaveApp').addEventListener('click', saveApp);
+
+    // Servidores Xtream
+    var btnAddServer = document.getElementById('btnAddServer');
+    if (btnAddServer) btnAddServer.addEventListener('click', addXtreamServer);
+    var serversBody = document.getElementById('serversTableBody');
+    if (serversBody) {
+      serversBody.addEventListener('click', function (e) {
+        var toggle = e.target.closest('[data-server-toggle]');
+        if (toggle) {
+          toggleXtreamServer(toggle.dataset.serverToggle);
+          return;
+        }
+        var del = e.target.closest('[data-server-delete]');
+        if (del) deleteXtreamServer(del.dataset.serverDelete);
+      });
+    }
 
     // Fechamentos
     document.addEventListener('click', function (e) {

@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20261103g">
+<link rel="stylesheet" href="styles.css?v=20261108a">
 </head>
 <body>
 
@@ -106,7 +106,9 @@
   <nav class="nav-tabs">
     <button type="button" class="nav-btn active" data-tab="overview">📊 Visão geral</button>
     <button type="button" class="nav-btn" data-tab="playlists">🎬 Listas <span class="count-tag" id="countPlaylists">0</span></button>
+    <button type="button" class="nav-btn" data-tab="converter">🔄 Conversor M3U</button>
     <button type="button" class="nav-btn" data-tab="clients">👥 Clientes <span class="count-tag" id="countClients">0</span></button>
+    <button type="button" class="nav-btn" data-tab="xtream">🔑 Contas Xtream <span class="count-tag" id="countXtream">0</span></button>
     <button type="button" class="nav-btn" data-tab="audit">🔓 Acesso / Auditoria</button>
     <button type="button" class="nav-btn" data-tab="settings">⚙️ Configuração</button>
   </nav>
@@ -161,6 +163,37 @@
         <button type="button" class="btn-primary" id="btnNewClient">+ Novo cliente</button>
       </div>
       <div id="clientsList" class="card-list"></div>
+    </section>
+
+    <!-- ----------------------------- CONTAS XTREAM ---------------------- -->
+    <section id="tab-xtream" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Contas Xtream</h2>
+            <p>Clientes que entraram no app só com usuário e senha. A senha não é armazenada aqui.</p>
+          </div>
+          <span class="pill-soft">registro automático</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Usuário</th>
+                <th>Servidor</th>
+                <th>Aparelho</th>
+                <th>Status</th>
+                <th>Vencimento</th>
+                <th>Último acesso</th>
+              </tr>
+            </thead>
+            <tbody id="xtreamClientsBody"></tbody>
+          </table>
+        </div>
+        <p class="secondary small" style="margin-top:10px;">
+          Contas vencidas ou bloqueadas continuam sendo controladas no painel do servidor Xtream.
+        </p>
+      </div>
     </section>
 
     <!-- ----------------------------- AUDIT / ACESSO ---------------------- -->
@@ -225,6 +258,58 @@
       </details>
     </section>
 
+    <!-- --------------------------- CONVERSOR M3U ------------------------ -->
+    <section id="tab-converter" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Conversor M3U para Xtream Codes</h2>
+            <p>Extraia servidor, usuário e senha de um link M3U. A conversão acontece no seu navegador — nada é enviado ao servidor.</p>
+          </div>
+          <span class="pill-soft">100% no navegador</span>
+        </div>
+
+        <div class="field">
+          <label for="m3uUrl">URL da Lista M3U</label>
+          <textarea id="m3uUrl" rows="3" spellcheck="false" autocomplete="off" placeholder="http://servidor.com:8080/get.php?username=usuario123&amp;password=senha123&amp;type=m3u_plus&amp;output=ts"></textarea>
+          <small>Cole aqui o link M3U completo para extrair o servidor, usuário e senha.</small>
+        </div>
+
+        <div class="m3u-actions">
+          <button type="button" class="btn-primary" id="btnConvertM3u">🔄 Converter / Extrair</button>
+          <button type="button" class="btn-outline" id="btnClearM3u">Limpar</button>
+        </div>
+
+        <div id="m3uMsg" class="auth-msg hidden" role="alert" style="margin-top:12px;"></div>
+
+        <div id="m3uResult" class="m3u-result hidden">
+          <h3>Dados extraídos</h3>
+          <div class="field">
+            <label for="m3uHost">Servidor / Host</label>
+            <div class="input-row">
+              <input id="m3uHost" class="mono" readonly>
+              <button type="button" class="btn-outline btn-sm" data-copy-m3u="m3uHost">Copiar</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="m3uUser">Usuário (Username)</label>
+            <div class="input-row">
+              <input id="m3uUser" class="mono" readonly>
+              <button type="button" class="btn-outline btn-sm" data-copy-m3u="m3uUser">Copiar</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="m3uPass">Senha (Password)</label>
+            <div class="input-row">
+              <input id="m3uPass" class="mono" readonly>
+              <button type="button" class="btn-outline btn-sm" data-copy-m3u="m3uPass">Copiar</button>
+            </div>
+          </div>
+          <button type="button" class="btn-success" id="btnCopyAllM3u">📋 Copiar todos os dados</button>
+        </div>
+      </div>
+    </section>
+
     <!-- ---------------------------- SETTINGS ---------------------------- -->
     <section id="tab-settings" class="tab-panel">
       <div class="card">
@@ -248,6 +333,33 @@
               </tr>
             </thead>
             <tbody id="appsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Servidores Xtream</h2>
+            <p>O app testa estes servidores no login por usuário e senha, na ordem abaixo.</p>
+          </div>
+        </div>
+        <div class="server-form">
+          <input id="srvName" placeholder="Nome (ex.: Servidor 3)" autocomplete="off">
+          <input id="srvUrl" placeholder="http://servidor.com:8080" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn-primary" id="btnAddServer">+ Adicionar</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nome</th>
+                <th>Endereço</th>
+                <th>Ativo</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="serversTableBody"></tbody>
           </table>
         </div>
       </div>
@@ -289,6 +401,7 @@
         </p>
         <div class="code-box">dashboard/sql/001_schema.sql       -> estrutura base (apps, aparelhos, listas, clientes, auditoria)
 dashboard/sql/005_access_reset.sql -> data de entrada + telefone do cliente
+dashboard/sql/006_xtream_accounts.sql -> servidores + contas Xtream (login por usuário/senha)
 dashboard/sql/002_cleanup.sql      -> apaga as tabelas legadas (opcional, com backup)
 dashboard/sql/003_admin.sql        -> confere/adiciona administradores
 dashboard/sql/004_rollback.sql     -> volta atrás (somente antes do 002)</div>
@@ -655,7 +768,8 @@ dashboard/sql/004_rollback.sql     -> volta atrás (somente antes do 002)</div>
 <script src="js/config.js?v=20261103g"></script>
 <script src="js/validation.js?v=20261103g"></script>
 <script src="js/ui.js?v=20261103g"></script>
-<script src="js/api.js?v=20261103g"></script>
-<script src="js/app.js?v=20261103g"></script>
+<script src="js/api.js?v=20261108a"></script>
+<script src="js/app.js?v=20261108a"></script>
+<script src="js/converter.js?v=20261108a"></script>
 </body>
 </html>

@@ -297,6 +297,51 @@
       return sb.from('admins').select('*').order('created_at', { ascending: true }).then(unwrap);
     },
 
+    /* --------------------------- contas Xtream ---------------------------- */
+    loadXtreamServers: function () {
+      return sb
+        .from('xtream_servers')
+        .select('*')
+        .order('sort_order', { ascending: true })
+        .then(unwrap);
+    },
+
+    saveXtreamServer: function (server) {
+      var payload = cleanPayload({
+        app_name: server.app_name || 'McPlayer',
+        name: String(server.name || '').trim(),
+        url: String(server.url || '').trim(),
+        sort_order: Number(server.sort_order || 100),
+        active: server.active !== false
+      });
+
+      if (server.id) {
+        return sb
+          .from('xtream_servers')
+          .update(payload)
+          .eq('id', server.id)
+          .select()
+          .single()
+          .then(unwrap);
+      }
+      return sb.from('xtream_servers').insert(payload).select().single().then(unwrap);
+    },
+
+    deleteXtreamServer: function (id) {
+      return sb.from('xtream_servers').delete().eq('id', id).then(function (res) {
+        if (res.error) throw res.error;
+        return true;
+      });
+    },
+
+    loadXtreamClients: function () {
+      return sb
+        .from('xtream_clients')
+        .select('*')
+        .order('last_seen_at', { ascending: false })
+        .then(unwrap);
+    },
+
     /* ------------------------------- backup ------------------------------- */
     exportAll: function () {
       return Promise.all([

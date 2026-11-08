@@ -260,6 +260,17 @@ input::placeholder, textarea::placeholder { color: #55637a; }
 .checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); margin: 8px 0 12px; }
 .checkbox input { width: auto; }
 
+/* --------------------------- conversor M3U ------------------------------ */
+.m3u-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.m3u-result { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.m3u-result h3 { margin-bottom: 12px; }
+.m3u-result .field:last-of-type { margin-bottom: 4px; }
+.m3u-result .input-row input { color: var(--text-primary); }
+
+/* ------------------------- servidores Xtream ---------------------------- */
+.server-form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.server-form input { flex: 1 1 200px; min-width: 160px; }
+
 /* ------------------------------ buttons --------------------------------- */
 .btn-primary, .btn-outline, .btn-danger, .btn-success, .btn-ghost, .btn-wa {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;

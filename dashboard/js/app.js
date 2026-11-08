@@ -1023,22 +1023,65 @@
     return d.toLocaleDateString('pt-BR');
   }
 
+  // Todos os aparelhos que já entraram na conta (007). Sem o 007 fica só o
+  // último aparelho gravado na própria linha da conta.
+  function xtreamDeviceCell(c) {
+    var devices = Array.isArray(c.xtream_devices) ? c.xtream_devices.slice() : [];
+    var lines = [];
+    if (devices.length) {
+      devices.sort(function (a, b) {
+        return String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || ''));
+      });
+      devices.forEach(function (d) {
+        var id = [d.mac, d.device_id].filter(Boolean).join(' · ');
+        lines.push('<div class="mono small">' + U.esc(id || 'sem identificação') + '</div>');
+      });
+    } else {
+      var last = [c.mac, c.device_id].filter(Boolean).join(' · ');
+      if (last) lines.push('<div class="mono small">' + U.esc(last) + '</div>');
+    }
+    if (!lines.length) return '—';
+    var count = lines.length > 1
+      ? '<div class="small muted">' + lines.length + ' aparelhos</div>'
+      : '';
+    return count + lines.join('');
+  }
+
   function renderXtream() {
     var missing = state.xtreamMissing;
     var clients = state.xtreamClients || [];
     var servers = state.xtreamServers || [];
 
+    var deviceCount = 0;
+    clients.forEach(function (c) {
+      if (Array.isArray(c.xtream_devices) && c.xtream_devices.length) {
+        deviceCount += c.xtream_devices.length;
+      } else if (c.mac || c.device_id) {
+        deviceCount += 1;
+      }
+    });
     document.getElementById('countXtream').textContent = missing ? '—' : clients.length;
+    var devicesCountEl = document.getElementById('countXtreamDevices');
+    if (devicesCountEl) devicesCountEl.textContent = missing ? '—' : deviceCount;
+
+    var hintEl = document.getElementById('xtreamDevicesHint');
+    if (hintEl) {
+      var hasDevicesTable = clients.some(function (c) {
+        return Array.isArray(c.xtream_devices);
+      });
+      hintEl.style.display = !missing && clients.length && !hasDevicesTable
+        ? ''
+        : 'none';
+    }
 
     document.getElementById('xtreamClientsBody').innerHTML = missing
       ? '<tr><td colspan="6" class="muted">Rode o dashboard/sql/006_xtream_accounts.sql no Supabase para ativar.</td></tr>'
       : clients.length
         ? clients.map(function (c) {
-            var device = [c.mac, c.device_id].filter(Boolean).join(' · ');
             return '<tr>' +
               '<td><b>' + U.esc(c.username) + '</b></td>' +
               '<td class="mono small">' + U.esc(c.server_url) + '</td>' +
-              '<td class="small">' + U.esc(device || '—') + '</td>' +
+              '<td>' + xtreamDeviceCell(c) + '</td>' +
               '<td>' + xtreamStatusBadge(c.status) + '</td>' +
               '<td>' + formatDateOnly(c.exp_date) + '</td>' +
               '<td>' + U.formatDateTime(c.last_seen_at) + '</td>' +

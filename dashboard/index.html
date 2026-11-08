@@ -173,7 +173,10 @@
             <h2>Contas Xtream</h2>
             <p>Clientes que entraram no app só com usuário e senha. A senha não é armazenada aqui.</p>
           </div>
-          <span class="pill-soft">registro automático</span>
+          <div class="head-pills">
+            <span class="pill-soft"><span id="countXtreamDevices">0</span> aparelho(s)</span>
+            <span class="pill-soft">registro automático</span>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
@@ -181,7 +184,7 @@
               <tr>
                 <th>Usuário</th>
                 <th>Servidor</th>
-                <th>Aparelho</th>
+                <th>Aparelhos conectados</th>
                 <th>Status</th>
                 <th>Vencimento</th>
                 <th>Último acesso</th>
@@ -192,6 +195,10 @@
         </div>
         <p class="secondary small" style="margin-top:10px;">
           Contas vencidas ou bloqueadas continuam sendo controladas no painel do servidor Xtream.
+        </p>
+        <p class="secondary small" id="xtreamDevicesHint" style="display:none;">
+          Para listar todos os aparelhos conectados em cada conta, rode o
+          <b>dashboard/sql/007_xtream_devices.sql</b> no SQL Editor do Supabase.
         </p>
       </div>
     </section>
@@ -402,6 +409,7 @@
         <div class="code-box">dashboard/sql/001_schema.sql       -> estrutura base (apps, aparelhos, listas, clientes, auditoria)
 dashboard/sql/005_access_reset.sql -> data de entrada + telefone do cliente
 dashboard/sql/006_xtream_accounts.sql -> servidores + contas Xtream (login por usuário/senha)
+dashboard/sql/007_xtream_devices.sql  -> aparelhos conectados em cada conta Xtream
 dashboard/sql/002_cleanup.sql      -> apaga as tabelas legadas (opcional, com backup)
 dashboard/sql/003_admin.sql        -> confere/adiciona administradores
 dashboard/sql/004_rollback.sql     -> volta atrás (somente antes do 002)</div>

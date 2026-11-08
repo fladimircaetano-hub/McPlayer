@@ -335,11 +335,21 @@
     },
 
     loadXtreamClients: function () {
+      // O 007 cria xtream_devices (todos os aparelhos de cada conta). Se o
+      // SQL ainda não foi rodado, o embed falha e voltamos para a leitura
+      // antiga (só o último aparelho) sem quebrar a aba.
       return sb
         .from('xtream_clients')
-        .select('*')
+        .select('*, xtream_devices(id, device_id, mac, last_seen_at)')
         .order('last_seen_at', { ascending: false })
-        .then(unwrap);
+        .then(unwrap)
+        .catch(function () {
+          return sb
+            .from('xtream_clients')
+            .select('*')
+            .order('last_seen_at', { ascending: false })
+            .then(unwrap);
+        });
     },
 
     /* ------------------------------- backup ------------------------------- */

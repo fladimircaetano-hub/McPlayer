@@ -48,6 +48,9 @@ String _seriesCardSubtitle(String category) {
 /// Sentinela: subcategoria "todas" selecionada (navegação mobile).
 const _kAllSubs = '__ALL_SUBCATEGORIES__';
 
+/// Chave do nó de foco da linha "TODAS" da coluna de subcategorias.
+const _kSubAllNode = '__ALL_SUBS_NODE__';
+
 typedef _CatNode = CategoryNode;
 
 List<_CatNode> _buildCatTree(List<IptvCategory> cats) =>
@@ -92,6 +95,16 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   /// folha exata (nome completo) e [_selectedParent] o agrupamento.
   String _selectedParent = '';
   String? _selectedSub;
+
+  /// Nós de foco das colunas laterais e do primeiro cartão da grade: a TV
+  /// usa para levar o cursor ao lugar certo a cada troca de nível.
+  final Map<String, FocusNode> _categoryNodes = {};
+  final Map<String, FocusNode> _subNodes = {};
+  final FocusNode _firstCardNode = FocusNode(debugLabel: 'vod-first-card');
+
+  /// Índice do cartão em foco (só na TV). Serve para segurar o cursor no fim
+  /// da grade em vez de ele escapar para a coluna de categorias.
+  int? _focusedCardIndex;
 
   StreamType get _type => widget.type;
   bool get _isSeries => _type == StreamType.series;
@@ -203,6 +216,13 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     _searchNode.dispose();
     _backNode.dispose();
     _searchCtrl.dispose();
+    for (final node in _categoryNodes.values) {
+      node.dispose();
+    }
+    for (final node in _subNodes.values) {
+      node.dispose();
+    }
+    _firstCardNode.dispose();
     super.dispose();
   }
 
@@ -407,26 +427,98 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     setState(() => _sortMode = (_sortMode + 1) % 3);
   }
 
-  // ---------- navegação por níveis (mobile) ----------
+  // ---------- navegação por níveis ----------
+
+  FocusNode _categoryNode(String name) => _categoryNodes.putIfAbsent(
+    name,
+    () => FocusNode(debugLabel: 'vod-category-$name'),
+  );
+
+  FocusNode _subNode(String key) =>
+      _subNodes.putIfAbsent(key, () => FocusNode(debugLabel: 'vod-sub-$key'));
+
+  /// Pede o foco só quando o widget já está montado: um nó de uma linha
+  /// fora da tela (ListView) não pode receber foco.
+  void _focusIfMounted(FocusNode? node) {
+    final ctx = node?.context;
+    if (node != null && ctx != null && ctx.mounted) node.requestFocus();
+  }
+
+  void _focusAfterBuild(FocusNode? node) {
+    if (!_isTv) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusIfMounted(node);
+    });
+  }
+
+  /// Primeira opção do nível seguinte: a primeira subcategoria quando a
+  /// categoria tem subcategorias, senão o primeiro cartão da grade.
+  void _focusFirstOption() {
+    if (!_isTv) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final node = _selectedNode;
+      if (node != null && node.hasSubs && !_showOnlyFavorites) {
+        _focusIfMounted(_subNode(_kSubAllNode));
+      } else {
+        _focusIfMounted(_firstCardNode);
+      }
+    });
+  }
+
+  /// Volta o foco da grade para a coluna da esquerda: subcategoria escolhida
+  /// quando existe, senão a categoria escolhida.
+  void _focusLeftColumn() {
+    if (_showOnlyFavorites) {
+      _focusIfMounted(_categoryNode('FAVORITOS'));
+      return;
+    }
+    final sub = _selectedSub;
+    if (sub != null) {
+      _focusIfMounted(_subNode(sub == _kAllSubs ? _kSubAllNode : sub));
+      return;
+    }
+    final node = _selectedNode;
+    if (node != null && node.hasSubs) {
+      _focusIfMounted(_subNode(_kSubAllNode));
+      return;
+    }
+    if (_selectedParent.isNotEmpty) {
+      _focusIfMounted(_categoryNode(_selectedParent));
+    }
+  }
 
   /// Retorna true se conseguiu voltar um nível na hierarquia.
   bool _goBackLevel() {
-    // Na TV, só a aba Filmes tem níveis para voltar (Séries e TV ao vivo
-    // devem continuar exatamente como estão).
-    if (_isTv && !_isTvMovies) return false;
     if (_showOnlyFavorites) {
-      setState(() => _showOnlyFavorites = false);
+      setState(() {
+        _showOnlyFavorites = false;
+        _focusedCardIndex = null;
+      });
+      _focusAfterBuild(_categoryNode('FAVORITOS'));
       return true;
     }
     if (_selectedSub != null) {
-      setState(() => _selectedSub = null);
+      final prev = _selectedSub!;
+      setState(() {
+        _selectedSub = null;
+        _focusedCardIndex = null;
+      });
+      _focusAfterBuild(
+        _subNode(prev == _kAllSubs ? _kSubAllNode : prev),
+      );
       return true;
     }
     if (_selectedParent.isNotEmpty) {
+      // Volta para a lista de categorias: saiu da categoria atual.
+      final prev = _selectedParent;
+      lockAdultContent();
       setState(() {
         _selectedParent = '';
         _selectedSub = null;
+        _focusedCardIndex = null;
       });
+      _focusAfterBuild(_categoryNode(prev));
       return true;
     }
     return false;
@@ -455,22 +547,39 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   }
 
   void _selectParent(String name) {
+    // Saiu do grupo Adulto? O PIN volta a ser exigido na próxima entrada.
+    syncAdultAccessWithCategory(name);
     setState(() {
       _selectedParent = name;
       _selectedSub = null;
       _showOnlyFavorites = false;
+      _focusedCardIndex = null;
     });
+    // Categoria escolhida: o cursor vai direto para a primeira opção do
+    // nível seguinte (subcategoria ou primeiro cartão).
+    _focusFirstOption();
   }
 
   void _selectSub(String? fullName) {
+    // "Todas as subcategorias" continua dentro do pai escolhido.
+    final category = fullName == _kAllSubs ? _selectedParent : fullName;
+    if (category != null && category.isNotEmpty) {
+      syncAdultAccessWithCategory(category);
+    }
     setState(() {
       _selectedSub = fullName;
       _showOnlyFavorites = false;
+      _focusedCardIndex = null;
     });
+    // Subcategoria escolhida: cursor no primeiro conteúdo da grade.
+    _focusAfterBuild(_firstCardNode);
   }
 
   void _toggleFavorites() {
-    setState(() => _showOnlyFavorites = !_showOnlyFavorites);
+    final turningOn = !_showOnlyFavorites;
+    // Favoritos não são uma categoria: ao voltar ao Adulto o PIN é pedido.
+    if (turningOn) lockAdultContent();
+    setState(() => _showOnlyFavorites = turningOn);
   }
 
   // ---------- build ----------
@@ -545,6 +654,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 name: 'TODOS',
                 count: total,
                 selected: _isAllSelected,
+                focusNode: _categoryNode('TODOS'),
                 // Com o pai "Filmes" oculto, o foco começa nas
                 // subcategorias (a escolha seguinte), não em TODOS.
                 autofocus: _hiddenMoviesRoot == null,
@@ -555,7 +665,11 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 count: widget.controller.totalFavoritesCount,
                 selected: _showOnlyFavorites,
                 accent: AppColors.accentOrange,
-                onTap: _toggleFavorites,
+                focusNode: _categoryNode('FAVORITOS'),
+                onTap: () {
+                  _toggleFavorites();
+                  _focusAfterBuild(_firstCardNode);
+                },
               ),
               ...tree
                   .where((node) => hidden == null || node.name != hidden.name)
@@ -565,6 +679,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                       count: node.count,
                       selected:
                           !_showOnlyFavorites && _selectedParent == node.name,
+                      focusNode: _categoryNode(node.name),
                       onTap: () => _selectParent(node.name),
                     ),
                   ),
@@ -587,6 +702,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 name: 'TODAS',
                 count: node.count,
                 selected: _selectedSub == null || _selectedSub == _kAllSubs,
+                focusNode: _subNode(_kSubAllNode),
                 autofocus: true,
                 onTap: () => _selectSub(_kAllSubs),
               ),
@@ -595,6 +711,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                   name: _categorySubLabel(leaf.name),
                   count: leaf.count,
                   selected: _selectedSub == leaf.name,
+                  focusNode: _subNode(leaf.name),
                   onTap: () => _selectSub(leaf.name),
                 ),
               ),
@@ -652,6 +769,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     required int count,
     required bool selected,
     bool autofocus = false,
+    FocusNode? focusNode,
     Color? accent,
     required VoidCallback onTap,
   }) {
@@ -660,6 +778,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       padding: const EdgeInsets.only(bottom: 8),
       child: TvFocusable(
         autofocus: autofocus,
+        focusNode: focusNode,
         borderRadius: BorderRadius.circular(10),
         onPressed: onTap,
         child: Container(
@@ -1386,6 +1505,36 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     return _buildMoviesGrid(items);
   }
 
+  /// Segura o cursor nas bordas da grade: sem isso o D-pad "escapa" para a
+  /// coluna de categorias quando não há mais cartão naquela direção.
+  KeyEventResult _handleGridKey(
+    FocusNode node,
+    KeyEvent event,
+    int crossAxisCount,
+    int itemCount,
+  ) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final index = _focusedCardIndex;
+    if (index == null || index < 0 || index >= itemCount) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    final column = index % crossAxisCount;
+    if (key == LogicalKeyboardKey.arrowLeft && column == 0) {
+      _focusLeftColumn();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight &&
+        column == crossAxisCount - 1) {
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown &&
+        index + crossAxisCount >= itemCount) {
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   Widget _buildMoviesGrid(List<StreamItem> items) {
     // Calcula colunas baseado na largura
     int crossAxisCount;
@@ -1402,35 +1551,45 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       crossAxisCount = 3;
     }
 
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        childAspectRatio: 0.68, // pôster 2:3
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, event) =>
+          _handleGridKey(node, event, crossAxisCount, items.length),
+      child: GridView.builder(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          childAspectRatio: 0.68, // pôster 2:3
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+        ),
+        itemCount: items.length,
+        itemBuilder: (context, i) {
+          final item = items[i];
+          // StreamCard já é um TvFocusable: um único clique pressiona OK,
+          // abre o player e desenha o foco. O wrapper externo duplicava os
+          // eventos e exigia um segundo toque em alguns controles.
+          return Builder(
+            builder: (cardContext) => StreamCard(
+              item: item,
+              focusNode: i == 0 ? _firstCardNode : null,
+              onTap: () => _openPlayer(items, i),
+              onToggleFavorite: () => widget.controller.toggleFavorite(item),
+              isVod: true,
+              // Garante que a capa fique INTEIRA na tela já no primeiro toque:
+              // sem isso o GridView só revela parte do card e o usuário tem de
+              // apertar de novo para ver o resto.
+              onFocusChange: (focused) {
+                if (focused) {
+                  _focusedCardIndex = i;
+                  _revealCard(cardContext);
+                }
+              },
+            ),
+          );
+        },
       ),
-      itemCount: items.length,
-      itemBuilder: (context, i) {
-        final item = items[i];
-        // StreamCard já é um TvFocusable: um único clique pressiona OK,
-        // abre o player e desenha o foco. O wrapper externo duplicava os
-        // eventos e exigia um segundo toque em alguns controles.
-        return Builder(
-          builder: (cardContext) => StreamCard(
-            item: item,
-            onTap: () => _openPlayer(items, i),
-            onToggleFavorite: () => widget.controller.toggleFavorite(item),
-            isVod: true,
-            // Garante que a capa fique INTEIRA na tela já no primeiro toque:
-            // sem isso o GridView só revela parte do card e o usuário tem de
-            // apertar de novo para ver o resto.
-            onFocusChange: (focused) {
-              if (focused) _revealCard(cardContext);
-            },
-          ),
-        );
-      },
     );
   }
 
@@ -1450,39 +1609,50 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       crossAxisCount = 3;
     }
 
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        childAspectRatio: 0.68,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, event) =>
+          _handleGridKey(node, event, crossAxisCount, groups.length),
+      child: GridView.builder(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          childAspectRatio: 0.68,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+        ),
+        itemCount: groups.length,
+        itemBuilder: (context, i) {
+          final group = groups[i];
+          // O cartão mostra o nome da SÉRIE (group.name), não do episódio
+          // representativo: no M3U o rep é "Nome S01 E01" e sem isso a grade
+          // exibiria "Zatch Bell! EP01" em vez de "Zatch Bell".
+          final displayItem = group.rep.copyWith(
+            name: group.name,
+            logoUrl: group.logoUrl ?? group.rep.logoUrl,
+            category: group.episodes.length == 1
+                ? _seriesCardSubtitle(group.category)
+                : '${group.episodes.length} episódios',
+          );
+          return Builder(
+            builder: (cardContext) => StreamCard(
+              item: displayItem,
+              focusNode: i == 0 ? _firstCardNode : null,
+              onTap: () => _onSeriesTap(group),
+              onToggleFavorite: () =>
+                  widget.controller.toggleFavorite(group.rep),
+              isVod: true,
+              onFocusChange: (focused) {
+                if (focused) {
+                  _focusedCardIndex = i;
+                  _revealCard(cardContext);
+                }
+              },
+            ),
+          );
+        },
       ),
-      itemCount: groups.length,
-      itemBuilder: (context, i) {
-        final group = groups[i];
-        // O cartão mostra o nome da SÉRIE (group.name), não do episódio
-        // representativo: no M3U o rep é "Nome S01 E01" e sem isso a grade
-        // exibiria "Zatch Bell! EP01" em vez de "Zatch Bell".
-        final displayItem = group.rep.copyWith(
-          name: group.name,
-          logoUrl: group.logoUrl ?? group.rep.logoUrl,
-          category: group.episodes.length == 1
-              ? _seriesCardSubtitle(group.category)
-              : '${group.episodes.length} episódios',
-        );
-        return Builder(
-          builder: (cardContext) => StreamCard(
-            item: displayItem,
-            onTap: () => _onSeriesTap(group),
-            onToggleFavorite: () => widget.controller.toggleFavorite(group.rep),
-            isVod: true,
-            onFocusChange: (focused) {
-              if (focused) _revealCard(cardContext);
-            },
-          ),
-        );
-      },
     );
   }
 

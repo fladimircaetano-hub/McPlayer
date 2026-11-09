@@ -13,6 +13,7 @@ import '../widgets/double_back_to_exit.dart';
 import '../widgets/exit_confirmation_dialog.dart';
 import '../widgets/tv_focusable.dart';
 import 'add_playlist_screen.dart';
+import 'account_login_screen.dart';
 import 'home_screen.dart';
 
 /// Tela "Playlist" — entrada do app: título + botão +,
@@ -325,6 +326,7 @@ class _ListsScreenState extends State<ListsScreen>
       success = false;
     }
     if (success && mounted) {
+      await controller.storageService.setCredentialLogin(false);
       _openActive();
     } else {
       _autoActivating = false;
@@ -553,6 +555,73 @@ class _ListsScreenState extends State<ListsScreen>
                           ],
                         ),
                         const SizedBox(height: 20),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: TvFocusable(
+                            borderRadius: BorderRadius.circular(10),
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => AccountLoginScreen(
+                                    controller: controller,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 14,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.surface,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: AppColors.cardBorder,
+                                ),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(
+                                    Icons.vpn_key_rounded,
+                                    color: AppColors.primary,
+                                    size: 22,
+                                  ),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Entrar com usuário e senha',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                        SizedBox(height: 2),
+                                        Text(
+                                          'O servidor é encontrado automaticamente',
+                                          style: TextStyle(
+                                            color: AppColors.textSecondary,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: Colors.white54,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                         if (rows.isEmpty)
                           const Center(
                             child: Padding(

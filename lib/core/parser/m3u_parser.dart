@@ -10,6 +10,11 @@ class M3uParser {
 
   static final RegExp _numericStreamUrl = RegExp(r'/\d+/\d+/\d+\s*$');
 
+  /// VOD de painéis que usam URL opaca: `/play/<token>` sem sufixo nenhum.
+  /// O canal ao vivo do mesmo painel termina em `/ts` (transporte mpegts),
+  /// então o que sobra aqui é filme/episódio.
+  static final RegExp _opaquePlayVod = RegExp(r'/play/[^/?#]+$');
+
   /// Alguns painéis geram links `.../play/<token>/ts.` no M3U, mas o
   /// endpoint real do provedor é `.../play/<token>` (responde 302 para o
   /// stream). Sem isso o player tenta abrir `/ts.` e recebe 404.
@@ -183,6 +188,7 @@ class M3uParser {
           name: name,
           group: group,
           url: streamUrl,
+          rawUrl: line,
           regexSeries: regexSeries,
         );
 
@@ -227,19 +233,24 @@ class M3uParser {
   /// 2. episódio marcado no nome (S01E01, T1:E2, EP 12...);
   /// 3. extensão de arquivo VOD (.mp4, .mkv...);
   /// 4. transporte ao vivo (.m3u8, .ts...);
-  /// 5. só então o nome do grupo desempata (URLs sem formato claro).
+  /// 5. só então o nome do grupo desempata (URLs sem formato claro);
+  /// 6. e, por último, URL opaca `/play/<token>` (sem `/ts`) é VOD.
   /// Isso evita que canais ao vivo caiam em Filmes/Séries só porque o
   /// grupo se chama "FILME E SERIES" ou o canal se chama "TNT SERIES".
   static StreamType _classifyStreamType({
     required String name,
     required String group,
     required String url,
+    required String rawUrl,
     required RegExp regexSeries,
   }) {
     final lowerName = name.toLowerCase();
     final lowerGroup = group.toLowerCase();
     final lowerUrl = url.toLowerCase();
     final path = _urlPath(url);
+    // A URL bruta preserva o `/ts` que a normalização remove: é ele que
+    // separa canal ao vivo de VOD nesses provedores.
+    final rawPath = _urlPath(rawUrl);
 
     // 1. Painel Xtream no path da URL (determinístico).
     if (lowerUrl.contains('/live/')) return StreamType.live;
@@ -321,7 +332,16 @@ class M3uParser {
       return StreamType.movie;
     }
 
-    // 6. Padrão: Canais Ao Vivo
+    // 5c. URL opaca estilo `/play/<token>` (sem `/ts`, sem extensão) é
+    // VOD: o canal ao vivo desse tipo de painel sempre tem `/ts`. Sem
+    // isso, grupos como "XXX | HENTAI", "ONLYFANS / PRIVACY" e
+    // "XXX | HETERO" apareciam em TV ao vivo. Fica depois das regras de
+    // grupo de propósito: grupo de canal reconhecido continua ao vivo.
+    if (_opaquePlayVod.hasMatch(rawPath)) {
+      return StreamType.movie;
+    }
+
+    // Padrão: canais ao vivo.
     return StreamType.live;
   }
 }

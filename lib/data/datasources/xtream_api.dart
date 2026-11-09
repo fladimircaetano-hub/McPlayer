@@ -1,5 +1,7 @@
 import 'dart:convert';
+
 import 'package:dio/dio.dart';
+
 import '../models/stream_item.dart';
 import '../models/xtream_account.dart';
 
@@ -7,20 +9,24 @@ class XtreamApi {
   final Dio _dio;
 
   XtreamApi([Dio? dio])
-      : _dio = dio ??
-            Dio(
-              BaseOptions(
-                connectTimeout: const Duration(seconds: 25),
-                receiveTimeout: const Duration(seconds: 40),
-                headers: {
-                  'User-Agent': 'IPTVSmarters/1.0.0 (Linux; Android 12)',
-                  'Accept': 'application/json, text/plain, */*',
-                },
-                validateStatus: (status) => status != null && status < 500,
-              ),
-            );
+    : _dio =
+          dio ??
+          Dio(
+            BaseOptions(
+              connectTimeout: const Duration(seconds: 25),
+              receiveTimeout: const Duration(seconds: 40),
+              headers: {
+                'User-Agent': 'IPTVSmarters/1.0.0 (Linux; Android 12)',
+                'Accept': 'application/json, text/plain, */*',
+              },
+              validateStatus: (status) => status != null && status < 500,
+            ),
+          );
 
-  String _cleanUrl(String url) {
+  /// Normaliza a URL do servidor do mesmo jeito em todo o app. O cache do
+  /// catálogo usa essa forma como chave, então a abertura precisa gerar
+  /// exatamente a mesma string que o login gravou.
+  static String normalizeServerUrl(String url) {
     var clean = url.trim();
     if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
       clean = 'https://$clean';
@@ -30,6 +36,8 @@ class XtreamApi {
     }
     return clean;
   }
+
+  String _cleanUrl(String url) => normalizeServerUrl(url);
 
   /// Autentica na API Xtream Codes
   Future<XtreamAccount> authenticate({
@@ -43,7 +51,9 @@ class XtreamApi {
     final base = _cleanUrl(serverUrl);
     final baseUri = Uri.tryParse(base);
     if (baseUri == null || !baseUri.hasScheme || !baseUri.host.contains('.')) {
-      throw Exception('URL do servidor inválida. Ex: http://iptv.exemplo.com:8080');
+      throw Exception(
+        'URL do servidor inválida. Ex: http://iptv.exemplo.com:8080',
+      );
     }
     final endpoint = '$base/player_api.php';
 
@@ -78,7 +88,11 @@ class XtreamApi {
         if (userInfo is Map<String, dynamic>) {
           final auth = userInfo['auth'];
           final status = userInfo['status']?.toString();
-          final authOk = auth == 1 || auth == '1' || auth == true || status?.toLowerCase() == 'active';
+          final authOk =
+              auth == 1 ||
+              auth == '1' ||
+              auth == true ||
+              status?.toLowerCase() == 'active';
           if (authOk) {
             return XtreamAccount(
               serverUrl: base,
@@ -90,9 +104,11 @@ class XtreamApi {
             );
           } else {
             final msg = userInfo['message']?.toString();
-            throw Exception(msg?.isNotEmpty == true
-                ? msg!
-                : 'Usuário/senha inválidos ou assinatura expirada.');
+            throw Exception(
+              msg?.isNotEmpty == true
+                  ? msg!
+                  : 'Usuário/senha inválidos ou assinatura expirada.',
+            );
           }
         }
       }
@@ -152,7 +168,10 @@ class XtreamApi {
           if (raw is Map<String, dynamic>) {
             final id = raw['category_id']?.toString();
             final name = raw['category_name']?.toString();
-            if (id != null && id.isNotEmpty && name != null && name.isNotEmpty) {
+            if (id != null &&
+                id.isNotEmpty &&
+                name != null &&
+                name.isNotEmpty) {
               map[id] = name;
             }
           }
@@ -177,8 +196,10 @@ class XtreamApi {
   }) async {
     try {
       final endpoint = '${account.serverUrl}/player_api.php';
-      final categoryMap =
-          await _fetchCategoryMap(account, 'get_live_categories');
+      final categoryMap = await _fetchCategoryMap(
+        account,
+        'get_live_categories',
+      );
       final response = await _dio.get(
         endpoint,
         queryParameters: {
@@ -198,37 +219,39 @@ class XtreamApi {
       }
       if (data is! List) return [];
 
-    final List<StreamItem> items = [];
-    for (final raw in data) {
-      if (raw is Map<String, dynamic>) {
-        final streamId = raw['stream_id']?.toString() ?? '';
-        final name = raw['name']?.toString() ?? 'Canal';
-        final logo = raw['stream_icon']?.toString();
-        final epgId = raw['epg_channel_id']?.toString();
-        final categoryId = raw['category_id']?.toString();
-        final category = raw['category_name']?.toString() ??
-            (categoryId != null ? categoryMap[categoryId] : null) ??
-            'Geral';
-        
-        // URL da stream ao vivo HLS (.m3u8) ou TS (.ts)
-        final suffix = ext == 'mpegts' ? 'ts' : 'm3u8';
-        final streamUrl = '${account.serverUrl}/live/${account.username}/${account.password}/$streamId.$suffix';
+      final List<StreamItem> items = [];
+      for (final raw in data) {
+        if (raw is Map<String, dynamic>) {
+          final streamId = raw['stream_id']?.toString() ?? '';
+          final name = raw['name']?.toString() ?? 'Canal';
+          final logo = raw['stream_icon']?.toString();
+          final epgId = raw['epg_channel_id']?.toString();
+          final categoryId = raw['category_id']?.toString();
+          final category =
+              raw['category_name']?.toString() ??
+              (categoryId != null ? categoryMap[categoryId] : null) ??
+              'Geral';
 
-        items.add(
-          StreamItem(
-            id: 'xtream_live_$streamId',
-            name: name,
-            streamUrl: streamUrl,
-            logoUrl: (logo != null && logo.isNotEmpty) ? logo : null,
-            category: category,
-            streamType: StreamType.live,
-            rating: raw['rating']?.toString(),
-            epgId: (epgId != null && epgId.isNotEmpty) ? epgId : null,
-          ),
-        );
+          // URL da stream ao vivo HLS (.m3u8) ou TS (.ts)
+          final suffix = ext == 'mpegts' ? 'ts' : 'm3u8';
+          final streamUrl =
+              '${account.serverUrl}/live/${account.username}/${account.password}/$streamId.$suffix';
+
+          items.add(
+            StreamItem(
+              id: 'xtream_live_$streamId',
+              name: name,
+              streamUrl: streamUrl,
+              logoUrl: (logo != null && logo.isNotEmpty) ? logo : null,
+              category: category,
+              streamType: StreamType.live,
+              rating: raw['rating']?.toString(),
+              epgId: (epgId != null && epgId.isNotEmpty) ? epgId : null,
+            ),
+          );
+        }
       }
-    }
-    return items;
+      return items;
     } catch (_) {
       return [];
     }
@@ -238,8 +261,10 @@ class XtreamApi {
   Future<List<StreamItem>> getVodStreams(XtreamAccount account) async {
     try {
       final endpoint = '${account.serverUrl}/player_api.php';
-      final categoryMap =
-          await _fetchCategoryMap(account, 'get_vod_categories');
+      final categoryMap = await _fetchCategoryMap(
+        account,
+        'get_vod_categories',
+      );
       final response = await _dio.get(
         endpoint,
         queryParameters: {
@@ -259,35 +284,37 @@ class XtreamApi {
       }
       if (data is! List) return [];
 
-    final List<StreamItem> items = [];
-    for (final raw in data) {
-      if (raw is Map<String, dynamic>) {
-        final streamId = raw['stream_id']?.toString() ?? '';
-        final name = raw['name']?.toString() ?? 'Filme';
-        final logo = raw['stream_icon']?.toString();
-        final categoryId = raw['category_id']?.toString();
-        final category = raw['category_name']?.toString() ??
-            (categoryId != null ? categoryMap[categoryId] : null) ??
-            'Filmes';
-        final ext = raw['container_extension']?.toString() ?? 'mp4';
+      final List<StreamItem> items = [];
+      for (final raw in data) {
+        if (raw is Map<String, dynamic>) {
+          final streamId = raw['stream_id']?.toString() ?? '';
+          final name = raw['name']?.toString() ?? 'Filme';
+          final logo = raw['stream_icon']?.toString();
+          final categoryId = raw['category_id']?.toString();
+          final category =
+              raw['category_name']?.toString() ??
+              (categoryId != null ? categoryMap[categoryId] : null) ??
+              'Filmes';
+          final ext = raw['container_extension']?.toString() ?? 'mp4';
 
-        final streamUrl = '${account.serverUrl}/movie/${account.username}/${account.password}/$streamId.$ext';
+          final streamUrl =
+              '${account.serverUrl}/movie/${account.username}/${account.password}/$streamId.$ext';
 
-        items.add(
-          StreamItem(
-            id: 'xtream_vod_$streamId',
-            name: name,
-            streamUrl: streamUrl,
-            logoUrl: (logo != null && logo.isNotEmpty) ? logo : null,
-            category: category,
-            streamType: StreamType.movie,
-            rating: raw['rating']?.toString(),
-            releaseDate: raw['year']?.toString(),
-          ),
-        );
+          items.add(
+            StreamItem(
+              id: 'xtream_vod_$streamId',
+              name: name,
+              streamUrl: streamUrl,
+              logoUrl: (logo != null && logo.isNotEmpty) ? logo : null,
+              category: category,
+              streamType: StreamType.movie,
+              rating: raw['rating']?.toString(),
+              releaseDate: raw['year']?.toString(),
+            ),
+          );
+        }
       }
-    }
-    return items;
+      return items;
     } catch (_) {
       return [];
     }
@@ -297,8 +324,10 @@ class XtreamApi {
   Future<List<StreamItem>> getSeriesStreams(XtreamAccount account) async {
     try {
       final endpoint = '${account.serverUrl}/player_api.php';
-      final categoryMap =
-          await _fetchCategoryMap(account, 'get_series_categories');
+      final categoryMap = await _fetchCategoryMap(
+        account,
+        'get_series_categories',
+      );
       final response = await _dio.get(
         endpoint,
         queryParameters: {
@@ -318,40 +347,47 @@ class XtreamApi {
       }
       if (data is! List) return [];
 
-    final List<StreamItem> items = [];
-    for (final raw in data) {
-      if (raw is Map<String, dynamic>) {
-        final seriesId = raw['series_id'];
-        final name = raw['name']?.toString() ?? 'Série';
-        final logo = raw['cover']?.toString();
-        final categoryId = raw['category_id']?.toString();
-        final category = raw['category_name']?.toString() ??
-            (categoryId != null ? categoryMap[categoryId] : null) ??
-            'Séries';
+      final List<StreamItem> items = [];
+      for (final raw in data) {
+        if (raw is Map<String, dynamic>) {
+          final seriesId = raw['series_id'];
+          final name = raw['name']?.toString() ?? 'Série';
+          final logo = raw['cover']?.toString();
+          final categoryId = raw['category_id']?.toString();
+          final category =
+              raw['category_name']?.toString() ??
+              (categoryId != null ? categoryMap[categoryId] : null) ??
+              'Séries';
 
-        items.add(
-          StreamItem(
-            id: 'xtream_series_$seriesId',
-            name: name,
-            streamUrl: '${account.serverUrl}/series/${account.username}/${account.password}/$seriesId.mp4',
-            logoUrl: (logo != null && logo.isNotEmpty) ? logo : null,
-            category: category,
-            streamType: StreamType.series,
-            rating: raw['rating']?.toString(),
-            releaseDate: raw['releaseDate']?.toString(),
-            seriesId: seriesId is int ? seriesId : int.tryParse(seriesId.toString()),
-          ),
-        );
+          items.add(
+            StreamItem(
+              id: 'xtream_series_$seriesId',
+              name: name,
+              streamUrl:
+                  '${account.serverUrl}/series/${account.username}/${account.password}/$seriesId.mp4',
+              logoUrl: (logo != null && logo.isNotEmpty) ? logo : null,
+              category: category,
+              streamType: StreamType.series,
+              rating: raw['rating']?.toString(),
+              releaseDate: raw['releaseDate']?.toString(),
+              seriesId: seriesId is int
+                  ? seriesId
+                  : int.tryParse(seriesId.toString()),
+            ),
+          );
+        }
       }
-    }
-    return items;
+      return items;
     } catch (_) {
       return [];
     }
   }
 
   /// Busca episódios de uma série específica. Nunca lança: retorna [] em falha.
-  Future<List<StreamItem>> getSeriesEpisodes(XtreamAccount account, int seriesId) async {
+  Future<List<StreamItem>> getSeriesEpisodes(
+    XtreamAccount account,
+    int seriesId,
+  ) async {
     try {
       final endpoint = '${account.serverUrl}/player_api.php';
       final response = await _dio.get(

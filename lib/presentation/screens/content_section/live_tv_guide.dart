@@ -37,7 +37,18 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   final FocusNode _backNode = FocusNode();
   Timer? _searchDebounce;
   Timer? _clockTimer;
-  Timer? _focusPreviewDebounce;
+
+  /// Nós de foco das categorias e do primeiro canal: a TV usa para levar o
+  /// cursor ao lugar certo quando a categoria é escolhida.
+  final Map<String, FocusNode> _categoryNodes = {};
+  final FocusNode _firstChannelNode = FocusNode(
+    debugLabel: 'live-first-channel',
+  );
+  final ScrollController _channelScroll = ScrollController();
+
+  /// Índice do canal em foco (só na TV). Serve para segurar o cursor nas
+  /// pontas da lista em vez de ele escapar para a coluna de categorias.
+  int? _focusedChannelIndex;
 
   Player? _previewPlayer;
   VideoController? _previewVideoController;
@@ -52,14 +63,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   bool _previewLoading = false;
   bool _previewError = false;
 
-  /// Canal adulto focado sem PIN: não abre o preview; mostra o cadeado e
-  /// pede a senha só quando o usuário confirma (OK).
-  bool _previewLocked = false;
-
-  // Navegação: categorias filtram, canais dão preview.
+  // Navegação: categorias filtram, canais dão prévia.
   String? _selectedCategory;
   int _selectedIndex = 0;
-  // Prévia só após escolha explícita: 1º clique seleciona, 2º abre player.
+  // Prévia só após escolha explícita: 1º clique abre a prévia, 2º o player.
   bool _channelChosen = false;
 
   // Celular: navegação em níveis Categoria -> Subcategoria -> Canal.
@@ -110,10 +117,14 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   void dispose() {
     _searchDebounce?.cancel();
     _clockTimer?.cancel();
-    _focusPreviewDebounce?.cancel();
     _searchNode.dispose();
     _backNode.dispose();
     _searchCtrl.dispose();
+    for (final node in _categoryNodes.values) {
+      node.dispose();
+    }
+    _firstChannelNode.dispose();
+    _channelScroll.dispose();
     try {
       _previewPlayer?.dispose();
     } catch (_) {}
@@ -228,8 +239,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     return items;
   }
 
+  /// Canal em foco/selecionado. Na TV o foco já troca a exibição (o vídeo só
+  /// começa no OK); no celular a seleção só existe depois do toque.
   StreamItem? get _selectedChannel {
-    if (!_channelChosen) return null;
+    if (!_isTv && !_channelChosen) return null;
     final list = _channels();
     if (list.isEmpty) return null;
     return list[_selectedIndex.clamp(0, list.length - 1)];
@@ -261,8 +274,13 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     }
   }
 
-  void _selectCategory(String name) {
-    if (_selectedCategory == name) return;
+  void _selectCategory(String name, {bool focusChannels = false}) {
+    if (_selectedCategory == name) {
+      if (focusChannels) _focusFirstChannel();
+      return;
+    }
+    // Saiu do grupo Adulto? O PIN volta a ser exigido na próxima entrada.
+    syncAdultAccessWithCategory(name);
     try {
       _previewPlayer?.stop();
     } catch (_) {}
@@ -272,27 +290,102 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       _channelChosen = false;
       _previewLoading = false;
       _previewError = false;
-      _previewLocked = false;
       _epgDayOffset = 0;
       _epg = const [];
+      _focusedChannelIndex = null;
     });
+    // Categoria escolhida: o cursor vai direto para o primeiro canal.
+    if (focusChannels) _focusFirstChannel();
+  }
+
+  // ---------- foco da TV ----------
+
+  FocusNode _categoryNode(String name) => _categoryNodes.putIfAbsent(
+    name,
+    () => FocusNode(debugLabel: 'live-category-$name'),
+  );
+
+  /// Pede o foco só quando o widget já está montado: um item fora da tela
+  /// (ListView) não pode receber foco.
+  void _focusIfMounted(FocusNode? node) {
+    final ctx = node?.context;
+    if (node != null && ctx != null && ctx.mounted) node.requestFocus();
+  }
+
+  /// Categoria escolhida → primeiro canal da lista. A lista volta ao topo
+  /// antes do foco: um item fora da tela (ListView) não pode receber foco.
+  void _focusFirstChannel() {
+    if (!_isTv) return;
+    if (_channelScroll.hasClients) _channelScroll.jumpTo(0);
+    void attempt(int tries) {
+      // Sem frame agendado o post-frame não roda (o caso de reclicar na
+      // categoria já escolhida não muda estado nenhum).
+      WidgetsBinding.instance.scheduleFrame();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_firstChannelNode.context != null) {
+          _firstChannelNode.requestFocus();
+        } else if (tries > 0) {
+          // Lista ainda montando o primeiro item: tenta no frame seguinte.
+          attempt(tries - 1);
+        }
+      });
+    }
+
+    attempt(2);
+  }
+
+  /// Volta o foco da lista de canais para a categoria escolhida.
+  bool _focusChosenCategory() {
+    final node = _categoryNodes[_selectedCategory] ?? _categoryNodes['TODOS'];
+    final ctx = node?.context;
+    if (node == null || ctx == null || !ctx.mounted) return false;
+    node.requestFocus();
+    return true;
+  }
+
+  /// Segura o cursor nas pontas da lista de canais: sem isso o D-pad
+  /// escapa para a coluna de categorias ao passar do último/primeiro canal.
+  KeyEventResult _handleChannelKey(
+    FocusNode node,
+    KeyEvent event,
+    int itemCount,
+  ) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final index = _focusedChannelIndex;
+    if (index == null || index < 0 || index >= itemCount) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowDown && index == itemCount - 1) {
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp && index == 0) {
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      // Categoria escolhida fora da tela: deixa a travessia normal agir.
+      return _focusChosenCategory()
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
+    return KeyEventResult.ignored;
   }
 
   // ---------- navegação mobile por níveis ----------
 
   void _stopPreview() {
-    _focusPreviewDebounce?.cancel();
     try {
       _previewPlayer?.stop();
     } catch (_) {}
     _previewToken++;
     _previewLoading = false;
     _previewError = false;
-    _previewLocked = false;
   }
 
   void _selectMobileParent(CategoryNode node) {
     _stopPreview();
+    syncAdultAccessWithCategory(node.name);
     widget.controller.setSearchQuery('');
     setState(() {
       _mobileParent = node.name;
@@ -308,6 +401,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
 
   void _selectMobileSub(String rawCategory) {
     _stopPreview();
+    syncAdultAccessWithCategory(rawCategory);
     widget.controller.setSearchQuery('');
     setState(() {
       _mobileSub = rawCategory;
@@ -322,6 +416,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   /// explícito, nunca na abertura da tela.
   void _selectMobileAll() {
     _stopPreview();
+    lockAdultContent();
     widget.controller.setSearchQuery('');
     setState(() {
       _mobileParent = 'TODOS';
@@ -345,6 +440,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       final node = _mobileNode;
       final flat = node == null || !node.hasSubs;
       _stopPreview();
+      if (flat) lockAdultContent();
       setState(() {
         if (flat) _mobileParent = null;
         _mobileSub = null;
@@ -356,6 +452,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     }
     if (_mobileParent != null) {
       _stopPreview();
+      lockAdultContent();
       setState(() {
         _mobileParent = null;
         _selectedIndex = 0;
@@ -389,18 +486,35 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     super.handleBackButton();
   }
 
-  /// [fromFocus] = true quando o canal foi apenas focado pelo D-pad:
-  /// a seleção/preview aparecem na hora, mas o player só abre no OK
-  /// (um único OK, porque o foco já deixou o canal escolhido).
-  void _selectChannel(int i, {bool fromFocus = false}) {
+  /// Foco do D-pad num canal: troca o canal exibido e a programação, mas
+  /// NÃO abre a prévia. O vídeo só começa no clique/OK — navegar pelo guia
+  /// não deve ficar tocando o que aparece na frente.
+  void _focusChannel(int i) {
+    final list = _channels();
+    if (i < 0 || i >= list.length) return;
+    if (_selectedIndex == i && !_channelChosen) return;
+    _stopPreview();
+    setState(() {
+      _selectedIndex = i;
+      _channelChosen = false;
+      _epg = const [];
+      _epgLoading = false;
+    });
+  }
+
+  /// Clique/toque/OK num canal: o primeiro clique abre a PRÉVIA; com a
+  /// prévia já aberta, o próximo clique abre o player em tela cheia.
+  Future<void> _selectChannel(int i) async {
     final list = _channels();
     if (i < 0 || i >= list.length) return;
 
-    if (_selectedIndex == i && _channelChosen) {
-      if (!fromFocus) _openPlayer(list, i);
+    if (_channelChosen && _selectedIndex == i) {
+      await _openPlayer(list, i);
       return;
     }
 
+    final ch = list[i];
+    _stopPreview();
     setState(() {
       _selectedIndex = i;
       _channelChosen = true;
@@ -410,24 +524,20 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     });
     _loadEpg();
 
-    // Ao navegar rápido com o D-pad, só abre o preview depois de uma
-    // pequena pausa; o item selecionado e o EPG já mudam imediatamente.
-    _focusPreviewDebounce?.cancel();
-    final delay = fromFocus ? const Duration(milliseconds: 220) : Duration.zero;
-    _focusPreviewDebounce = Timer(delay, () {
+    // Canal adulto: o PIN é pedido antes de abrir a prévia.
+    if (isAdultCategory(ch.category) && !adultContentUnlocked) {
+      final ok = await ensureAdultAccess(
+        context,
+        storage: widget.controller.storageService,
+        title: ch.name,
+      );
       if (!mounted || !_channelChosen || _selectedIndex != i) return;
-      final ch = _selectedChannel;
-      if (ch == null) return;
-      // Canal adulto: não abre o preview sem o PIN. O cadeado aparece no
-      // lugar do vídeo e o PIN é pedido quando o usuário aperta OK.
-      if (isAdultCategory(ch.category) && !adultContentUnlocked) {
-        _stopPreview();
-        if (mounted) setState(() => _previewLocked = true);
+      if (!ok) {
+        setState(() => _channelChosen = false);
         return;
       }
-      setState(() => _previewLocked = false);
-      _startPreview(ch);
-    });
+    }
+    _startPreview(ch);
   }
 
   Future<void> _startPreview(StreamItem ch) async {
@@ -447,9 +557,18 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       _previewVideoController ??= VideoController(
         _previewPlayer!,
         configuration: const VideoControllerConfiguration(
+          // Mesmo caminho do player cheio: no decoder Cedar (Allwinner) o
+          // `vo=gpu` devolve os frames do canal com faixas verdes; desenhar
+          // direto na Surface sai limpo.
+          vo: 'mediacodec_embed',
+          hwdec: 'mediacodec',
           enableHardwareAcceleration: true,
         ),
       );
+      // O `Video` widget só existe depois deste rebuild; a Surface precisa
+      // estar anexada antes do `open()` no modo direto.
+      if (mounted) setState(() {});
+      await _waitPreviewSurface();
       await _previewPlayer!.open(Media(ch.streamUrl));
       // Outro canal foi escolhido enquanto este abria: descarta.
       if (!mounted || token != _previewToken) return;
@@ -461,6 +580,38 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         _previewError = true;
       });
       debugPrint('[LiveTvGuide] Preview video init error: $e');
+    }
+  }
+
+  /// Espera a Surface do preview estar disponível (vo=mediacodec_embed).
+  Future<void> _waitPreviewSurface() async {
+    final platform = _previewVideoController?.platform;
+    if (platform == null) return;
+    dynamic wid;
+    try {
+      wid = (platform as dynamic).wid;
+    } catch (_) {
+      return;
+    }
+    bool ready() {
+      final value = wid.value;
+      if (value == null) return false;
+      return '$value' != '0';
+    }
+
+    if (ready()) return;
+    final completer = Completer<void>();
+    void listener() {
+      if (ready() && !completer.isCompleted) completer.complete();
+    }
+
+    wid.addListener(listener);
+    try {
+      await completer.future.timeout(const Duration(milliseconds: 1500));
+    } catch (_) {
+      debugPrint('[LiveTvGuide] preview surface não anexou a tempo');
+    } finally {
+      wid.removeListener(listener);
     }
   }
 
@@ -478,9 +629,8 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   // ---------- player ----------
 
   Future<void> _openPlayer(List<StreamItem> playlist, int index) async {
-    _focusPreviewDebounce?.cancel();
     final item = playlist[index];
-    // Canal adulto: pede o PIN na primeira abertura da sessão (padrão 0000).
+    // Canal adulto: confirma o PIN antes de abrir em tela cheia.
     if (isAdultCategory(item.category)) {
       final ok = await ensureAdultAccess(
         context,
@@ -488,7 +638,6 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         title: item.name,
       );
       if (!ok || !mounted) return;
-      if (_previewLocked) setState(() => _previewLocked = false);
     }
     try {
       await _previewPlayer?.pause();
@@ -714,12 +863,19 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                   _colorAction(
                     color: AppColors.accentOrange,
                     label: 'Favoritos${_showOnlyFavorites ? ' ✓' : ''}',
-                    onTap: () => setState(() {
-                      _showOnlyFavorites = !_showOnlyFavorites;
-                      _selectedIndex = 0;
-                      _channelChosen = false;
-                      _epg = const [];
-                    }),
+                    onTap: () {
+                      final turningOn = !_showOnlyFavorites;
+                      // Favoritos não são uma categoria: sair do grupo
+                      // Adulto exige o PIN de novo na volta.
+                      if (turningOn) lockAdultContent();
+                      _stopPreview();
+                      setState(() {
+                        _showOnlyFavorites = turningOn;
+                        _selectedIndex = 0;
+                        _channelChosen = false;
+                        _epg = const [];
+                      });
+                    },
                   ),
                   const SizedBox(width: 16),
                   _colorAction(
@@ -895,8 +1051,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                   count: widget.controller.totalLiveCount,
                   selected: _selectedCategory == 'TODOS',
                   autofocus: true,
+                  focusNode: _categoryNode('TODOS'),
                   onFocus: (_) {},
-                  onTap: () => _selectCategory('TODOS'),
+                  onTap: () =>
+                      _selectCategory('TODOS', focusChannels: true),
                 );
               }
               final cat = cats[i - 1];
@@ -904,8 +1062,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                 name: cat.name,
                 count: cat.count,
                 selected: _selectedCategory == cat.name,
+                focusNode: _categoryNode(cat.name),
                 onFocus: (_) {},
-                onTap: () => _selectCategory(cat.name),
+                onTap: () =>
+                    _selectCategory(cat.name, focusChannels: true),
               );
             },
           ),
@@ -933,24 +1093,34 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                     style: TextStyle(color: AppColors.textMuted),
                   ),
                 )
-              : ListView.builder(
-                  itemCount: list.length,
-                  itemBuilder: (context, i) {
-                    final item = list[i];
-                    final selected = _channelChosen && i == _selectedIndex;
-                    return _channelRow(
-                      number: i + 1,
-                      item: item,
-                      selected: selected,
-                      // Focar já seleciona e mostra a prévia: o visual
-                      // responde na primeira navegação do D-pad. Um OK
-                      // depois abre o player (sem o antigo duplo clique).
-                      onFocus: (focused) {
-                        if (focused) _selectChannel(i, fromFocus: true);
-                      },
-                      onTap: () => _selectChannel(i),
-                    );
-                  },
+              : Focus(
+                  canRequestFocus: false,
+                  skipTraversal: true,
+                  onKeyEvent: (node, event) =>
+                      _handleChannelKey(node, event, list.length),
+                  child: ListView.builder(
+                    controller: _channelScroll,
+                    itemCount: list.length,
+                    itemBuilder: (context, i) {
+                      final item = list[i];
+                      final selected = _channelChosen && i == _selectedIndex;
+                      return _channelRow(
+                        number: i + 1,
+                        item: item,
+                        selected: selected,
+                        focusNode: i == 0 ? _firstChannelNode : null,
+                        // Focar só troca canal/programação; a prévia só abre
+                        // no OK, para não ficar tocando enquanto navega.
+                        onFocus: (focused) {
+                          if (focused) {
+                            _focusedChannelIndex = i;
+                            _focusChannel(i);
+                          }
+                        },
+                        onTap: () => _selectChannel(i),
+                      );
+                    },
+                  ),
                 ),
         ),
       ],
@@ -1019,6 +1189,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     required int count,
     required bool selected,
     bool autofocus = false,
+    FocusNode? focusNode,
     required ValueChanged<bool> onFocus,
     required VoidCallback onTap,
   }) {
@@ -1026,6 +1197,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       padding: const EdgeInsets.only(bottom: 8),
       child: TvFocusable(
         autofocus: autofocus,
+        focusNode: focusNode,
         borderRadius: BorderRadius.circular(10),
         onPressed: onTap,
         onFocusChange: onFocus,
@@ -1071,6 +1243,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     required StreamItem item,
     required bool selected,
     bool autofocus = false,
+    FocusNode? focusNode,
     required ValueChanged<bool> onFocus,
     required VoidCallback onTap,
   }) {
@@ -1078,6 +1251,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       padding: const EdgeInsets.only(bottom: 8),
       child: TvFocusable(
         autofocus: autofocus,
+        focusNode: focusNode,
         borderRadius: BorderRadius.circular(10),
         onPressed: onTap,
         onFocusChange: onFocus,
@@ -1192,44 +1366,12 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Vídeo ou poster/placeholder
-                  if (_channelChosen &&
-                      !_previewLocked &&
-                      _previewVideoController != null)
+                  // Vídeo (só depois do clique) ou poster/placeholder
+                  if (_channelChosen && _previewVideoController != null)
                     Video(
                       controller: _previewVideoController!,
                       fit: BoxFit.contain,
                       controls: NoVideoControls,
-                    )
-                  else if (_channelChosen && _previewLocked)
-                    Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.lock_rounded,
-                            color: Colors.white70,
-                            size: 34,
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Conteúdo adulto',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Aperte OK e digite o PIN',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
                     )
                   else if (logo != null && logo.isNotEmpty)
                     CachedNetworkImage(
@@ -1380,18 +1522,20 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(color: Colors.white24),
                               ),
-                              child: const Row(
+                              child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(
-                                    Icons.fullscreen_rounded,
+                                    _channelChosen
+                                        ? Icons.fullscreen_rounded
+                                        : Icons.play_circle_fill_rounded,
                                     color: Colors.white,
                                     size: 14,
                                   ),
-                                  SizedBox(width: 4),
+                                  const SizedBox(width: 4),
                                   Text(
-                                    'Tela Cheia',
-                                    style: TextStyle(
+                                    _channelChosen ? 'Tela Cheia' : 'Ver prévia',
+                                    style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
@@ -1547,6 +1691,14 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
             textAlign: TextAlign.center,
             style: const TextStyle(color: Colors.white70, fontSize: 14),
           ),
+          if (ch != null && !_channelChosen) ...[
+            const SizedBox(height: 4),
+            const Text(
+              'Aperte OK para ver a prévia',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+            ),
+          ],
         ],
       ),
     );
@@ -1563,7 +1715,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         child: Text(
           _channelChosen
               ? 'Sem programação para este canal'
-              : 'Selecione um canal para ver a programação',
+              : _selectedChannel == null
+              ? 'Selecione um canal para ver a programação'
+              : 'Aperte OK no canal para ver a programação',
           style: const TextStyle(color: AppColors.textMuted),
           textAlign: TextAlign.center,
         ),
@@ -1819,8 +1973,6 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
 
   Widget _buildMobilePreview() {
     final ch = _selectedChannel;
-    // Sem canal escolhido não há motivo para carregar a lista inteira
-    // (o catálogo do provedor pode ter milhares de canais).
     final list = ch == null ? const <StreamItem>[] : _channels();
     final index = list.isEmpty ? 0 : _selectedIndex.clamp(0, list.length - 1);
     final logo = ch?.logoUrl;
@@ -1828,7 +1980,17 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
 
     return GestureDetector(
       key: const Key('live-mobile-preview'),
-      onTap: ch == null ? null : () => _openPlayer(list, index),
+      // Toque na prévia: sem prévia aberta, começa a tocar; tocando,
+      // abre o player em tela cheia.
+      onTap: ch == null
+          ? null
+          : () {
+              if (_channelChosen) {
+                _openPlayer(list, index);
+              } else {
+                _selectChannel(index);
+              }
+            },
       child: Container(
         decoration: BoxDecoration(
           color: Colors.black,
@@ -1858,7 +2020,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                 ),
               )
             else ...[
-              if (_previewVideoController != null)
+              // O vídeo só aparece depois do toque no canal; antes disso
+              // fica o logo, para nada tocar enquanto o usuário procura.
+              if (_channelChosen && _previewVideoController != null)
                 Video(
                   controller: _previewVideoController!,
                   fit: BoxFit.contain,
@@ -1866,7 +2030,8 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                 ),
               // Logo/ícone cobre o vídeo enquanto ele carrega ou falha; com
               // o canal tocando, o vídeo fica visível (nada por cima).
-              if (_previewVideoController == null ||
+              if (!_channelChosen ||
+                  _previewVideoController == null ||
                   _previewLoading ||
                   _previewError)
                 Center(
@@ -2010,8 +2175,14 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          onPressed: () => _openPlayer(list, index),
-                          child: const Text('Assistir'),
+                          onPressed: () {
+                            if (_channelChosen) {
+                              _openPlayer(list, index);
+                            } else {
+                              _selectChannel(index);
+                            }
+                          },
+                          child: Text(_channelChosen ? 'Assistir' : 'Ver prévia'),
                         ),
                       ),
                     ],

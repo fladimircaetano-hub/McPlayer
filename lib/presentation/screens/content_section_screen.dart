@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/models/stream_item.dart';
 import '../controllers/iptv_controller.dart';
+import '../widgets/adult_pin_dialog.dart';
 import 'content_section/live_tv_guide.dart';
 import 'content_section/vod_grid.dart';
 
@@ -30,6 +31,9 @@ class _ContentSectionScreenState extends State<ContentSectionScreen> {
   @override
   void initState() {
     super.initState();
+    // Entrar em outra seção é sair da categoria em que o usuário estava:
+    // se ele estava no grupo Adulto, o PIN volta a ser exigido aqui.
+    lockAdultContent();
     // Limpa a busca aqui (e não no initState dos filhos): os filhos são
     // construídos dentro do ListenableBuilder abaixo, então notificar o
     // controller durante o build deles dispara a asserção "!_dirty".

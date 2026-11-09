@@ -83,3 +83,12 @@ String displayCategoryName(String category) {
   }
   return name;
 }
+
+/// Ordem de exibição das categorias: alfabética, com o grupo "Adulto"
+/// sempre no fim da lista.
+int compareCategoriesAdultLast(String a, String b) {
+  final aAdult = isAdultCategory(a);
+  final bAdult = isAdultCategory(b);
+  if (aAdult != bAdult) return aAdult ? 1 : -1;
+  return a.toLowerCase().compareTo(b.toLowerCase());
+}

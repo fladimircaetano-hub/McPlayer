@@ -15,6 +15,17 @@ class XtreamAccount {
     this.message,
   });
 
+  /// Vencimento em ISO-8601 para gravar no painel (o Xtream devolve os
+  /// segundos em texto). O RPC `xtream_login_register` espera timestamptz.
+  String? get expDateIso {
+    final seconds = int.tryParse(expDate ?? '');
+    if (seconds == null || seconds <= 0) return null;
+    return DateTime.fromMillisecondsSinceEpoch(
+      seconds * 1000,
+      isUtc: true,
+    ).toIso8601String();
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'serverUrl': serverUrl,

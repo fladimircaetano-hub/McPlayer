@@ -2,8 +2,8 @@
 //
 // Regra do produto: todos os canais/filmes/séries de categorias adultas ficam
 // dentro de um único grupo "Adulto". Ao entrar nele aparecem as categorias
-// originais do provedor como subcategorias. O PIN é pedido na primeira
-// abertura de conteúdo adulto da sessão e, sem PIN configurado, vale 0000.
+// originais do provedor como subcategorias. O PIN é pedido ao abrir conteúdo
+// adulto e de novo a cada retorno ao grupo, e sem PIN configurado vale 0000.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mcplayer/core/network/api_client.dart';
@@ -169,6 +169,23 @@ void main() {
       expect(adultMovies.map((i) => i.id), contains('m1'));
       expect(adultMovies.map((i) => i.id), isNot(contains('m2')));
     });
+
+    test('o grupo Adulto fica por último em todas as abas', () {
+      for (final type in [StreamType.live, StreamType.movie, StreamType.series]) {
+        final tree = buildCategoryTree(controller.getCategories(type));
+        final adultIndex = tree.indexWhere((n) => n.name == 'Adulto');
+        expect(adultIndex, isNonNegative, reason: '$type');
+        expect(adultIndex, tree.length - 1, reason: '$type');
+      }
+
+      // Nas listas planas (coluna de categorias da TV) também vai no fim.
+      final liveNames = controller
+          .getCategories(StreamType.live)
+          .map((c) => c.name)
+          .toList();
+      expect(liveNames.last, startsWith('Adulto | '));
+      expect(liveNames.first, 'Notícias');
+    });
   });
 
   testWidgets('Filmes: adulto vira grupo único e o cartão pede o PIN',
@@ -227,5 +244,46 @@ void main() {
     await tester.pump();
     tester.view.resetPhysicalSize();
     tester.view.resetDevicePixelRatio();
+  });
+
+  testWidgets('sair do grupo Adulto volta a exigir o PIN', (tester) async {
+    resetAdultContentUnlocked();
+    SharedPreferences.setMockInitialValues({});
+    final storage = await StorageService.init();
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => ensureAdultAccess(context, storage: storage),
+            child: const Text('Abrir adulto'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Abrir adulto'));
+    await tester.pumpAndSettle();
+    expect(find.text('Conteúdo adulto'), findsOneWidget);
+
+    // PIN padrão 0000 libera.
+    for (var i = 0; i < 4; i++) {
+      await tester.tap(find.text('0'));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(adultContentUnlocked, isTrue);
+
+    // Continua dentro do grupo: não trava.
+    syncAdultAccessWithCategory('Adulto | XXX');
+    expect(adultContentUnlocked, isTrue);
+
+    // Escolheu uma categoria fora do grupo: volta a travar.
+    syncAdultAccessWithCategory('Filmes | Ação');
+    expect(adultContentUnlocked, isFalse);
   });
 }

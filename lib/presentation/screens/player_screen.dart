@@ -59,6 +59,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   String _errorMessage = '';
   bool _showControls = true;
   Timer? _hideTimer;
+  // Em live, underruns curtos (Wi-Fi) alternam `buffering` a cada segundo.
+  // Esperar um instante antes de mostrar "Carregando…" evita o pisca-pisca
+  // que parecia falha de reprodução.
+  Timer? _liveBufferingTimer;
 
   bool _isPlaying = false;
   bool _isBuffering = true;
@@ -75,7 +79,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   DateTime? _lastSurfaceTapAt;
 
   int _retryCount = 0;
-  static const int _maxRetries = 2;
+  static const int _maxRetries = 4;
   int _openGeneration = 0;
 
   // ===== Pipeline de vídeo (4K / HEVC / AV1) =====
@@ -100,6 +104,29 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
+  /// SoC Allwinner (caixas/projetores com decoder Cedar). Nesses aparelhos o
+  /// pipeline `vo=gpu` corrompe parte dos streams e trava mais; o modo
+  /// direto (`mediacodec_embed`) é o único caminho limpo e fluido.
+  static bool? _isAllwinner;
+
+  static Future<void> _probeSoc() async {
+    if (_isAllwinner != null) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      _isAllwinner = false;
+      return;
+    }
+    try {
+      final info = await const MethodChannel(
+        'mcplayer/device',
+      ).invokeMethod<String>('soc');
+      final v = (info ?? '').toLowerCase();
+      _isAllwinner =
+          v.contains('sun50iw') || v.contains('allwinner') || v.contains('sunxi');
+    } catch (_) {
+      _isAllwinner = false;
+    }
+  }
+
   /// Ordem de tentativas. Fora do Android o mpv já é estável; em 1080p/HLS
   /// no Android mantemos o padrão do media_kit (auto-safe).
   List<_DecodeMode> get _decodeChain {
@@ -108,6 +135,28 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       return const [
         _DecodeMode.direct,
         _DecodeMode.copy,
+        _DecodeMode.software,
+      ];
+    }
+    // Canais ao vivo: o decoder Cedar (Allwinner) destas caixas devolve
+    // imagem com faixas verdes/amarelas quando os frames passam pelo
+    // `vo=gpu` (auto/cópia). Desenhar direto na Surface
+    // (`mediacodec_embed`) sai limpo; se falhar, volta para auto e por
+    // último software.
+    if (_isLive) {
+      return const [
+        _DecodeMode.direct,
+        _DecodeMode.auto,
+        _DecodeMode.software,
+      ];
+    }
+    // VOD nas caixas Allwinner: o mesmo defeito aparece em alguns filmes
+    // e o `vo=gpu` também é mais pesado (duas cópias por frame). Fora
+    // delas o padrão do media_kit continua sendo o mais compatível.
+    if (_isAllwinner == true) {
+      return const [
+        _DecodeMode.direct,
+        _DecodeMode.auto,
         _DecodeMode.software,
       ];
     }
@@ -168,6 +217,11 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   // Para detectar "frame congelado" em live streams com timestamp parado
   int _lastKnownPosition = -1;
   int _stallPositionCount = 0;
+  // Muitos canais HLS/MPEG-TS entregam posição fixa (0) a sessão inteira.
+  // Sem saber se a posição já andou, a regra de "congelado" reconectaria
+  // um canal saudável a cada 90s.
+  bool _livePositionMoved = false;
+  int _liveFirstPosition = -1;
 
   PlayerAspect _currentAspect = PlayerAspect.original;
 
@@ -251,14 +305,16 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   /// Inicialização ordenada do player nativo: cria, configura o pipeline
   /// (4K seguro quando necessário) e só então abre a stream.
   Future<void> _initNativePlayer() async {
+    await _probeSoc();
     await _createNativePlayer();
     if (!mounted) return;
-    // O mpv só consegue abrir o decodificador direto (MediaCodec -> Surface)
-    // quando a surface do Flutter já existe. Sem esta espera o `open()`
-    // acontece antes do `Video` widget montar e o mpv responde
-    // "Could not open codec.".
-    await _waitForAndroidSurface(const Duration(milliseconds: 4000));
-    if (!mounted) return;
+    // Só o decodificador direto (MediaCodec -> Surface) exige a Surface
+    // anexada antes do `open()`; em `vo=gpu` o media_kit anexa a surface
+    // depois dos parâmetros de vídeo, e esperar aqui só atrasaria o canal.
+    if (_decodeMode == _DecodeMode.direct) {
+      await _waitForAndroidSurface(const Duration(milliseconds: 4000));
+      if (!mounted) return;
+    }
     _open(_currentItem.streamUrl);
     _startStallWatchdog();
   }
@@ -294,8 +350,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
 
   /// Espera a Surface do `Video` widget ficar disponível (Android).
   ///
-  /// Enquanto `wid` for nulo o mpv está com `vo=null`; abrir mídia nesse
-  /// estado impede o caminho zero-copy (`mediacodec_embed`).
+  /// O media_kit começa com `wid = 0` e nesse estado mantém o mpv em
+  /// `vo=null`/`vid=no`: o `open()` então nunca entrega vídeo (o player fica
+  /// preto, o watchdog dispara e o canal é reaberto). Só 0/nulo significa
+  /// "surface ainda não anexou".
   Future<void> _waitForAndroidSurface(Duration timeout) async {
     if (!_isAndroid) return;
     final platform = _videoController?.platform;
@@ -306,10 +364,16 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     } catch (_) {
       return;
     }
-    if (wid == null || wid.value != null) return;
+    bool ready() {
+      final value = wid.value;
+      if (value == null) return false;
+      return '$value' != '0';
+    }
+
+    if (ready()) return;
     final completer = Completer<void>();
     void listener() {
-      if (wid.value != null && !completer.isCompleted) completer.complete();
+      if (ready() && !completer.isCompleted) completer.complete();
     }
 
     wid.addListener(listener);
@@ -346,10 +410,12 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
             .timeout(const Duration(seconds: 5));
       }
 
-      // Cache de rede: menor = menos RAM, mas pode travar em rede instável
-      // 8s é equilíbrio para HLS live; VOD busca sob demanda
+      // Cache de rede: menor = menos RAM, mas pode travar em rede instável.
+      // Ao vivo 3s é o meio-termo: com `cache-pause-initial=no` não atrasa
+      // o primeiro frame, e absorve jitter de HLS/MPEG-TS sem emendar
+      // reconexões seguidas.
       await dyn
-          .setProperty('cache-secs', '8')
+          .setProperty('cache-secs', _isLive ? '3' : '8')
           .timeout(const Duration(seconds: 3));
       await dyn
           .setProperty('cache-pause', 'yes')
@@ -375,8 +441,16 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
           .timeout(const Duration(seconds: 3));
 
       // ========== BAIXA LATÊNCIA (LIVE) ==========
+      // Esperar o cache encher antes do 1º frame atrasava a abertura do
+      // canal em até ~10s; ao vivo começamos já e deixamos o cache encher
+      // em paralelo. VOD mantém a espera (evita micro-travadas).
       await dyn
-          .setProperty('cache-pause-initial', 'yes')
+          .setProperty('cache-pause-initial', _isLive ? 'no' : 'yes')
+          .timeout(const Duration(seconds: 3));
+      // Ao vivo, retoma logo após um underrun (1s de buffer) em vez de
+      // esperar os 3s padrão — encurta o congelamento percebido.
+      await dyn
+          .setProperty('cache-pause-wait', _isLive ? '1' : '3')
           .timeout(const Duration(seconds: 3));
 
       // ========== 4K / CODECS DE ALTO RISCO ==========
@@ -519,8 +593,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       if (!mounted) return;
       // A nova surface do `Video` widget precisa existir antes do `open()`
       // para o modo direto (`mediacodec_embed`) funcionar.
-      await _waitForAndroidSurface(const Duration(milliseconds: 4000));
-      if (!mounted) return;
+      if (_decodeMode == _DecodeMode.direct) {
+        await _waitForAndroidSurface(const Duration(milliseconds: 4000));
+        if (!mounted) return;
+      }
 
       _retryCount = 0;
       _watchdogActive = true;
@@ -545,17 +621,73 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     }
   }
 
+  /// Aplica a legenda escolhida. No modo direto o mpv desenha os frames
+  /// direto na Surface e não compõe OSD (legendas), então volta para o
+  /// automático antes de ativar a faixa.
+  Future<void> _selectSubtitleTrack(SubtitleTrack track) async {
+    if (track.id != 'no' &&
+        _isAndroid &&
+        _decodeMode == _DecodeMode.direct) {
+      await _switchDecodeMode(
+        reason: 'legenda exige composição do mpv',
+        target: _DecodeMode.auto,
+      );
+      if (!mounted || _player == null) return;
+    }
+    await _player?.setSubtitleTrack(track);
+  }
+
   /// Ciclo manual do decodificador (botão "Dec: ..." no player).
   Future<void> _cycleDecodeMode() async {
-    const order = [
-      _DecodeMode.auto,
-      _DecodeMode.direct,
-      _DecodeMode.copy,
-      _DecodeMode.software,
-    ];
+    final order = _is4K
+        ? const [
+            _DecodeMode.direct,
+            _DecodeMode.copy,
+            _DecodeMode.software,
+          ]
+        : _isLive
+        ? const [
+            _DecodeMode.direct,
+            _DecodeMode.auto,
+            _DecodeMode.software,
+          ]
+        : const [
+            _DecodeMode.auto,
+            _DecodeMode.direct,
+            _DecodeMode.copy,
+            _DecodeMode.software,
+          ];
     final current = order.indexOf(_decodeMode);
     final next = order[(current + 1) % order.length];
     await _switchDecodeMode(reason: 'manual (${next.name})', target: next);
+  }
+
+  /// Limpa o overlay de carregamento quando o vídeo realmente começa.
+  ///
+  /// Depois de um retry o mpv costuma não reemitir `buffering=false` (o
+  /// estado já estava falso antes do `_isBuffering = true` manual), então o
+  /// "Reconectando…" ficava preso e o watchdog reabria o canal a cada 25s.
+  Future<void> _clearBufferingOnFirstFrame(int gen) async {
+    final controller = _videoController;
+    if (controller == null) return;
+    try {
+      await controller.waitUntilFirstFrameRendered.timeout(
+        const Duration(seconds: 15),
+      );
+    } catch (_) {
+      return;
+    }
+    if (!mounted || gen != _openGeneration || _hasError) return;
+    if (_isBuffering) {
+      setState(() {
+        _isBuffering = false;
+        _bufferingSince = null;
+      });
+    }
+    // Canal abriu de fato: devolve o orçamento de reconexão.
+    _retryCount = 0;
+    _stallPositionCount = 0;
+    _lastProgressAt = DateTime.now();
   }
 
   /// Lê do mpv o decoder e o formato reais depois do primeiro frame.
@@ -619,7 +751,14 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
           // Após um seek, ignora posições antigas até o mpv alcançar o alvo.
           if (_shouldIgnoreStalePosition(pos)) return;
           if (mounted && pos.inSeconds != _position.inSeconds) {
-            setState(() => _position = pos);
+            // Com os controles escondidos não há o que redesenhar; rebuildar
+            // a tela inteira a cada segundo pesa nas caixas fracas e pode
+            // derrubar frames do vídeo.
+            if (_showControls) {
+              setState(() => _position = pos);
+            } else {
+              _position = pos;
+            }
           }
           // Sinal de vida para o watchdog (mesmo sem rebuild).
           _lastProgressAt = DateTime.now();
@@ -642,7 +781,21 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _subs.add(
       _player!.stream.buffering.listen(
         (buffering) {
-          if (mounted) setState(() => _isBuffering = buffering);
+          if (!mounted) return;
+          if (!_isLive) {
+            setState(() => _isBuffering = buffering);
+          } else if (buffering) {
+            _liveBufferingTimer?.cancel();
+            _liveBufferingTimer = Timer(const Duration(milliseconds: 900), () {
+              if (mounted && _isLive && _watchdogActive) {
+                setState(() => _isBuffering = true);
+              }
+            });
+          } else {
+            _liveBufferingTimer?.cancel();
+            _liveBufferingTimer = null;
+            if (_isBuffering) setState(() => _isBuffering = false);
+          }
           if (buffering) {
             _bufferingSince ??= DateTime.now();
           } else {
@@ -729,6 +882,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _bufferingSince = DateTime.now();
     _lastKnownPosition = -1;
     _stallPositionCount = 0;
+    _livePositionMoved = false;
+    _liveFirstPosition = -1;
     _watchdogActive = true;
     _stallTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (!mounted ||
@@ -741,10 +896,36 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       final now = DateTime.now();
 
       // 1) Buffering infinito: nunca saiu do loading.
-      if (_isBuffering && _bufferingSince != null) {
+      // Se o mpv já anunciou o vídeo (`videoParams`), há frames chegando —
+      // o estado `_isBuffering` pode estar apenas obsoleto. Não reinicia.
+      final hasVideo = (_player!.state.videoParams.w ?? 0) > 0;
+      if (_isBuffering && hasVideo) {
+        // Frame já chegando: o overlay é resíduo de um retry.
+        if (now.difference(_bufferingSince ?? now) >=
+            const Duration(seconds: 3)) {
+          setState(() => _isBuffering = false);
+          _bufferingSince = null;
+        }
+        return;
+      }
+      if (_isBuffering && _bufferingSince != null && !hasVideo) {
         if (now.difference(_bufferingSince!) >= _bufferTimeout) {
           _bufferingSince = now; // evita disparo duplo no próximo tick
-          _autoReconnect('travou no carregamento');
+          // Sem nenhum frame: o modo atual (ex.: direto numa caixa que não
+          // suporta) pode estar travado. Troca o decodificador antes de
+          // gastar uma reconexão de rede.
+          //
+          // Exceção: canal ao vivo em caixa Allwinner. O modo direto já é o
+          // único que sai limpo no Cedar; cair para "auto" aqui trocaria uma
+          // falha de rede por imagem listrada. Reconecta no mesmo modo.
+          final cedarLive = _isLive && _isAllwinner == true;
+          if (_decodeAttempt < _decodeChain.length - 1 &&
+              !_switchingDecoder &&
+              !cedarLive) {
+            _switchDecodeMode(reason: 'sem vídeo no modo atual');
+          } else {
+            _autoReconnect('travou no carregamento');
+          }
         }
         return;
       }
@@ -763,14 +944,20 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       }
 
       // 3) Live stream com timestamp parado (às vezes HLS para de atualizar posição)
-      // Detecta se a posição não muda por muito tempo em stream ao vivo
+      // Vários canais HLS/MPEG-TS mantêm a posição em 0 durante toda a
+      // reprodução. Só vale a regra se a posição já tiver andado alguma vez
+      // nesta sessão; senão o canal saudável seria reconectado a cada 90s.
       if (_isLive && _isPlaying && !_isBuffering) {
         final currentPos = _position.inSeconds;
-        if (currentPos == _lastKnownPosition) {
+        if (_liveFirstPosition < 0) {
+          _liveFirstPosition = currentPos;
+        } else if (currentPos != _liveFirstPosition) {
+          _livePositionMoved = true;
+        }
+        if (_livePositionMoved && currentPos == _lastKnownPosition) {
           _stallPositionCount++;
-          // Se posição não muda por 30s em live, pode ser stream travado
-          if (_stallPositionCount >= 15) {
-            // 15 * 2s = 30s
+          if (_stallPositionCount >= 45) {
+            // 45 * 2s = 90s
             _stallPositionCount = 0;
             _lastKnownPosition = -1;
             _autoReconnect('stream ao vivo sem progresso');
@@ -791,9 +978,37 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       );
       return;
     }
+    if (_isLive) unawaited(_logLiveStallDiagnostics(motivo));
     _retryCount++;
     if (mounted) setState(() => _isBuffering = true);
     _open(_currentItem.streamUrl, isRetry: true);
+  }
+
+  /// Registra no logcat o estado do cache no momento de uma reconexão ao
+  /// vivo — sem isso não dá para separar falha de rede de decoder travado.
+  Future<void> _logLiveStallDiagnostics(String motivo) async {
+    final platform = _player?.platform;
+    if (platform == null) return;
+    try {
+      final dynamic p = platform;
+      Future<String> read(String name) async {
+        try {
+          final v = await p
+              .getProperty(name)
+              .timeout(const Duration(seconds: 1));
+          return '${v ?? ''}';
+        } catch (_) {
+          return '?';
+        }
+      }
+
+      final buffer = await read('cache-buffering-state');
+      final cache = await read('demuxer-cache-duration');
+      final speed = await read('cache-speed');
+      debugPrint(
+        '[Player] live reconexão ($motivo) buffer=$buffer cache=$cache speed=$speed',
+      );
+    } catch (_) {}
   }
 
   Future<void> _initBrightness() async {
@@ -855,6 +1070,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
       if (!mounted || gen != _openGeneration) return;
       await _player!.setVolume(_volume * 100);
       unawaited(_refreshVideoDiagnostics(gen));
+      unawaited(_clearBufferingOnFirstFrame(gen));
       if (mounted) {
         _resetControlsTimeout();
       }
@@ -924,14 +1140,12 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     return m.contains('failed to resolve hostname') ||
         m.contains('no address associated with hostname') ||
         m.contains('connection refused') ||
-        m.contains('connection reset') ||
         m.contains('network is unreachable') ||
         m.contains('no route to host') ||
         m.contains('http error 401') ||
         m.contains('http error 403') ||
         m.contains('http error 404') ||
         m.contains('http error 410') || // Gone
-        m.contains('http error 503') || // Service Unavailable
         m.contains('ssl handshake') || // SSL/TLS falhou
         m.contains('certificate verify'); // Certificado inválido
   }
@@ -946,11 +1160,22 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
         m.contains('eof') ||
         m.contains('http error 500') || // Internal server error
         m.contains('http error 502') || // Bad gateway
+        m.contains('http error 503') || // Service unavailable
         m.contains('http error 504'); // Gateway timeout
   }
 
   void _onPlayerError(String error) {
     if (!mounted || _hasError || !_watchdogActive || _switchingDecoder) {
+      return;
+    }
+    debugPrint('[Player] erro: $error');
+
+    // Aviso do mpv ao abrir canal ao vivo (que não aceita seek): não é
+    // falha de reprodução. Antes ele caía no retry e reabria o canal em
+    // loop, deixando a tela preta com "Reconectando".
+    final lower = error.toLowerCase();
+    if (lower.contains('cannot seek in this stream') ||
+        lower.contains('force-seekable')) {
       return;
     }
 
@@ -1017,14 +1242,18 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   }
 
   void _onCompleted() {
+    // Canal ao vivo que encerra o stream não deve pular de canal sozinho
+    // (parece falha para quem está assistindo). Reabre o mesmo canal.
+    if (_isLive) {
+      _autoReconnect('canal encerrou a transmissão');
+      return;
+    }
     if (!_hasPlaylist) {
       if (mounted) setState(() => _showControls = true);
       return;
     }
-    // Ao vivo mantém o rodízio; filmes/séries param no último item.
-    final next = _isLive
-        ? (_currentIndex + 1) % _playlist.length
-        : nextIndex(_currentIndex, _playlist.length);
+    // Filmes/séries param no último item.
+    final next = nextIndex(_currentIndex, _playlist.length);
     if (next != null) {
       _zapTo(next);
     } else if (mounted) {
@@ -1372,8 +1601,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                         ? const Icon(Icons.check, color: AppColors.primary)
                         : null,
                     onTap: () {
-                      _player!.setSubtitleTrack(t);
                       Navigator.pop(context);
+                      _selectSubtitleTrack(t);
                     },
                   ),
                 ),
@@ -1389,6 +1618,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   void dispose() {
     _watchdogActive = false;
     _hideTimer?.cancel();
+    _liveBufferingTimer?.cancel();
     _stallTimer?.cancel();
     for (final s in _subs) {
       s.cancel();
@@ -1846,7 +2076,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                         ),
                       ),
                     ),
-                    if (_is4K) ...[
+                    if (_isAndroid) ...[
                       const SizedBox(width: 8),
                       TvFocusable(
                         focusNode: _compatNode,

@@ -22,6 +22,8 @@ class StorageService {
   static const String _keyTmdb = 'pref_tmdb';
   static const String _keyKeepScreenOn = 'pref_keep_screen_on';
   static const String _keyLanguage = 'pref_language';
+  static const String _keyCredentialLogin = 'pref_credential_login';
+  static const String _keyPanelListFailure = 'pref_panel_list_failure';
 
   final SharedPreferences _prefs;
   
@@ -120,6 +122,42 @@ class StorageService {
       await _prefs.setStringList(_keyRecentUrls, recents);
     });
   }
+
+  // --- Login por usuário e senha (conta Xtream direta) ---
+  /// True quando a conta ativa foi criada na tela "Entrar com usuário e
+  /// senha". Nesse modo quem libera o acesso é o próprio servidor Xtream,
+  /// então a sessão é restaurada mesmo com o aparelho pendente no painel.
+  bool getCredentialLogin() => _prefs.getBool(_keyCredentialLogin) ?? false;
+
+  Future<void> setCredentialLogin(bool value) =>
+      _prefs.setBool(_keyCredentialLogin, value);
+
+  // --- Lista enviada pelo painel ---
+  /// Última lista do painel que falhou ao carregar. Evita baixar de novo, a
+  /// cada abertura, uma lista que o aparelho não consegue processar.
+  ({String sourceKey, DateTime at})? getPanelListFailure() {
+    final raw = _prefs.getString(_keyPanelListFailure);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final key = map['key'] as String? ?? '';
+      final at = DateTime.tryParse(map['at'] as String? ?? '');
+      if (key.isEmpty || at == null) return null;
+      return (sourceKey: key, at: at);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> setPanelListFailure(String sourceKey) async {
+    await _prefs.setString(
+      _keyPanelListFailure,
+      jsonEncode({'key': sourceKey, 'at': DateTime.now().toIso8601String()}),
+    );
+  }
+
+  Future<void> clearPanelListFailure() =>
+      _prefs.remove(_keyPanelListFailure);
 
   // --- Xtream Codes Account ---
   XtreamAccount? getXtreamAccount() {

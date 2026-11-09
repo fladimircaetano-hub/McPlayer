@@ -1,3 +1,4 @@
+import '../../../core/utils/adult_content.dart';
 import '../../../data/models/iptv_category.dart';
 
 /// Separadores usados pelos provedores para hierarquia de categorias
@@ -50,7 +51,8 @@ class CategoryNode {
 }
 
 /// Agrupa as categorias do provedor por pai. Mantém a ordem alfabética
-/// dos pais e das folhas para a navegação ficar previsível.
+/// dos pais e das folhas para a navegação ficar previsível, com o grupo
+/// "Adulto" sempre por último.
 List<CategoryNode> buildCategoryTree(List<IptvCategory> cats) {
   final map = <String, List<IptvCategory>>{};
   for (final c in cats) {
@@ -63,7 +65,7 @@ List<CategoryNode> buildCategoryTree(List<IptvCategory> cats) {
             e.value..sort((a, b) => a.name.compareTo(b.name)),
           ))
       .toList()
-    ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    ..sort((a, b) => compareCategoriesAdultLast(a.name, b.name));
   return nodes;
 }
 

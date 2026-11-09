@@ -223,6 +223,36 @@ http://fibers.top/play/ghi789
       expect(items[0].streamType, StreamType.live);
     });
 
+    test('URL opaca /play/<token> sem /ts é VOD, não TV ao vivo', () async {
+      const sample = '''
+#EXTM3U
+#EXTINF:-1 group-title="CANAIS | ADULTOS",[Adult] Amateur
+http://fibers.top:80/play/tokLive1/ts
+#EXTINF:-1 group-title="CANAIS",Canal sem sufixo ts
+http://fibers.top:80/play/tokLive2
+#EXTINF:-1 group-title="XXX | HENTAI",HENTAI004
+http://fibers.top:80/play/tokVod1
+#EXTINF:-1 group-title="ONLYFANS / PRIVACY",Debora Peixoto S01E01
+http://fibers.top:80/play/tokVod2
+#EXTINF:-1 group-title="XXX | HETERO",I Love You (1986)
+http://fibers.top:80/play/tokVod3
+#EXTINF:-1 group-title="REELSHORT",Traida e Coroada (2026)
+http://fibers.top:80/play/tokVod4
+''';
+      final items = await M3uParser.parseM3u(sample);
+      expect(items.length, 6);
+
+      // Ao vivo continua ao vivo (com e sem o sufixo /ts).
+      expect(items[0].streamType, StreamType.live);
+      expect(items[1].streamType, StreamType.live);
+      // Episódio marcado no nome vira série.
+      expect(items[3].streamType, StreamType.series);
+      // Filme adulto / hentai / curta de provedor saem de TV ao vivo.
+      expect(items[2].streamType, StreamType.movie);
+      expect(items[4].streamType, StreamType.movie);
+      expect(items[5].streamType, StreamType.movie);
+    });
+
     test('URL com query string preserva classificação por extensão', () async {
       const sample = '''
 #EXTM3U

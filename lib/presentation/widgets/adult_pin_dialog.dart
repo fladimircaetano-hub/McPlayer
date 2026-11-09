@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../core/storage/storage_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/adult_content.dart';
 import 'tv_focusable.dart';
 
 /// Controle dos pais do conteúdo adulto.
 ///
-/// Regra pedida: o PIN é solicitado na PRIMEIRA abertura de conteúdo adulto
-/// (canal, filme ou série). Depois de acertar, fica liberado até o app ser
-/// fechado — não pede de novo a cada item.
+/// Regra pedida: o PIN é solicitado ao abrir conteúdo adulto e volta a ser
+/// pedido sempre que o usuário SAI do grupo "Adulto" (outra categoria, outra
+/// aba ou outra seção). Enquanto ele continua no grupo, não pede de novo a
+/// cada item.
 ///
 /// O PIN é o definido em Configurações > Código PIN. Se o operador nunca
 /// definiu um, vale o padrão de fábrica **0000**.
@@ -18,6 +20,17 @@ bool get adultContentUnlocked => _adultUnlocked;
 
 @visibleForTesting
 void resetAdultContentUnlocked() => _adultUnlocked = false;
+
+/// Fecha o acesso liberado: na próxima entrada no grupo "Adulto" o PIN é
+/// pedido outra vez.
+void lockAdultContent() => _adultUnlocked = false;
+
+/// Mantém o acesso coerente com a categoria que está na tela: escolher
+/// qualquer categoria fora do grupo "Adulto" volta a travar.
+void syncAdultAccessWithCategory(String category) {
+  if (isAdultCategory(category)) return;
+  lockAdultContent();
+}
 
 /// PIN efetivo: 4 dígitos salvos ou "0000" quando não há PIN válido.
 String adultPinOrDefault(String? storedPin) {

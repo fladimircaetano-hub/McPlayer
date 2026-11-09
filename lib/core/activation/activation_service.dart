@@ -197,6 +197,42 @@ class ActivationService {
     }
   }
 
+  /// Registra/atualiza a conta Xtream usada no login por usuário/senha.
+  ///
+  /// O painel guarda só usuário, servidor, aparelho e vencimento — nunca a
+  /// senha. Falha aqui não impede o cliente de assistir: o login já foi
+  /// validado direto no servidor Xtream.
+  Future<void> registerXtreamLogin({
+    required String serverUrl,
+    required String username,
+    required String deviceId,
+    required String mac,
+    String? status,
+    String? expDate,
+  }) async {
+    if (!isEnabled) return;
+    try {
+      await _rpc('xtream_login_register', {
+        'p_app_name': ActivationConfig.appName,
+        'p_server_url': serverUrl,
+        'p_username': username,
+        'p_device_id': deviceId,
+        'p_mac': mac,
+        'p_status': status,
+        'p_exp_date': expDate,
+      });
+      // Sem senha e sem URL: só o suficiente para saber, no logcat, se o
+      // aparelho avisou o painel nesta abertura.
+      debugPrint(
+        _lastError == null
+            ? '[Activation] conta Xtream registrada no painel'
+            : '[Activation] registro da conta Xtream falhou: $_lastError',
+      );
+    } catch (e) {
+      _log('registerXtreamLogin falhou: $e');
+    }
+  }
+
   /// Chama um RPC do Supabase e devolve o objeto JSON (ou null em erro).
   Future<Map<String, dynamic>?> _rpc(
     String name,

@@ -9,6 +9,7 @@ import '../../core/storage/storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/back_navigation_mixin.dart';
 import '../controllers/iptv_controller.dart';
+import '../widgets/adult_pin_dialog.dart';
 import '../widgets/tv_focusable.dart';
 import 'lists_screen.dart';
 import 'admin_screen.dart';
@@ -811,6 +812,8 @@ class _SettingsScreenState extends State<SettingsScreen> with BackNavigationMixi
               return;
             }
             await _storage.setPin(pin);
+            // PIN novo vale imediatamente: o conteúdo adulto pede de novo.
+            lockAdultContent();
             _pinCtrl.clear();
             _refresh();
             _snack(tr('pin_saved'));

@@ -1,12 +1,39 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:dio/dio.dart';
+
+/// Resultado do download de uma lista M3U, com os validadores do HTTP
+/// (ETag/Last-Modified) para saber depois se o arquivo remoto mudou.
+class M3uFetchResult {
+  final String content;
+  final String? etag;
+  final String? lastModified;
+  final int? contentLength;
+
+  const M3uFetchResult({
+    required this.content,
+    this.etag,
+    this.lastModified,
+    this.contentLength,
+  });
+}
+
+/// Informação leve de um arquivo remoto (resposta de HEAD).
+class RemoteFileInfo {
+  final String? etag;
+  final String? lastModified;
+  final int? contentLength;
+
+  const RemoteFileInfo({this.etag, this.lastModified, this.contentLength});
+}
 
 class ApiClient {
   late final Dio dio;
 
   ApiClient([Dio? customDio]) {
-    dio = customDio ??
+    dio =
+        customDio ??
         Dio(
           BaseOptions(
             connectTimeout: const Duration(seconds: 30),
@@ -32,6 +59,12 @@ class ApiClient {
   }
 
   Future<String> fetchM3uContent(String url) async {
+    final result = await fetchM3u(url);
+    return result.content;
+  }
+
+  /// Baixa a lista e devolve também os validadores HTTP.
+  Future<M3uFetchResult> fetchM3u(String url) async {
     final clean = _cleanUrl(url);
     final uri = Uri.tryParse(clean);
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
@@ -109,12 +142,54 @@ class ApiClient {
         if (!upper.contains('#EXTM3U') && !upper.contains('#EXTINF')) {
           throw Exception('Conteúdo não parece uma lista M3U válida.');
         }
-        return data;
+        return M3uFetchResult(
+          content: data,
+          etag: _header(response.headers, 'etag'),
+          lastModified: _header(response.headers, 'last-modified'),
+          contentLength: int.tryParse(
+            _header(response.headers, 'content-length') ?? '',
+          ),
+        );
       }
       throw Exception('Lista vazia ou resposta inválida do servidor.');
     } on DioException catch (e) {
       throw Exception(_friendlyDio(e));
     }
+  }
+
+  /// Consulta só os cabeçalhos da lista (HEAD). Usado para descobrir se o
+  /// provedor trocou o arquivo desde o último download salvo.
+  ///
+  /// Retorna null quando o servidor não aceita HEAD ou não responde 2xx.
+  Future<RemoteFileInfo?> remoteFileInfo(String url) async {
+    final clean = _cleanUrl(url);
+    final uri = Uri.tryParse(clean);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) return null;
+    try {
+      final response = await dio.head<List<int>>(
+        clean,
+        options: Options(
+          responseType: ResponseType.bytes,
+          validateStatus: (_) => true,
+        ),
+      );
+      final status = response.statusCode ?? 0;
+      if (status < 200 || status >= 400) return null;
+      return RemoteFileInfo(
+        etag: _header(response.headers, 'etag'),
+        lastModified: _header(response.headers, 'last-modified'),
+        contentLength: int.tryParse(
+          _header(response.headers, 'content-length') ?? '',
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _header(Headers headers, String name) {
+    final value = headers.value(name)?.trim();
+    return (value == null || value.isEmpty) ? null : value;
   }
 
   String _friendlyDio(DioException e) {

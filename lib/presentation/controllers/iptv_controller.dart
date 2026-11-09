@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+
 import '../../core/network/api_client.dart';
 import '../../core/parser/m3u_parser.dart';
+import '../../core/storage/catalog_cache.dart';
 import '../../core/storage/storage_service.dart';
 import '../../core/utils/adult_content.dart';
 import '../../core/utils/duplicates.dart';
@@ -17,12 +20,14 @@ class IptvController extends ChangeNotifier {
   final StorageService storageService;
   final ApiClient apiClient;
   final XtreamApi xtreamApi;
+  final CatalogCache catalogCache;
 
   IptvController({
     required this.storageService,
     required this.apiClient,
     required this.xtreamApi,
-  }) {
+    CatalogCache? catalogCache,
+  }) : catalogCache = catalogCache ?? CatalogCache() {
     _favorites = storageService.getFavorites();
   }
 
@@ -50,6 +55,14 @@ class IptvController extends ChangeNotifier {
   DuplicateScan? _pendingScan;
   String _pendingSource = '';
   String? _pendingFingerprint;
+
+  /// Metadados do catálogo em memória (fonte, validadores, TTL do cache).
+  CatalogCacheMeta? _catalogMeta;
+  bool _catalogRefreshing = false;
+
+  /// Desliga a revalidação em segundo plano (usado em testes).
+  @visibleForTesting
+  bool debugDisableAutoRevalidate = false;
 
   /// EPG compartilhado (cache em memória). A tela guia lê daqui.
   final EpgService epgService = EpgService();
@@ -81,9 +94,8 @@ class IptvController extends ChangeNotifier {
   /// Canais ao vivo que têm chave de EPG (tvg-id no M3U, epg_channel_id
   /// no Xtream). Se for 0, o provedor não entrega a chave e o guia não
   /// tem como casar canal x programação.
-  int get liveChannelsWithEpgId => _liveItems
-      .where((c) => (c.epgId ?? '').trim().isNotEmpty)
-      .length;
+  int get liveChannelsWithEpgId =>
+      _liveItems.where((c) => (c.epgId ?? '').trim().isNotEmpty).length;
 
   /// Canais cujo id/epgId existe no XMLTV carregado.
   int get liveChannelsMatchedEpg =>
@@ -105,7 +117,8 @@ class IptvController extends ChangeNotifier {
     }
   }
 
-  List<IptvCategory> getCategories(StreamType type) => _categoriesMap[type] ?? [];
+  List<IptvCategory> getCategories(StreamType type) =>
+      _categoriesMap[type] ?? [];
 
   /// Filtra itens da aba com base na categoria selecionada, busca e favoritos
   List<StreamItem> getFilteredItems(
@@ -159,19 +172,47 @@ class IptvController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Carrega lista M3U por URL remota
-  Future<bool> loadFromM3uUrl(String url) async {
-    _startLoading('Baixando lista M3U...');
+  /// Carrega lista M3U por URL remota.
+  ///
+  /// Com [allowCache] (abertura do app), o catálogo salvo em disco aparece
+  /// na hora e o provedor é checado em segundo plano. Sem ele (Recarregar,
+  /// troca de lista), a lista é sempre baixada de novo.
+  ///
+  /// Com [cacheOnly] nunca baixa: só abre o que já está salvo. [silent]
+  /// evita a barra de carregamento (atualização disparada pelo painel).
+  Future<bool> loadFromM3uUrl(
+    String url, {
+    bool allowCache = false,
+    bool cacheOnly = false,
+    bool silent = false,
+  }) async {
+    final sourceKey = 'm3u:$url';
+    if (allowCache) {
+      final cached = await _readCatalogCache(sourceKey);
+      if (cached != null && cached.items.isNotEmpty) {
+        _catalogMeta = cached.meta;
+        _loadedListName = cached.meta.listName;
+        _organizeItems(cached.items);
+        _finishLoading();
+        await storageService.saveLastM3uUrl(url);
+        unawaited(_refreshEpgForM3u(url));
+        unawaited(_backgroundRefreshM3u(url, cached));
+        return true;
+      }
+    }
+    if (cacheOnly) return false;
+
+    if (!silent) _startLoading('Baixando lista M3U...');
     try {
-      final content = await apiClient.fetchM3uContent(url);
-      _updateStatus('Processando canais e categorias...');
-      final items = await M3uParser.parseM3u(content);
+      final fetched = await apiClient.fetchM3u(url);
+      if (!silent) _updateStatus('Processando canais e categorias...');
+      final items = await M3uParser.parseM3u(fetched.content);
 
       if (items.isEmpty) {
         throw Exception('Nenhuma stream válida encontrada na lista informada.');
       }
 
-      await _prepareItems(items, 'm3u:$url');
+      await _prepareItems(items, sourceKey);
       _loadedListName = url.split('/').last.split('?').first;
       if (_loadedListName == null || _loadedListName!.isEmpty) {
         _loadedListName = 'Lista M3U Online';
@@ -182,26 +223,70 @@ class IptvController extends ChangeNotifier {
       final seriesGroups = <String, int>{};
       for (final it in items) {
         if (it.streamType == StreamType.series) {
-          seriesGroups.update(it.category, (v) => v + 1,
-              ifAbsent: () => 1);
+          seriesGroups.update(it.category, (v) => v + 1, ifAbsent: () => 1);
         }
       }
       final _ = seriesGroups.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
 
       await storageService.saveLastM3uUrl(url);
+
+      final meta = CatalogCacheMeta(
+        sourceKey: sourceKey,
+        kind: 'm3u',
+        listName: _loadedListName!,
+        savedAt: DateTime.now(),
+        itemCount: items.length,
+        etag: fetched.etag,
+        lastModified: fetched.lastModified,
+        contentLength: fetched.contentLength,
+      );
+      _catalogMeta = meta;
+      final snapshot = _allItems;
+      final hasPendingDuplicates = _pendingScan != null;
+
       // EPG em segundo plano: nunca bloqueia nem derruba o carregamento.
       unawaited(_refreshEpgForM3u(url));
       _finishLoading();
+      if (!hasPendingDuplicates) {
+        unawaited(_saveCatalogCache(snapshot, meta));
+      }
       return true;
     } catch (e) {
-      _setError('Erro ao carregar lista: ${e.toString().replaceAll('Exception:', '')}');
+      final message =
+          'Erro ao carregar lista: ${e.toString().replaceAll('Exception:', '')}';
+      if (silent) {
+        debugPrint('[Cache] carga silenciosa falhou: $message');
+      } else {
+        _setError(message);
+      }
       return false;
     }
   }
 
-  /// Carrega lista M3U de arquivo local
-  Future<bool> loadFromLocalFile(String filePath) async {
+  /// Carrega lista M3U de arquivo local.
+  Future<bool> loadFromLocalFile(
+    String filePath, {
+    bool allowCache = false,
+    bool cacheOnly = false,
+  }) async {
+    final sourceKey = 'file:$filePath';
+    if (allowCache) {
+      final cached = await _readCatalogCache(sourceKey);
+      if (cached != null && cached.items.isNotEmpty) {
+        _catalogMeta = cached.meta;
+        _loadedListName = cached.meta.listName;
+        _organizeItems(cached.items);
+        _finishLoading();
+        await storageService.saveLastM3uPath(filePath);
+        // Arquivo local não tem credenciais: limpa EPG anterior.
+        epgService.clear();
+        unawaited(_backgroundRefreshLocalFile(filePath, cached));
+        return true;
+      }
+    }
+    if (cacheOnly) return false;
+
     _startLoading('Lendo arquivo local...');
     try {
       final file = File(filePath);
@@ -217,27 +302,102 @@ class IptvController extends ChangeNotifier {
         throw Exception('Nenhum canal encontrado dentro do arquivo M3U.');
       }
 
-      await _prepareItems(items, 'file:$filePath');
+      await _prepareItems(items, sourceKey);
       _loadedListName = file.uri.pathSegments.last;
       await storageService.saveLastM3uPath(filePath);
       // Arquivo local não tem credenciais: limpa EPG anterior.
       epgService.clear();
+
+      final stat = await file.stat();
+      final meta = CatalogCacheMeta(
+        sourceKey: sourceKey,
+        kind: 'file',
+        listName: _loadedListName!,
+        savedAt: DateTime.now(),
+        itemCount: items.length,
+        contentLength: stat.size,
+        lastModified: stat.modified.toIso8601String(),
+      );
+      _catalogMeta = meta;
+      final snapshot = _allItems;
+      final hasPendingDuplicates = _pendingScan != null;
+
       _finishLoading();
+      if (!hasPendingDuplicates) {
+        unawaited(_saveCatalogCache(snapshot, meta));
+      }
       return true;
     } catch (e) {
-      _setError('Erro ao ler arquivo: ${e.toString().replaceAll('Exception:', '')}');
+      _setError(
+        'Erro ao ler arquivo: ${e.toString().replaceAll('Exception:', '')}',
+      );
       return false;
     }
   }
 
+  /// Chave do catálogo Xtream, normalizada como o login grava o cache.
+  String _xtreamSourceKey(String serverUrl, String username) =>
+      'xtream:${username.trim()}@${XtreamApi.normalizeServerUrl(serverUrl)}';
+
+  /// Identifica a fonte de uma conta Xtream (usado para detectar troca de
+  /// lista no painel sem baixar nada).
+  String sourceKeyForXtream(String serverUrl, String username) =>
+      _xtreamSourceKey(serverUrl, username);
+
+  /// Identifica a fonte de uma lista M3U.
+  String sourceKeyForM3u(String url) => 'm3u:$url';
+
+  /// Fonte da lista que está aberta agora.
+  String? get catalogSourceKey => _catalogMeta?.sourceKey;
+
   /// Login e carregamento via Xtream Codes API.
   /// Live/VOD/Séries carregam em paralelo; falha parcial não derruba o login.
+  ///
+  /// Com [allowCache] (abertura do app), usa o catálogo salvo e atualiza em
+  /// segundo plano pelo TTL. Sem ele, autentica e baixa tudo de novo.
+  /// [cacheOnly] não baixa nada quando não há cache; [silent] esconde a
+  /// barra de carregamento (atualização disparada pelo painel).
   Future<bool> loginXtream({
     required String serverUrl,
     required String username,
     required String password,
+    bool allowCache = false,
+    bool cacheOnly = false,
+    bool silent = false,
   }) async {
-    _startLoading('Autenticando no servidor Xtream Codes...');
+    final sourceKey = _xtreamSourceKey(serverUrl, username);
+    if (allowCache) {
+      final cached = await _readCatalogCache(sourceKey);
+      if (cached != null && cached.items.isNotEmpty) {
+        // Mantém status/vencimento já conhecidos: o painel usa esses campos
+        // e a abertura pelo cache não deve apagá-los.
+        final saved = storageService.getXtreamAccount();
+        final sameAccount = saved != null &&
+            saved.username.trim().toLowerCase() ==
+                username.trim().toLowerCase() &&
+            XtreamApi.normalizeServerUrl(saved.serverUrl) ==
+                XtreamApi.normalizeServerUrl(serverUrl);
+        final account = XtreamAccount(
+          serverUrl: XtreamApi.normalizeServerUrl(serverUrl),
+          username: username.trim(),
+          password: password,
+          status: sameAccount ? saved.status : null,
+          expDate: sameAccount ? saved.expDate : null,
+        );
+        _currentAccount = account;
+        await storageService.saveXtreamAccount(account);
+        _catalogMeta = cached.meta;
+        _loadedListName = cached.meta.listName;
+        _organizeItems(cached.items);
+        _finishLoading();
+        unawaited(_refreshEpgForXtream(account));
+        unawaited(_backgroundRefreshXtream(account, cached));
+        return true;
+      }
+    }
+    if (cacheOnly) return false;
+
+    if (!silent) _startLoading('Autenticando no servidor Xtream Codes...');
     try {
       final account = await xtreamApi.authenticate(
         serverUrl: serverUrl,
@@ -248,20 +408,21 @@ class IptvController extends ChangeNotifier {
       _currentAccount = account;
       await storageService.saveXtreamAccount(account);
 
-      _updateStatus('Carregando canais, filmes e séries...');
-      final results = await Future.wait(
-        [
-          xtreamApi.getLiveStreams(account,
-              ext: storageService.getStreamFormat()),
-          xtreamApi.getVodStreams(account),
-          xtreamApi.getSeriesStreams(account),
-        ],
-        eagerError: false,
-      ).timeout(
-        const Duration(seconds: 90),
-        onTimeout: () => throw TimeoutException(
-            'Tempo esgotado ao carregar catálogo (90s). Tente novamente.'),
-      );
+      if (!silent) _updateStatus('Carregando canais, filmes e séries...');
+      final results =
+          await Future.wait([
+            xtreamApi.getLiveStreams(
+              account,
+              ext: storageService.getStreamFormat(),
+            ),
+            xtreamApi.getVodStreams(account),
+            xtreamApi.getSeriesStreams(account),
+          ], eagerError: false).timeout(
+            const Duration(seconds: 90),
+            onTimeout: () => throw TimeoutException(
+              'Tempo esgotado ao carregar catálogo (90s). Tente novamente.',
+            ),
+          );
 
       final live = results[0];
       final movies = results[1];
@@ -270,22 +431,42 @@ class IptvController extends ChangeNotifier {
       final combined = [...live, ...movies, ...series];
       if (combined.isEmpty) {
         throw Exception(
-            'Login OK, mas nenhum conteúdo retornado. Verifique a assinatura.');
+          'Login OK, mas nenhum conteúdo retornado. Verifique a assinatura.',
+        );
       }
       await _prepareItems(
         combined,
-        'xtream:${account.username}@${account.serverUrl}',
+        _xtreamSourceKey(account.serverUrl, account.username),
       );
       _loadedListName = 'Xtream: ${account.username}';
+
+      final meta = CatalogCacheMeta(
+        sourceKey: _xtreamSourceKey(account.serverUrl, account.username),
+        kind: 'xtream',
+        listName: _loadedListName!,
+        savedAt: DateTime.now(),
+        itemCount: combined.length,
+      );
+      _catalogMeta = meta;
+      final snapshot = _allItems;
+      final hasPendingDuplicates = _pendingScan != null;
+
       // EPG em segundo plano: nunca bloqueia nem derruba o login.
       unawaited(_refreshEpgForXtream(account));
       _finishLoading();
+      if (!hasPendingDuplicates) {
+        unawaited(_saveCatalogCache(snapshot, meta));
+      }
       return true;
     } on TimeoutException catch (e) {
-      _setError(e.message ?? 'Tempo esgotado.');
+      if (!silent) _setError(e.message ?? 'Tempo esgotado.');
       return false;
     } catch (e) {
-      _setError(e.toString().replaceAll('Exception:', '').trim());
+      if (!silent) {
+        _setError(e.toString().replaceAll('Exception:', '').trim());
+      } else {
+        debugPrint('[Cache] login silencioso falhou: $e');
+      }
       return false;
     }
   }
@@ -322,12 +503,16 @@ class IptvController extends ChangeNotifier {
   Future<List<StreamItem>> getSeriesEpisodes(int seriesId) async {
     if (_currentAccount == null) return [];
     try {
-      final episodes =
-          await xtreamApi.getSeriesEpisodes(_currentAccount!, seriesId);
+      final episodes = await xtreamApi.getSeriesEpisodes(
+        _currentAccount!,
+        seriesId,
+      );
       final cleaned = dedupeEpisodes(episodes);
       if (cleaned.length != episodes.length) {
-        debugPrint('[Dedupe] série $seriesId: '
-            '${episodes.length - cleaned.length} episódio(s) repetido(s)');
+        debugPrint(
+          '[Dedupe] série $seriesId: '
+          '${episodes.length - cleaned.length} episódio(s) repetido(s)',
+        );
       }
       return cleaned;
     } catch (_) {
@@ -453,6 +638,7 @@ class IptvController extends ChangeNotifier {
     final scan = _pendingScan;
     if (scan == null) return;
     await _commitDedupe(scan, _pendingSource);
+    unawaited(_saveCacheFromState());
   }
 
   /// Mantém a lista como está e não pergunta de novo até ela mudar.
@@ -465,6 +651,255 @@ class IptvController extends ChangeNotifier {
     _pendingSource = '';
     _pendingFingerprint = null;
     notifyListeners();
+    unawaited(_saveCacheFromState());
+  }
+
+  // ---------- cache do catálogo em disco ----------
+
+  Future<CatalogCacheData?> _readCatalogCache(String sourceKey) async {
+    try {
+      return await catalogCache.read(sourceKey);
+    } catch (e) {
+      debugPrint('[Cache] leitura falhou: $e');
+      return null;
+    }
+  }
+
+  /// Grava o catálogo atual. Roda em segundo plano: a interface já abriu.
+  Future<void> _saveCatalogCache(
+    List<StreamItem> items,
+    CatalogCacheMeta meta,
+  ) async {
+    if (items.isEmpty) return;
+    try {
+      // Dá tempo da tela principal montar antes de serializar 100k+ itens.
+      await Future<void>.delayed(const Duration(seconds: 2));
+      final full = meta.copyWith(
+        savedAt: DateTime.now(),
+        itemCount: items.length,
+        contentHash: catalogFingerprint(items),
+      );
+      // Se o usuário trocou de lista nesse meio tempo, não sobrescreve os
+      // metadados da lista ativa (o arquivo antigo pode ser gravado).
+      if (_catalogMeta?.sourceKey == full.sourceKey) {
+        _catalogMeta = full;
+      }
+      await catalogCache.write(meta: full, items: items);
+    } catch (e) {
+      debugPrint('[Cache] gravação falhou: $e');
+    }
+  }
+
+  Future<void> _saveCacheFromState() async {
+    final meta = _catalogMeta;
+    if (meta == null) return;
+    await _saveCatalogCache(_allItems, meta);
+  }
+
+  /// Depois de abrir do cache, confere se o arquivo remoto mudou. Roda sem
+  /// barra de carregamento: se der erro, o cache continua valendo.
+  Future<void> _backgroundRefreshM3u(
+    String url,
+    CatalogCacheData cached,
+  ) async {
+    if (debugDisableAutoRevalidate || _catalogRefreshing) return;
+    final meta = cached.meta;
+    final decision = decideM3uRefresh(meta, DateTime.now());
+    if (decision == CatalogRefreshDecision.keep) return;
+
+    _catalogRefreshing = true;
+    try {
+      var changed = decision == CatalogRefreshDecision.refresh;
+      if (!changed) {
+        final info = await apiClient.remoteFileInfo(url);
+        changed = catalogRemoteChanged(
+          cachedEtag: meta.etag,
+          cachedLastModified: meta.lastModified,
+          etag: info?.etag,
+          lastModified: info?.lastModified,
+        );
+      }
+      if (!changed) return;
+
+      final fetched = await apiClient.fetchM3u(url);
+      final items = await M3uParser.parseM3u(fetched.content);
+      if (items.isEmpty) return;
+      // Outra lista foi carregada durante a checagem: descarta o resultado.
+      if (_catalogMeta?.sourceKey != meta.sourceKey) return;
+
+      // Provedor regerou o arquivo, mas o catálogo é o mesmo: só renova os
+      // validadores e não mexe na tela do usuário.
+      if (meta.contentHash != null &&
+          catalogFingerprint(items) == meta.contentHash) {
+        final refreshed = CatalogCacheMeta(
+          sourceKey: meta.sourceKey,
+          kind: meta.kind,
+          listName: meta.listName,
+          savedAt: DateTime.now(),
+          itemCount: items.length,
+          etag: fetched.etag,
+          lastModified: fetched.lastModified,
+          contentLength: fetched.contentLength,
+          contentHash: meta.contentHash,
+        );
+        _catalogMeta = refreshed;
+        await catalogCache.write(meta: refreshed, items: items);
+        return;
+      }
+
+      await _prepareItems(items, meta.sourceKey);
+      _loadedListName = meta.listName;
+      final freshMeta = CatalogCacheMeta(
+        sourceKey: meta.sourceKey,
+        kind: meta.kind,
+        listName: meta.listName,
+        savedAt: DateTime.now(),
+        itemCount: items.length,
+        etag: fetched.etag,
+        lastModified: fetched.lastModified,
+        contentLength: fetched.contentLength,
+      );
+      _catalogMeta = freshMeta;
+      notifyListeners();
+      if (_pendingScan == null) {
+        unawaited(_saveCatalogCache(_allItems, freshMeta));
+      }
+    } catch (e) {
+      debugPrint('[Cache] revalidação M3U falhou: $e');
+    } finally {
+      _catalogRefreshing = false;
+    }
+  }
+
+  Future<void> _backgroundRefreshLocalFile(
+    String filePath,
+    CatalogCacheData cached,
+  ) async {
+    if (debugDisableAutoRevalidate || _catalogRefreshing) return;
+    final meta = cached.meta;
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) return;
+      final stat = await file.stat();
+      final sameSize =
+          meta.contentLength != null && meta.contentLength == stat.size;
+      final sameTime = meta.lastModified == stat.modified.toIso8601String();
+      if (sameSize && sameTime) return;
+
+      _catalogRefreshing = true;
+      final content = await file.readAsString();
+      final items = await M3uParser.parseM3u(content);
+      if (items.isEmpty) return;
+      // Outra lista foi carregada durante a checagem: descarta o resultado.
+      if (_catalogMeta?.sourceKey != meta.sourceKey) return;
+
+      if (meta.contentHash != null &&
+          catalogFingerprint(items) == meta.contentHash) {
+        final refreshed = CatalogCacheMeta(
+          sourceKey: meta.sourceKey,
+          kind: meta.kind,
+          listName: meta.listName,
+          savedAt: DateTime.now(),
+          itemCount: items.length,
+          contentLength: stat.size,
+          lastModified: stat.modified.toIso8601String(),
+          contentHash: meta.contentHash,
+        );
+        _catalogMeta = refreshed;
+        await catalogCache.write(meta: refreshed, items: items);
+        return;
+      }
+
+      await _prepareItems(items, meta.sourceKey);
+      _loadedListName = meta.listName;
+      final freshMeta = CatalogCacheMeta(
+        sourceKey: meta.sourceKey,
+        kind: meta.kind,
+        listName: meta.listName,
+        savedAt: DateTime.now(),
+        itemCount: items.length,
+        contentLength: stat.size,
+        lastModified: stat.modified.toIso8601String(),
+      );
+      _catalogMeta = freshMeta;
+      notifyListeners();
+      if (_pendingScan == null) {
+        unawaited(_saveCatalogCache(_allItems, freshMeta));
+      }
+    } catch (e) {
+      debugPrint('[Cache] revalidação local falhou: $e');
+    } finally {
+      _catalogRefreshing = false;
+    }
+  }
+
+  /// Xtream não expõe validadores de arquivo: a atualização em segundo plano
+  /// acontece só quando o cache passa do TTL.
+  Future<void> _backgroundRefreshXtream(
+    XtreamAccount account,
+    CatalogCacheData cached,
+  ) async {
+    if (debugDisableAutoRevalidate || _catalogRefreshing) return;
+    final meta = cached.meta;
+    if (DateTime.now().difference(meta.savedAt) < catalogXtreamTtl) return;
+
+    _catalogRefreshing = true;
+    try {
+      final fresh = await xtreamApi.authenticate(
+        serverUrl: account.serverUrl,
+        username: account.username,
+        password: account.password,
+      );
+      _currentAccount = fresh;
+      await storageService.saveXtreamAccount(fresh);
+
+      final results = await Future.wait([
+        xtreamApi.getLiveStreams(fresh, ext: storageService.getStreamFormat()),
+        xtreamApi.getVodStreams(fresh),
+        xtreamApi.getSeriesStreams(fresh),
+      ], eagerError: false).timeout(const Duration(seconds: 90));
+
+      final combined = [for (final list in results) ...list];
+      if (combined.isEmpty) return;
+      // Outra lista foi carregada durante a checagem: descarta o resultado.
+      if (_catalogMeta?.sourceKey != meta.sourceKey) return;
+
+      final sourceKey = _xtreamSourceKey(fresh.serverUrl, fresh.username);
+      if (meta.contentHash != null &&
+          catalogFingerprint(combined) == meta.contentHash) {
+        final refreshed = CatalogCacheMeta(
+          sourceKey: sourceKey,
+          kind: meta.kind,
+          listName: meta.listName,
+          savedAt: DateTime.now(),
+          itemCount: combined.length,
+          contentHash: meta.contentHash,
+        );
+        _catalogMeta = refreshed;
+        await catalogCache.write(meta: refreshed, items: combined);
+        return;
+      }
+
+      await _prepareItems(combined, sourceKey);
+      _loadedListName = meta.listName;
+      final freshMeta = CatalogCacheMeta(
+        sourceKey: sourceKey,
+        kind: meta.kind,
+        listName: meta.listName,
+        savedAt: DateTime.now(),
+        itemCount: combined.length,
+      );
+      _catalogMeta = freshMeta;
+      unawaited(_refreshEpgForXtream(fresh));
+      notifyListeners();
+      if (_pendingScan == null) {
+        unawaited(_saveCatalogCache(_allItems, freshMeta));
+      }
+    } catch (e) {
+      debugPrint('[Cache] revalidação Xtream falhou: $e');
+    } finally {
+      _catalogRefreshing = false;
+    }
   }
 
   /// Organiza os itens carregados em abas e categorias
@@ -499,7 +934,9 @@ class IptvController extends ChangeNotifier {
           break;
         case StreamType.movie:
           _movieItems.add(normalized);
-          movieCatMap.putIfAbsent(normalized.category, () => []).add(normalized);
+          movieCatMap
+              .putIfAbsent(normalized.category, () => [])
+              .add(normalized);
           break;
         case StreamType.series:
           _seriesItems.add(normalized);
@@ -511,18 +948,42 @@ class IptvController extends ChangeNotifier {
     }
 
     _categoriesMap = {
-      StreamType.live: liveCatMap.entries
-          .map((e) => IptvCategory(id: e.key, name: e.key, streamType: StreamType.live, items: e.value))
-          .toList()
-        ..sort((a, b) => a.name.compareTo(b.name)),
-      StreamType.movie: movieCatMap.entries
-          .map((e) => IptvCategory(id: e.key, name: e.key, streamType: StreamType.movie, items: e.value))
-          .toList()
-        ..sort((a, b) => a.name.compareTo(b.name)),
-      StreamType.series: seriesCatMap.entries
-          .map((e) => IptvCategory(id: e.key, name: e.key, streamType: StreamType.series, items: e.value))
-          .toList()
-        ..sort((a, b) => a.name.compareTo(b.name)),
+      StreamType.live:
+          liveCatMap.entries
+              .map(
+                (e) => IptvCategory(
+                  id: e.key,
+                  name: e.key,
+                  streamType: StreamType.live,
+                  items: e.value,
+                ),
+              )
+              .toList()
+            ..sort((a, b) => compareCategoriesAdultLast(a.name, b.name)),
+      StreamType.movie:
+          movieCatMap.entries
+              .map(
+                (e) => IptvCategory(
+                  id: e.key,
+                  name: e.key,
+                  streamType: StreamType.movie,
+                  items: e.value,
+                ),
+              )
+              .toList()
+            ..sort((a, b) => compareCategoriesAdultLast(a.name, b.name)),
+      StreamType.series:
+          seriesCatMap.entries
+              .map(
+                (e) => IptvCategory(
+                  id: e.key,
+                  name: e.key,
+                  streamType: StreamType.series,
+                  items: e.value,
+                ),
+              )
+              .toList()
+            ..sort((a, b) => compareCategoriesAdultLast(a.name, b.name)),
     };
   }
 
@@ -557,9 +1018,14 @@ class IptvController extends ChangeNotifier {
     _liveItems.clear();
     _movieItems.clear();
     _seriesItems.clear();
-    _categoriesMap = {StreamType.live: [], StreamType.movie: [], StreamType.series: []};
+    _categoriesMap = {
+      StreamType.live: [],
+      StreamType.movie: [],
+      StreamType.series: [],
+    };
     _currentAccount = null;
     _loadedListName = null;
+    _catalogMeta = null;
     _searchQuery = '';
     epgService.clear();
     _showOnlyFavoritesReset();

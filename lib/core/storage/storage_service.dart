@@ -24,6 +24,9 @@ class StorageService {
   static const String _keyLanguage = 'pref_language';
   static const String _keyCredentialLogin = 'pref_credential_login';
   static const String _keyPanelListFailure = 'pref_panel_list_failure';
+  static const String _keyPreferredAudio = 'pref_player_audio_language';
+  static const String _keyPreferredSubtitle = 'pref_player_subtitle_language';
+  static const String _keySubtitleFontSize = 'pref_player_subtitle_font_size';
 
   final SharedPreferences _prefs;
   
@@ -413,5 +416,26 @@ class StorageService {
         await _prefs.setStringList(_keyFavorites, current.toList());
       }
     });
+  }
+
+  // --- Preferências de Player (Áudio e Legenda) ---
+  String? getPreferredAudioLanguage() => _prefs.getString(_keyPreferredAudio);
+
+  Future<void> setPreferredAudioLanguage(String language) async {
+    await _prefs.setString(_keyPreferredAudio, language);
+  }
+
+  String? getPreferredSubtitleLanguage() =>
+      _prefs.getString(_keyPreferredSubtitle);
+
+  Future<void> setPreferredSubtitleLanguage(String language) async {
+    await _prefs.setString(_keyPreferredSubtitle, language);
+  }
+
+  double getSubtitleFontSize() =>
+      _prefs.getDouble(_keySubtitleFontSize) ?? 22.0;
+
+  Future<void> setSubtitleFontSize(double size) async {
+    await _prefs.setDouble(_keySubtitleFontSize, size);
   }
 }

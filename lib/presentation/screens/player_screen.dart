@@ -8,6 +8,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 
+import '../../core/di/service_locator.dart';
+import '../../core/storage/storage_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/back_navigation_mixin.dart';
 import '../../core/utils/playback_math.dart';
@@ -242,6 +244,20 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   final FocusNode _fwd10Node = FocusNode();
   final FocusNode _sliderNode = FocusNode();
   final FocusNode _compatNode = FocusNode();
+  final FocusNode _audioNode = FocusNode();
+  final FocusNode _subtitleNode = FocusNode();
+
+  double _subtitleFontSize = 22.0;
+  bool _appliedInitialAudioPreference = false;
+  bool _appliedInitialSubtitlePreference = false;
+
+  StorageService? get _storage {
+    try {
+      return ServiceLocator.instance.storage;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Nós da tela de erro: o overlay entra depois do build inicial, então o
   /// autofocus sozinho nem sempre entrega o foco no Fire TV (D-pad). Sem
@@ -260,6 +276,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     // Libera os pôsteres da RAM ao abrir o player (as listas ficam na
     // pilha de navegação segurando imagens; no stick de 1 GB isso conta).
     PaintingBinding.instance.imageCache.clear();
+    final storage = _storage;
+    if (storage != null) {
+      _subtitleFontSize = storage.getSubtitleFontSize();
+    }
     _playlist = widget.playlist == null
         ? <StreamItem>[]
         : orderPlaylistForPlayback(widget.playlist!);
@@ -476,6 +496,23 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
             .setProperty('vd-lavc-threads', '4')
             .timeout(const Duration(seconds: 3));
       }
+
+      // ========== ESTILIZAÇÃO PADRÃO DE LEGENDAS (MPV OSD) ==========
+      await dyn
+          .setProperty('sub-font-size', '${(_subtitleFontSize * 1.8).round()}')
+          .timeout(const Duration(seconds: 3));
+      await dyn
+          .setProperty('sub-color', '#FFFFFFFF')
+          .timeout(const Duration(seconds: 3));
+      await dyn
+          .setProperty('sub-back-color', '#B3000000')
+          .timeout(const Duration(seconds: 3));
+      await dyn
+          .setProperty('sub-border-size', '2')
+          .timeout(const Duration(seconds: 3));
+      await dyn
+          .setProperty('sub-border-color', '#FF000000')
+          .timeout(const Duration(seconds: 3));
     } catch (e) {
       // Aparelho sem suporte a uma propriedade: segue com as demais.
       debugPrint('[Player] mpv setup warning: $e');
@@ -811,7 +848,10 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _subs.add(
       _player!.stream.tracks.listen(
         (tracks) {
-          if (mounted) setState(() => _tracks = tracks);
+          if (mounted) {
+            setState(() => _tracks = tracks);
+            _autoApplyTrackPreferences(tracks);
+          }
         },
         onError: (e) {
           debugPrint('[Player] tracks stream error: $e');
@@ -1020,7 +1060,11 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   }
 
   Future<void> _open(String url, {bool isRetry = false}) async {
-    if (!isRetry) _retryCount = 0;
+    if (!isRetry) {
+      _retryCount = 0;
+      _appliedInitialAudioPreference = false;
+      _appliedInitialSubtitlePreference = false;
+    }
     // Geração: zaps rápidos disparam _open concorrentes no mesmo player
     // nativo — o atrasado (stale) deve abortar em vez de disputar o mpv,
     // o que derrubava o app principalmente em filmes (VOD).
@@ -1519,99 +1563,707 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     });
   }
 
-  void _showTracksSheet() {
+  String _formatTrackName({
+    required String? title,
+    required String? language,
+    required String id,
+    required String fallbackPrefix,
+  }) {
+    final t = title?.trim() ?? '';
+    final l = language?.trim() ?? '';
+
+    if (t.isNotEmpty &&
+        t.toLowerCase() != 'und' &&
+        !t.toLowerCase().startsWith('track_')) {
+      return t;
+    }
+
+    if (l.isNotEmpty && l.toLowerCase() != 'und') {
+      final code = l.toLowerCase();
+      switch (code) {
+        case 'por':
+        case 'pt':
+        case 'pob':
+        case 'pt-br':
+        case 'pt_br':
+        case 'portuguese':
+          return 'Português';
+        case 'eng':
+        case 'en':
+        case 'en-us':
+        case 'english':
+          return 'Inglês';
+        case 'spa':
+        case 'es':
+        case 'es-es':
+        case 'spanish':
+          return 'Espanhol';
+        case 'fre':
+        case 'fra':
+        case 'fr':
+        case 'french':
+          return 'Francês';
+        case 'ita':
+        case 'it':
+        case 'italian':
+          return 'Italiano';
+        case 'ger':
+        case 'deu':
+        case 'de':
+        case 'german':
+          return 'Alemão';
+        case 'rus':
+        case 'ru':
+        case 'russian':
+          return 'Russo';
+        case 'jpn':
+        case 'ja':
+        case 'japanese':
+          return 'Japonês';
+        case 'chi':
+        case 'zho':
+        case 'zh':
+        case 'chinese':
+          return 'Chinês';
+        case 'kor':
+        case 'ko':
+        case 'korean':
+          return 'Coreano';
+        default:
+          return l.toUpperCase();
+      }
+    }
+
+    return '$fallbackPrefix $id';
+  }
+
+  String get _activeAudioLabel {
     final tracks = _tracks;
-    if (tracks == null) return;
-    showModalBottomSheet(
+    if (tracks == null || tracks.audio.isEmpty) return 'Áudio';
+    final currentId = _player?.state.track.audio.id;
+    final active = tracks.audio.where((t) => t.id == currentId).toList();
+    if (active.isNotEmpty) {
+      final name = _formatTrackName(
+        title: active.first.title,
+        language: active.first.language,
+        id: active.first.id,
+        fallbackPrefix: 'Áudio',
+      );
+      return 'Áudio ($name)';
+    }
+    return 'Áudio';
+  }
+
+  bool get _isSubtitleActive {
+    final subId = _player?.state.track.subtitle.id;
+    return subId != null && subId != 'no';
+  }
+
+  String get _activeSubtitleLabel {
+    final tracks = _tracks;
+    if (tracks == null || tracks.subtitle.isEmpty) return 'Legendas';
+    final currentId = _player?.state.track.subtitle.id;
+    if (currentId == null || currentId == 'no') return 'Legendas (Desat.)';
+    final active = tracks.subtitle.where((t) => t.id == currentId).toList();
+    if (active.isNotEmpty) {
+      final name = _formatTrackName(
+        title: active.first.title,
+        language: active.first.language,
+        id: active.first.id,
+        fallbackPrefix: 'Legenda',
+      );
+      return 'CC ($name)';
+    }
+    return 'Legendas';
+  }
+
+  void _selectAudioTrack(AudioTrack track) {
+    _player?.setAudioTrack(track);
+    final langKey = track.language?.trim().isNotEmpty == true
+        ? track.language!.trim()
+        : (track.title?.trim().isNotEmpty == true
+            ? track.title!.trim()
+            : track.id);
+    _storage?.setPreferredAudioLanguage(langKey);
+    if (mounted) setState(() {});
+  }
+
+  void _disableSubtitles() {
+    _player?.setSubtitleTrack(SubtitleTrack.no());
+    _storage?.setPreferredSubtitleLanguage('off');
+    if (mounted) setState(() {});
+  }
+
+  void _chooseSubtitleTrack(SubtitleTrack track) {
+    _selectSubtitleTrack(track);
+    final langKey = track.language?.trim().isNotEmpty == true
+        ? track.language!.trim()
+        : (track.title?.trim().isNotEmpty == true
+            ? track.title!.trim()
+            : track.id);
+    _storage?.setPreferredSubtitleLanguage(langKey);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _changeSubtitleFontSize(double newSize) async {
+    final clamped = newSize.clamp(14.0, 38.0);
+    setState(() {
+      _subtitleFontSize = clamped;
+    });
+    try {
+      final storage = _storage;
+      if (storage != null) {
+        await storage.setSubtitleFontSize(clamped);
+      }
+    } catch (_) {}
+    try {
+      final platform = _player?.platform;
+      if (platform != null) {
+        await (platform as dynamic)
+            .setProperty('sub-font-size', '${(clamped * 1.8).round()}')
+            .timeout(const Duration(seconds: 2));
+      }
+    } catch (_) {}
+  }
+
+  void _autoApplyTrackPreferences(Tracks tracks) {
+    final storage = _storage;
+    if (storage == null) return;
+
+    if (!_appliedInitialAudioPreference && tracks.audio.length > 1) {
+      final prefAudio = storage.getPreferredAudioLanguage();
+      if (prefAudio != null && prefAudio.isNotEmpty) {
+        final match = tracks.audio.where(
+          (t) => _matchesLanguage(t.language, t.title, prefAudio),
+        ).toList();
+        if (match.isNotEmpty) {
+          final target = match.first;
+          if (_player?.state.track.audio.id != target.id) {
+            _player?.setAudioTrack(target);
+          }
+        }
+      }
+      _appliedInitialAudioPreference = true;
+    }
+
+    if (!_appliedInitialSubtitlePreference && tracks.subtitle.isNotEmpty) {
+      final prefSub = storage.getPreferredSubtitleLanguage();
+      if (prefSub != null && prefSub.isNotEmpty) {
+        if (prefSub == 'off' || prefSub == 'no' || prefSub == '-1') {
+          _player?.setSubtitleTrack(SubtitleTrack.no());
+        } else {
+          final match = tracks.subtitle.where(
+            (t) => _matchesLanguage(t.language, t.title, prefSub),
+          ).toList();
+          if (match.isNotEmpty) {
+            final target = match.first;
+            if (_player?.state.track.subtitle.id != target.id) {
+              _selectSubtitleTrack(target);
+            }
+          }
+        }
+      }
+      _appliedInitialSubtitlePreference = true;
+    }
+  }
+
+  bool _matchesLanguage(String? lang, String? title, String pref) {
+    final p = pref.trim().toLowerCase();
+    final l = (lang ?? '').trim().toLowerCase();
+    final t = (title ?? '').trim().toLowerCase();
+    if (p.isEmpty) return false;
+    if (l == p || t == p) return true;
+    if (t.contains(p) || l.contains(p)) return true;
+    if (p == 'português' || p == 'portugues' || p == 'pt' || p == 'por') {
+      return l.contains('por') || l.contains('pt') || t.contains('portug');
+    }
+    if (p == 'inglês' || p == 'ingles' || p == 'en' || p == 'eng') {
+      return l.contains('eng') || l.contains('en') || t.contains('ingl');
+    }
+    if (p == 'espanhol' || p == 'es' || p == 'spa') {
+      return l.contains('spa') || l.contains('es') || t.contains('espan');
+    }
+    return false;
+  }
+
+  Future<void> _showAudioTracksDialog() async {
+    final tracks = _tracks;
+    if (tracks == null || tracks.audio.length <= 1) return;
+
+    _hideTimer?.cancel();
+    final currentId = _player?.state.track.audio.id;
+
+    await showDialog<void>(
       context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Faixas de áudio / legendas',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: AppColors.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: AppColors.cardBorder),
+          ),
+          child: FocusScope(
+            autofocus: true,
+            child: Container(
+              width: 440,
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.audiotrack,
+                          color: AppColors.primary,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Faixas de Áudio',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Áudio',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-                ...tracks.audio.map(
-                  (t) => ListTile(
-                    dense: true,
-                    title: Text(
-                      t.title ?? t.language ?? t.id,
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Selecione o idioma de áudio desejado:',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
                     ),
-                    trailing: _player!.state.track.audio.id == t.id
-                        ? const Icon(Icons.check, color: AppColors.primary)
-                        : null,
-                    onTap: () {
-                      _player!.setAudioTrack(t);
-                      Navigator.pop(context);
-                    },
                   ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Legendas',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-                ListTile(
-                  dense: true,
-                  title: const Text(
-                    'Desativadas',
-                    style: TextStyle(color: Colors.white, fontSize: 13),
-                  ),
-                  trailing: _player!.state.track.subtitle.id == 'no'
-                      ? const Icon(Icons.check, color: AppColors.primary)
-                      : null,
-                  onTap: () {
-                    _player!.setSubtitleTrack(SubtitleTrack.no());
-                    Navigator.pop(context);
-                  },
-                ),
-                ...tracks.subtitle.map(
-                  (t) => ListTile(
-                    dense: true,
-                    title: Text(
-                      t.title ?? t.language ?? t.id,
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                  const SizedBox(height: 16),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 280),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: tracks.audio.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final track = tracks.audio[index];
+                        final isSelected = currentId == track.id;
+                        final name = _formatTrackName(
+                          title: track.title,
+                          language: track.language,
+                          id: track.id,
+                          fallbackPrefix: 'Faixa',
+                        );
+                        return TvFocusable(
+                          autofocus:
+                              isSelected || (currentId == null && index == 0),
+                          borderRadius: BorderRadius.circular(10),
+                          onPressed: () {
+                            _selectAudioTrack(track);
+                            Navigator.of(dialogContext).pop();
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? AppColors.primary.withValues(alpha: 0.18)
+                                  : AppColors.surfaceLight,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isSelected
+                                    ? AppColors.primary
+                                    : AppColors.cardBorder,
+                                width: isSelected ? 1.5 : 1.0,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.volume_up_rounded,
+                                  color: isSelected
+                                      ? AppColors.primary
+                                      : Colors.white60,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    style: TextStyle(
+                                      color: isSelected
+                                          ? Colors.white
+                                          : Colors.white
+                                              .withValues(alpha: 0.85),
+                                      fontSize: 14,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                if (isSelected)
+                                  const Icon(
+                                    Icons.check_circle_rounded,
+                                    color: AppColors.primary,
+                                    size: 20,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                    trailing: _player!.state.track.subtitle.id == t.id
-                        ? const Icon(Icons.check, color: AppColors.primary)
-                        : null,
-                    onTap: () {
-                      Navigator.pop(context);
-                      _selectSubtitleTrack(t);
-                    },
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
       },
     );
+
+    if (mounted) _resetControlsTimeout();
+  }
+
+  Future<void> _showSubtitleTracksDialog() async {
+    final tracks = _tracks;
+    if (tracks == null || tracks.subtitle.isEmpty) return;
+
+    _hideTimer?.cancel();
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final currentSubId = _player?.state.track.subtitle.id;
+            final isOff = currentSubId == null || currentSubId == 'no';
+
+            return Dialog(
+              backgroundColor: AppColors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: AppColors.cardBorder),
+              ),
+              child: FocusScope(
+                autofocus: true,
+                child: Container(
+                  width: 480,
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.closed_caption,
+                              color: AppColors.primary,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Legendas & Estilo',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white70),
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.cardBorder),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.format_size,
+                              color: AppColors.textSecondary,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 10),
+                            const Expanded(
+                              child: Text(
+                                'Tamanho do Texto',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            TvFocusable(
+                              borderRadius: BorderRadius.circular(8),
+                              onPressed: _subtitleFontSize > 14.0
+                                  ? () {
+                                      _changeSubtitleFontSize(
+                                          _subtitleFontSize - 2.0);
+                                      setDialogState(() {});
+                                    }
+                                  : null,
+                              child: Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: _subtitleFontSize > 14.0
+                                      ? Colors.black54
+                                      : Colors.black26,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: AppColors.cardBorder,
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.remove,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text(
+                                '${_subtitleFontSize.toInt()} px',
+                                style: const TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            TvFocusable(
+                              borderRadius: BorderRadius.circular(8),
+                              onPressed: _subtitleFontSize < 38.0
+                                  ? () {
+                                      _changeSubtitleFontSize(
+                                          _subtitleFontSize + 2.0);
+                                      setDialogState(() {});
+                                    }
+                                  : null,
+                              child: Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: _subtitleFontSize < 38.0
+                                      ? Colors.black54
+                                      : Colors.black26,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: AppColors.cardBorder,
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.add,
+                                  color: Colors.white,
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Selecione uma faixa de legenda:',
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 240),
+                        child: ListView(
+                          shrinkWrap: true,
+                          children: [
+                            TvFocusable(
+                              autofocus: isOff,
+                              borderRadius: BorderRadius.circular(10),
+                              onPressed: () {
+                                _disableSubtitles();
+                                Navigator.of(dialogContext).pop();
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isOff
+                                      ? AppColors.primary.withValues(alpha: 0.18)
+                                      : AppColors.surfaceLight,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: isOff
+                                        ? AppColors.primary
+                                        : AppColors.cardBorder,
+                                    width: isOff ? 1.5 : 1.0,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.subtitles_off_rounded,
+                                      color: isOff
+                                          ? AppColors.primary
+                                          : Colors.white60,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        'Desativar legendas',
+                                        style: TextStyle(
+                                          color: isOff
+                                              ? Colors.white
+                                              : Colors.white
+                                                  .withValues(alpha: 0.85),
+                                          fontSize: 14,
+                                          fontWeight: isOff
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                    if (isOff)
+                                      const Icon(
+                                        Icons.check_circle_rounded,
+                                        color: AppColors.primary,
+                                        size: 20,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            ...tracks.subtitle.asMap().entries.map((entry) {
+                              final track = entry.value;
+                              final isSelected = currentSubId == track.id;
+                              final name = _formatTrackName(
+                                title: track.title,
+                                language: track.language,
+                                id: track.id,
+                                fallbackPrefix: 'Legenda',
+                              );
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                child: TvFocusable(
+                                  autofocus: isSelected,
+                                  borderRadius: BorderRadius.circular(10),
+                                  onPressed: () {
+                                    _chooseSubtitleTrack(track);
+                                    Navigator.of(dialogContext).pop();
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? AppColors.primary
+                                              .withValues(alpha: 0.18)
+                                          : AppColors.surfaceLight,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: isSelected
+                                            ? AppColors.primary
+                                            : AppColors.cardBorder,
+                                        width: isSelected ? 1.5 : 1.0,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.closed_caption,
+                                          color: isSelected
+                                              ? AppColors.primary
+                                              : Colors.white60,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Text(
+                                            name,
+                                            style: TextStyle(
+                                              color: isSelected
+                                                  ? Colors.white
+                                                  : Colors.white.withValues(
+                                                      alpha: 0.85),
+                                              fontSize: 14,
+                                              fontWeight: isSelected
+                                                  ? FontWeight.w700
+                                                  : FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                        if (isSelected)
+                                          const Icon(
+                                            Icons.check_circle_rounded,
+                                            color: AppColors.primary,
+                                            size: 20,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (mounted) _resetControlsTimeout();
   }
 
   @override
@@ -1633,6 +2285,8 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _fwd10Node.dispose();
     _sliderNode.dispose();
     _compatNode.dispose();
+    _audioNode.dispose();
+    _subtitleNode.dispose();
     _errorBackNode.dispose();
     _errorRetryNode.dispose();
     _player?.dispose();
@@ -1852,6 +2506,25 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
           controller: controller,
           fit: _currentAspect.fit,
           controls: NoVideoControls,
+          subtitleViewConfiguration: SubtitleViewConfiguration(
+            style: TextStyle(
+              height: 1.35,
+              fontSize: _subtitleFontSize,
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              backgroundColor: const Color(0xB3000000),
+              letterSpacing: 0.4,
+              shadows: const [
+                Shadow(
+                  offset: Offset(1.0, 1.0),
+                  blurRadius: 3.0,
+                  color: Colors.black,
+                ),
+              ],
+            ),
+            textAlign: TextAlign.center,
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+          ),
         ),
       ),
     );
@@ -1982,12 +2655,13 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                         ],
                       ),
                     ),
-                    if (_tracks != null &&
-                        (_tracks!.audio.length > 1 ||
-                            _tracks!.subtitle.isNotEmpty))
+                    // 1. Gerenciamento de Faixas de Áudio:
+                    // Ocultar o menu/botão de áudio caso o stream possua apenas uma única faixa.
+                    if (_tracks != null && _tracks!.audio.length > 1) ...[
                       TvFocusable(
+                        focusNode: _audioNode,
                         borderRadius: BorderRadius.circular(8),
-                        onPressed: _showTracksSheet,
+                        onPressed: _showAudioTracksDialog,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
@@ -1998,13 +2672,80 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: AppColors.cardBorder),
                           ),
-                          child: const Icon(
-                            Icons.closed_caption,
-                            color: AppColors.primary,
-                            size: 16,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.audiotrack,
+                                color: AppColors.primary,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _activeAudioLabel,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
+                      const SizedBox(width: 8),
+                    ],
+
+                    // 2. Gerenciamento de Legendas:
+                    // Listar legendas disponíveis no stream, alternar idioma ou "Desativar" (-1)
+                    if (_tracks != null && _tracks!.subtitle.isNotEmpty) ...[
+                      TvFocusable(
+                        focusNode: _subtitleNode,
+                        borderRadius: BorderRadius.circular(8),
+                        onPressed: _showSubtitleTracksDialog,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _isSubtitleActive
+                                ? AppColors.primary.withValues(alpha: 0.18)
+                                : Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _isSubtitleActive
+                                  ? AppColors.primary
+                                  : AppColors.cardBorder,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.closed_caption,
+                                color: _isSubtitleActive
+                                    ? AppColors.primary
+                                    : Colors.white70,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _activeSubtitleLabel,
+                                style: TextStyle(
+                                  color: _isSubtitleActive
+                                      ? Colors.white
+                                      : Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     const SizedBox(width: 8),
                     TvFocusable(
                       focusNode: _aspectNode,

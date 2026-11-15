@@ -106,6 +106,10 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   /// da grade em vez de ele escapar para a coluna de categorias.
   int? _focusedCardIndex;
 
+  /// Rola a grade de volta ao topo antes de entregar o foco ao primeiro
+  /// resultado da busca (um cartão fora da tela não pode receber foco).
+  final ScrollController _gridScroll = ScrollController();
+
   StreamType get _type => widget.type;
   bool get _isSeries => _type == StreamType.series;
   bool get _isTv => MediaQuery.of(context).size.width >= 900;
@@ -223,6 +227,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       node.dispose();
     }
     _firstCardNode.dispose();
+    _gridScroll.dispose();
     super.dispose();
   }
 
@@ -270,17 +275,31 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       _cancelSearch();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowDown ||
-        key == LogicalKeyboardKey.arrowUp) {
+    if (key == LogicalKeyboardKey.arrowDown) {
+      // Do campo de busca o cursor desce para o primeiro resultado; a
+      // travessia geométrica daqui caía em um botão qualquer da tela.
+      final hasResults = _isSeries
+          ? _seriesGroupsList().isNotEmpty
+          : _filteredItems().isNotEmpty;
+      if (!hasResults) return KeyEventResult.handled;
+      _searchNode.unfocus();
+      _hideKeyboard();
+      if (_isTv) {
+        _focusFirstResult();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          FocusScope.of(context).focusInDirection(TraversalDirection.down);
+        });
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
       _searchNode.unfocus();
       _hideKeyboard();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        FocusScope.of(context).focusInDirection(
-          key == LogicalKeyboardKey.arrowDown
-              ? TraversalDirection.down
-              : TraversalDirection.up,
-        );
+        FocusScope.of(context).focusInDirection(TraversalDirection.up);
       });
       return KeyEventResult.handled;
     }
@@ -451,6 +470,28 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     });
   }
 
+  /// Busca: o cursor desce do campo para o primeiro cartão dos resultados.
+  /// A grade volta ao topo antes do foco porque um cartão fora da tela não
+  /// pode receber foco.
+  void _focusFirstResult() {
+    if (!_isTv) return;
+    if (_gridScroll.hasClients) _gridScroll.jumpTo(0);
+    void attempt(int tries) {
+      // Sem frame agendado o post-frame não roda.
+      WidgetsBinding.instance.scheduleFrame();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_firstCardNode.context != null) {
+          _firstCardNode.requestFocus();
+        } else if (tries > 0) {
+          attempt(tries - 1);
+        }
+      });
+    }
+
+    attempt(2);
+  }
+
   /// Primeira opção do nível seguinte: a primeira subcategoria quando a
   /// categoria tem subcategorias, senão o primeiro cartão da grade.
   void _focusFirstOption() {
@@ -589,6 +630,11 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     return buildWithBackGuard(
       child: FocusScope(
         autofocus: true,
+        // Rede de segurança da busca: depois de fechar o teclado o campo
+        // perde o foco e a seta para baixo caía em um botão da barra de
+        // cima. Com busca ativa, seta para baixo fora da grade vai para o
+        // primeiro resultado.
+        onKeyEvent: _handleSearchEscapeKey,
         child: Scaffold(
           body: SafeArea(
             child: Column(
@@ -1505,6 +1551,27 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     return _buildMoviesGrid(items);
   }
 
+  /// Com busca ativa, seta para baixo fora da grade leva ao primeiro
+  /// resultado. Sem isso, o foco solto depois do teclado fazia o cursor
+  /// pular para um botão da barra de cima.
+  KeyEventResult _handleSearchEscapeKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (!_isTv || !_searchActive) return KeyEventResult.ignored;
+    if (event.logicalKey != LogicalKeyboardKey.arrowDown) {
+      return KeyEventResult.ignored;
+    }
+    // Foco dentro da grade: a própria grade decide (rola ou segura).
+    if (_focusedCardIndex != null) return KeyEventResult.ignored;
+    final hasResults = _isSeries
+        ? _seriesGroupsList().isNotEmpty
+        : _filteredItems().isNotEmpty;
+    if (!hasResults) return KeyEventResult.ignored;
+    _searchNode.unfocus();
+    _hideKeyboard();
+    _focusFirstResult();
+    return KeyEventResult.handled;
+  }
+
   /// Segura o cursor nas bordas da grade: sem isso o D-pad "escapa" para a
   /// coluna de categorias quando não há mais cartão naquela direção.
   KeyEventResult _handleGridKey(
@@ -1532,6 +1599,13 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
         index + crossAxisCount >= itemCount) {
       return KeyEventResult.handled;
     }
+    // Resultado de busca: o cursor para na primeira opção em vez de subir
+    // para a coluna de categorias.
+    if (key == LogicalKeyboardKey.arrowUp &&
+        _searchActive &&
+        index < crossAxisCount) {
+      return KeyEventResult.handled;
+    }
     return KeyEventResult.ignored;
   }
 
@@ -1557,6 +1631,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       onKeyEvent: (node, event) =>
           _handleGridKey(node, event, crossAxisCount, items.length),
       child: GridView.builder(
+        controller: _gridScroll,
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
@@ -1584,6 +1659,8 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 if (focused) {
                   _focusedCardIndex = i;
                   _revealCard(cardContext);
+                } else if (_focusedCardIndex == i) {
+                  _focusedCardIndex = null;
                 }
               },
             ),
@@ -1615,6 +1692,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       onKeyEvent: (node, event) =>
           _handleGridKey(node, event, crossAxisCount, groups.length),
       child: GridView.builder(
+        controller: _gridScroll,
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
@@ -1647,6 +1725,8 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
                 if (focused) {
                   _focusedCardIndex = i;
                   _revealCard(cardContext);
+                } else if (_focusedCardIndex == i) {
+                  _focusedCardIndex = null;
                 }
               },
             ),

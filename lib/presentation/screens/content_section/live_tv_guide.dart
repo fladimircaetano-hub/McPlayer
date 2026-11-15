@@ -179,17 +179,28 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       _cancelSearch();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowDown ||
-        key == LogicalKeyboardKey.arrowUp) {
+    if (key == LogicalKeyboardKey.arrowDown) {
+      // Do campo de busca o cursor desce para o primeiro resultado: a
+      // travessia geométrica daqui caía no botão Voltar da barra de cima.
+      if (_channels().isEmpty) return KeyEventResult.handled;
+      _searchNode.unfocus();
+      _hideKeyboard();
+      if (_isTv) {
+        _focusFirstChannel();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          FocusScope.of(context).focusInDirection(TraversalDirection.down);
+        });
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
       _searchNode.unfocus();
       _hideKeyboard();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        FocusScope.of(context).focusInDirection(
-          key == LogicalKeyboardKey.arrowDown
-              ? TraversalDirection.down
-              : TraversalDirection.up,
-        );
+        FocusScope.of(context).focusInDirection(TraversalDirection.up);
       });
       return KeyEventResult.handled;
     }
@@ -305,13 +316,6 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     () => FocusNode(debugLabel: 'live-category-$name'),
   );
 
-  /// Pede o foco só quando o widget já está montado: um item fora da tela
-  /// (ListView) não pode receber foco.
-  void _focusIfMounted(FocusNode? node) {
-    final ctx = node?.context;
-    if (node != null && ctx != null && ctx.mounted) node.requestFocus();
-  }
-
   /// Categoria escolhida → primeiro canal da lista. A lista volta ao topo
   /// antes do foco: um item fora da tela (ListView) não pode receber foco.
   void _focusFirstChannel() {
@@ -342,6 +346,24 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     if (node == null || ctx == null || !ctx.mounted) return false;
     node.requestFocus();
     return true;
+  }
+
+  /// Com busca ativa, seta para baixo fora da lista leva ao primeiro
+  /// resultado. Sem isso, o foco solto depois do teclado fazia o cursor
+  /// pular para um botão da barra de cima.
+  KeyEventResult _handleSearchEscapeKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (!_isTv || !_searchEngaged) return KeyEventResult.ignored;
+    if (event.logicalKey != LogicalKeyboardKey.arrowDown) {
+      return KeyEventResult.ignored;
+    }
+    // Foco dentro da lista: a própria lista decide (rola ou segura).
+    if (_focusedChannelIndex != null) return KeyEventResult.ignored;
+    if (_channels().isEmpty) return KeyEventResult.ignored;
+    _searchNode.unfocus();
+    _hideKeyboard();
+    _focusFirstChannel();
+    return KeyEventResult.handled;
   }
 
   /// Segura o cursor nas pontas da lista de canais: sem isso o D-pad
@@ -696,6 +718,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     return buildWithBackGuard(
       child: FocusScope(
         autofocus: true,
+        // Busca ativa: seta para baixo fora da lista leva ao primeiro
+        // resultado. Depois de fechar o teclado o campo perde o foco e a
+        // seta acabava caindo em um botão da barra de cima.
+        onKeyEvent: _handleSearchEscapeKey,
         child: Scaffold(
           body: SafeArea(child: _isTv ? _buildTvGuide() : _buildMobileGuide()),
         ),
@@ -1115,6 +1141,8 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                           if (focused) {
                             _focusedChannelIndex = i;
                             _focusChannel(i);
+                          } else if (_focusedChannelIndex == i) {
+                            _focusedChannelIndex = null;
                           }
                         },
                         onTap: () => _selectChannel(i),

@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mcplayer/core/network/api_client.dart';
+import 'package:mcplayer/core/storage/storage_service.dart';
 import 'package:mcplayer/data/datasources/xtream_api.dart';
 import 'package:mcplayer/data/models/xtream_account.dart';
 
@@ -224,6 +226,72 @@ void main() {
       expect(_isFatalError('Http Error 404'), isTrue);
       expect(_isTransientError('TIMEOUT'), isTrue);
       expect(_isTransientError('timeout'), isTrue);
+    });
+  });
+
+  group('Player Audio & Subtitle Tests', () {
+    test('Persistência e recuperação de preferências de áudio e legenda', () async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final storage = StorageService(prefs);
+
+      // Default font size é 22.0
+      expect(storage.getSubtitleFontSize(), equals(22.0));
+      expect(storage.getPreferredAudioLanguage(), isNull);
+      expect(storage.getPreferredSubtitleLanguage(), isNull);
+
+      // Salva preferência de idioma de áudio
+      await storage.setPreferredAudioLanguage('por');
+      expect(storage.getPreferredAudioLanguage(), equals('por'));
+
+      // Salva preferência de legenda ('off' / idioma)
+      await storage.setPreferredSubtitleLanguage('off');
+      expect(storage.getPreferredSubtitleLanguage(), equals('off'));
+
+      await storage.setPreferredSubtitleLanguage('eng');
+      expect(storage.getPreferredSubtitleLanguage(), equals('eng'));
+
+      // Salva e recupera tamanho de fonte da legenda
+      await storage.setSubtitleFontSize(26.0);
+      expect(storage.getSubtitleFontSize(), equals(26.0));
+    });
+
+    test('Lógica de exibição/ocultação do botão de áudio', () {
+      // Regra 1: Ocultar o menu/botão de áudio caso o stream possua apenas uma única faixa (ou 0).
+      bool shouldShowAudioButton(int audioTracksCount) => audioTracksCount > 1;
+
+      expect(shouldShowAudioButton(0), isFalse);
+      expect(shouldShowAudioButton(1), isFalse);
+      expect(shouldShowAudioButton(2), isTrue);
+      expect(shouldShowAudioButton(3), isTrue);
+    });
+
+    test('Lógica de exibição do botão de legenda', () {
+      // Regra 2: Exibir menu de legenda quando houver faixas disponíveis
+      bool shouldShowSubtitleButton(int subtitleTracksCount) => subtitleTracksCount > 0;
+
+      expect(shouldShowSubtitleButton(0), isFalse);
+      expect(shouldShowSubtitleButton(1), isTrue);
+      expect(shouldShowSubtitleButton(3), isTrue);
+    });
+
+    test('Ajuste dinâmico de tamanho de legenda com clamping', () {
+      double clampSize(double current, double delta) {
+        return (current + delta).clamp(14.0, 38.0);
+      }
+
+      double size = 22.0;
+      size = clampSize(size, 2.0); // (+)
+      expect(size, equals(24.0));
+
+      size = clampSize(size, -2.0); // (-)
+      expect(size, equals(22.0));
+
+      // Limite mínimo 14
+      expect(clampSize(14.0, -2.0), equals(14.0));
+
+      // Limite máximo 38
+      expect(clampSize(38.0, 2.0), equals(38.0));
     });
   });
 }

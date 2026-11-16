@@ -253,7 +253,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
 
   StorageService? get _storage {
     try {
-      return ServiceLocator.instance.storage;
+      return ServiceLocator().storage;
     } catch (_) {
       return null;
     }

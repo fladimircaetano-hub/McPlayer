@@ -81,6 +81,14 @@
       background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
       color: #c9d1d9; font-size: .74rem; word-break: break-all;
     }
+    .qr { display: flex; gap: 18px; align-items: center; }
+    .qr img { flex: none; width: 180px; height: 180px; padding: 8px; background: #fff; border-radius: 12px; }
+    .qr h2 { margin-bottom: 8px; }
+    .qr .note { margin-top: 0; }
+    .qr a { color: var(--blue-2); }
+    @media (max-width: 460px) {
+      .qr { flex-direction: column; text-align: center; }
+    }
     .foot { margin-top: 26px; color: #6e7781; font-size: .8rem; }
     .foot a { color: #6e7781; }
     .hint {
@@ -108,6 +116,15 @@
     Baixar para ARM 32 bits
     <small>Fire TV Stick e aparelhos antigos &middot; 29,7 MB</small>
   </a>
+
+  <section class="qr">
+    <img src="qr.png" alt="QR Code para abrir a página de instalação" width="180" height="180" loading="lazy">
+    <div>
+      <h2>Abrir no celular</h2>
+      <p class="note">Aponte a câmera do celular para o QR Code e toque no aviso que aparece.</p>
+      <p class="note"><a href="qr-card.png">Baixar o cartão do QR Code</a> para enviar no WhatsApp.</p>
+    </div>
+  </section>
 
   <section>
     <h2>Como instalar</h2>

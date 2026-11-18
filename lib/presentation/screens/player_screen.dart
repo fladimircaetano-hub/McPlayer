@@ -246,6 +246,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
   final FocusNode _compatNode = FocusNode();
   final FocusNode _audioNode = FocusNode();
   final FocusNode _subtitleNode = FocusNode();
+  final FocusNode _settingsNode = FocusNode();
 
   double _subtitleFontSize = 22.0;
   bool _appliedInitialAudioPreference = false;
@@ -1857,7 +1858,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                     child: ListView.separated(
                       shrinkWrap: true,
                       itemCount: tracks.audio.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final track = tracks.audio[index];
                         final isSelected = currentId == track.id;
@@ -2266,6 +2267,391 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     if (mounted) _resetControlsTimeout();
   }
 
+  Widget _buildSettingsButton() {
+    return TvFocusable(
+      focusNode: _settingsNode,
+      borderRadius: BorderRadius.circular(8),
+      onPressed: _showPlayerSettingsDialog,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 8,
+          vertical: 5,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.cardBorder),
+        ),
+        child: const Icon(
+          Icons.settings_outlined,
+          color: Colors.white,
+          size: 16,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showPlayerSettingsDialog() async {
+    _hideTimer?.cancel();
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final hasMultipleAudio =
+                _tracks != null && _tracks!.audio.length > 1;
+            final hasSubtitles =
+                _tracks != null && _tracks!.subtitle.isNotEmpty;
+
+            return Dialog(
+              backgroundColor: AppColors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: AppColors.cardBorder),
+              ),
+              child: FocusScope(
+                autofocus: true,
+                child: Container(
+                  width: 380,
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.tune_rounded,
+                            color: AppColors.primary,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'Opções do Player',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.close,
+                              color: Colors.white70,
+                              size: 20,
+                            ),
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 1. Áudio
+                      TvFocusable(
+                        autofocus: true,
+                        borderRadius: BorderRadius.circular(10),
+                        enabled: hasMultipleAudio,
+                        onPressed: hasMultipleAudio
+                            ? () {
+                                Navigator.of(dialogContext).pop();
+                                _showAudioTracksDialog();
+                              }
+                            : null,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 11,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.cardBorder),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.audiotrack,
+                                color: hasMultipleAudio
+                                    ? AppColors.primary
+                                    : Colors.white38,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Áudio',
+                                  style: TextStyle(
+                                    color: hasMultipleAudio
+                                        ? Colors.white
+                                        : Colors.white38,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                _activeAudioLabel,
+                                style: TextStyle(
+                                  color: hasMultipleAudio
+                                      ? AppColors.textSecondary
+                                      : Colors.white24,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Icon(
+                                Icons.chevron_right,
+                                color: hasMultipleAudio
+                                    ? Colors.white54
+                                    : Colors.white24,
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // 2. Legendas / CC
+                      TvFocusable(
+                        borderRadius: BorderRadius.circular(10),
+                        enabled: hasSubtitles,
+                        onPressed: hasSubtitles
+                            ? () {
+                                Navigator.of(dialogContext).pop();
+                                _showSubtitleTracksDialog();
+                              }
+                            : null,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 11,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.cardBorder),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.closed_caption,
+                                color: hasSubtitles
+                                    ? (_isSubtitleActive
+                                        ? AppColors.primary
+                                        : Colors.white70)
+                                    : Colors.white38,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Legendas (CC)',
+                                  style: TextStyle(
+                                    color: hasSubtitles
+                                        ? Colors.white
+                                        : Colors.white38,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                _activeSubtitleLabel,
+                                style: TextStyle(
+                                  color: hasSubtitles
+                                      ? AppColors.textSecondary
+                                      : Colors.white24,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Icon(
+                                Icons.chevron_right,
+                                color: hasSubtitles
+                                    ? Colors.white54
+                                    : Colors.white24,
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // 3. Proporção
+                      TvFocusable(
+                        borderRadius: BorderRadius.circular(10),
+                        onPressed: () {
+                          _cycleAspectRatio();
+                          setDialogState(() {});
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 11,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.cardBorder),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.aspect_ratio,
+                                color: AppColors.primary,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Text(
+                                  'Proporção',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white12,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  _currentAspect.label,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // 4. Reconectar
+                      TvFocusable(
+                        borderRadius: BorderRadius.circular(10),
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                          _reconnect();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 11,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.cardBorder),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(
+                                Icons.refresh,
+                                color: AppColors.primary,
+                                size: 18,
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Reconectar Stream',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // 5. Decodificador (Android)
+                      if (_isAndroid) ...[
+                        const SizedBox(height: 8),
+                        TvFocusable(
+                          enabled: !_switchingDecoder,
+                          borderRadius: BorderRadius.circular(10),
+                          onPressed: () async {
+                            await _cycleDecodeMode();
+                            if (mounted) setDialogState(() {});
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 11,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.accentGreen
+                                  .withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: AppColors.accentGreen
+                                    .withValues(alpha: 0.55),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.memory_rounded,
+                                  color: AppColors.accentGreen,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Text(
+                                    'Decodificador',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  _switchingDecoder
+                                      ? 'Trocando…'
+                                      : _decodeModeLabel,
+                                  style: const TextStyle(
+                                    color: AppColors.accentGreen,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (mounted) _resetControlsTimeout();
+  }
+
   @override
   void dispose() {
     _watchdogActive = false;
@@ -2287,6 +2673,7 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
     _compatNode.dispose();
     _audioNode.dispose();
     _subtitleNode.dispose();
+    _settingsNode.dispose();
     _errorBackNode.dispose();
     _errorRetryNode.dispose();
     _player?.dispose();
@@ -2360,51 +2747,91 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                   _buildVideoSurface(),
                   if (_isAdjustingBrightness) _buildBrightnessHud(),
                   if (_isAdjustingVolume) _buildVolumeHud(),
-                  if (_isBuffering && !_hasError)
-                    Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const CircularProgressIndicator(
-                            color: AppColors.primary,
-                            strokeWidth: 3,
-                          ),
-                          if (_retryCount > 0) ...[
-                            const SizedBox(height: 12),
-                            Text(
-                              'Reconectando (tentativa ${_retryCount + 1}/${_maxRetries + 1})…',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 16),
-                          TvFocusable(
-                            borderRadius: BorderRadius.circular(10),
-                            onPressed: () => Navigator.of(context).pop(),
+                  if (_isBuffering && !_hasError) ...[
+                    if (_retryCount == 0)
+                      const Center(
+                        child: CircularProgressIndicator(
+                          color: AppColors.primary,
+                          strokeWidth: 3,
+                        ),
+                      )
+                    else
+                      SafeArea(
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 16),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 18,
-                                vertical: 10,
+                                horizontal: 16,
+                                vertical: 8,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: AppColors.cardBorder),
-                              ),
-                              child: const Text(
-                                'Cancelar',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
+                                color: Colors.black87,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color:
+                                      AppColors.primary.withValues(alpha: 0.5),
                                 ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black45,
+                                    blurRadius: 8,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    'Reconectando (tentativa ${_retryCount + 1}/${_maxRetries + 1})…',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  TvFocusable(
+                                    borderRadius: BorderRadius.circular(12),
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white24,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: const Text(
+                                        'Cancelar',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                  ],
                   if (_hasError) _buildErrorOverlay(),
                   if (_showControls && !_hasError) _buildControlsOverlay(),
                 ],
@@ -2655,221 +3082,15 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                         ],
                       ),
                     ),
-                    // 1. Gerenciamento de Faixas de Áudio:
-                    // Ocultar o menu/botão de áudio caso o stream possua apenas uma única faixa.
-                    if (_tracks != null && _tracks!.audio.length > 1) ...[
-                      TvFocusable(
-                        focusNode: _audioNode,
-                        borderRadius: BorderRadius.circular(8),
-                        onPressed: _showAudioTracksDialog,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppColors.cardBorder),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.audiotrack,
-                                color: AppColors.primary,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _activeAudioLabel,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-
-                    // 2. Gerenciamento de Legendas:
-                    // Listar legendas disponíveis no stream, alternar idioma ou "Desativar" (-1)
-                    if (_tracks != null && _tracks!.subtitle.isNotEmpty) ...[
-                      TvFocusable(
-                        focusNode: _subtitleNode,
-                        borderRadius: BorderRadius.circular(8),
-                        onPressed: _showSubtitleTracksDialog,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _isSubtitleActive
-                                ? AppColors.primary.withValues(alpha: 0.18)
-                                : Colors.black54,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: _isSubtitleActive
-                                  ? AppColors.primary
-                                  : AppColors.cardBorder,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.closed_caption,
-                                color: _isSubtitleActive
-                                    ? AppColors.primary
-                                    : Colors.white70,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _activeSubtitleLabel,
-                                style: TextStyle(
-                                  color: _isSubtitleActive
-                                      ? Colors.white
-                                      : Colors.white70,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    const SizedBox(width: 8),
-                    TvFocusable(
-                      focusNode: _aspectNode,
-                      borderRadius: BorderRadius.circular(8),
-                      onPressed: _cycleAspectRatio,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.cardBorder),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.aspect_ratio,
-                              color: AppColors.primary,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              _currentAspect.label,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    TvFocusable(
-                      focusNode: _reconnectNode,
-                      borderRadius: BorderRadius.circular(8),
-                      onPressed: _reconnect,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.cardBorder),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.refresh,
-                              color: AppColors.primary,
-                              size: 16,
-                            ),
-                            SizedBox(width: 4),
-                            Text(
-                              'Reconectar',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (_isAndroid) ...[
-                      const SizedBox(width: 8),
-                      TvFocusable(
-                        focusNode: _compatNode,
-                        enabled: !_switchingDecoder,
-                        borderRadius: BorderRadius.circular(8),
-                        onPressed: _cycleDecodeMode,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppColors.accentGreen.withValues(
-                              alpha: 0.14,
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: AppColors.accentGreen.withValues(
-                                alpha: 0.55,
-                              ),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.memory_rounded,
-                                color: AppColors.accentGreen,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                _switchingDecoder
-                                    ? 'Trocando…'
-                                    : 'Dec: $_decodeModeLabel',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
               Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
+                child: (_isBuffering && _retryCount > 0)
+                    ? const SizedBox.shrink()
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
                     if (_hasPlaylist) ...[
                       _circleControl(
                         node: _prevNode,
@@ -2951,12 +3172,19 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                               ],
                             ),
                           ),
-                          Text(
-                            'mpv • HLS/TS',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.6),
-                              fontSize: 12,
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'mpv • HLS/TS',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.6),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              _buildSettingsButton(),
+                            ],
                           ),
                         ],
                       )
@@ -3012,12 +3240,19 @@ class _PlayerScreenState extends State<PlayerScreen> with BackNavigationMixin {
                                     fontSize: 12,
                                   ),
                                 ),
-                                Text(
-                                  _formatDuration(_duration),
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      _formatDuration(_duration),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    _buildSettingsButton(),
+                                  ],
                                 ),
                               ],
                             ),

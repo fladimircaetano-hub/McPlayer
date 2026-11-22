@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/adult_content.dart';
 import '../../../core/utils/back_navigation_mixin.dart';
+import '../../../core/utils/dpad_utils.dart';
 import '../../../core/utils/media_quality.dart';
 import '../../../data/models/iptv_category.dart';
 import '../../../data/models/stream_item.dart';
@@ -59,6 +60,30 @@ List<_CatNode> _buildCatTree(List<IptvCategory> cats) =>
 String _categoryParent(String raw) => categoryParent(raw);
 
 String _categorySubLabel(String raw) => categorySubLabel(raw);
+
+class _MobileCategoryEntry {
+  final String id;
+  final String name;
+  final int count;
+  final bool isSelected;
+  final bool isSub;
+  final bool hasSubs;
+  final bool isExpanded;
+  final Color? accent;
+  final VoidCallback onTap;
+
+  const _MobileCategoryEntry({
+    required this.id,
+    required this.name,
+    required this.count,
+    required this.isSelected,
+    this.isSub = false,
+    this.hasSubs = false,
+    this.isExpanded = false,
+    this.accent,
+    required this.onTap,
+  });
+}
 
 /// Grade de pôsteres para Filmes e Séries.
 /// - Layout responsivo (2/3/4 colunas conforme largura)
@@ -112,7 +137,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
 
   StreamType get _type => widget.type;
   bool get _isSeries => _type == StreamType.series;
-  bool get _isTv => MediaQuery.of(context).size.width >= 900;
+  bool get _isTv => DpadUtils.isLargeScreen(context);
 
   /// Na TV, a aba Filmes é a única com o agrupamento "Filmes" criado a
   /// partir de "Filmes | Ação". Esse pai é redundante com o título da
@@ -555,7 +580,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
       final prev = _selectedParent;
       lockAdultContent();
       setState(() {
-        _selectedParent = '';
+        _selectedParent = _isTv ? '' : 'TODOS';
         _selectedSub = null;
         _focusedCardIndex = null;
       });
@@ -641,7 +666,6 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               children: [
                 _buildTopBar(),
                 if (!_isTv && _isSearching) _buildSearchRow(),
-                if (!_isTv) _buildMobileBreadcrumb(),
                 Expanded(child: _isTv ? _buildTvBody() : _buildMobileBody()),
               ],
             ),
@@ -970,264 +994,154 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     );
   }
 
-  /// Celular: navegação por níveis (Categorias → Subcategorias → Grade).
-  Widget _buildMobileBody() {
-    // Busca global: mostra resultados de todas as categorias na hora.
-    if (_searchActive) return _buildGrid();
-
-    // Nível 1: grade de cards de categorias
-    if (_noCategorySelected) {
-      return _buildMobileCategoriesView();
+  /// Largura proporcional da coluna lateral de categorias no celular.
+  double _mobileCategoryWidth(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final isPortrait = size.width < size.height;
+    if (isPortrait) {
+      // Retrato: proporcional à largura (28%–32%), limitado entre 105 e 132
+      return (size.width * 0.31).clamp(105.0, 132.0);
+    } else {
+      // Paisagem (deitado): estreito (18%–22%) para não esmagar os pôsteres
+      return (size.width * 0.20).clamp(140.0, 180.0);
     }
-
-    // Nível 2: grade de cards de subcategorias (se existirem)
-    final node = _selectedNode;
-    if (node != null &&
-        node.hasSubs &&
-        _selectedSub == null &&
-        !_showOnlyFavorites) {
-      return _buildMobileSubcategoriesView(node);
-    }
-
-    // Nível 3: grade de conteúdo filtrado
-    return _buildGrid();
   }
 
-  /// Painel translúcido de contexto: mostra em que nível o usuário está
-  /// (Categorias › Pai › Subcategoria) e permite voltar um nível.
-  Widget _buildMobileBreadcrumb() {
-    if (!_showOnlyFavorites && _selectedParent.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final parts = <String>['Categorias'];
-    if (_showOnlyFavorites) {
-      parts.add('Favoritos');
-    } else {
-      parts.add(_selectedParent == 'TODOS' ? 'Todos' : _selectedParent);
-      final sub = _selectedSub;
-      if (sub != null) {
-        parts.add(sub == _kAllSubs ? 'Todas' : _categorySubLabel(sub));
-      }
-    }
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-      ),
-      child: Row(
-        children: [
-          TvFocusable(
-            borderRadius: BorderRadius.circular(6),
-            onPressed: _goBackLevel,
-            child: const Padding(
-              padding: EdgeInsets.all(4),
-              child: Icon(
-                Icons.arrow_back_ios_new_rounded,
-                color: Colors.white70,
-                size: 14,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              parts.join('  ›  '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
+  /// Celular: Layout de 2 colunas (Categorias em texto à esquerda + Pôsteres à direita).
+  Widget _buildMobileBody() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: _mobileCategoryWidth(context),
+          child: _buildMobileCategorySidebar(),
+        ),
+        Container(
+          width: 1,
+          color: AppColors.cardBorder.withValues(alpha: 0.5),
+        ),
+        Expanded(
+          child: _buildMobileGridPanel(),
+        ),
+      ],
     );
   }
 
-  static const _categoryGradients = [
-    [Color(0xFF1A237E), Color(0xFF283593)],
-    [Color(0xFF004D40), Color(0xFF00695C)],
-    [Color(0xFF880E4F), Color(0xFFC2185B)],
-    [Color(0xFF1B5E20), Color(0xFF2E7D32)],
-    [Color(0xFF4A148C), Color(0xFF6A1B9A)],
-    [Color(0xFFE65100), Color(0xFFEF6C00)],
-    [Color(0xFF0D47A1), Color(0xFF1565C0)],
-    [Color(0xFF3E2723), Color(0xFF5D4037)],
-    [Color(0xFF006064), Color(0xFF00838F)],
-    [Color(0xFFBF360C), Color(0xFFD84315)],
-  ];
-
-  Widget _buildMobileCategoriesView() {
+  /// Coluna esquerda (Mobile): Categorias apenas em texto, compactas, com rolagem suave.
+  Widget _buildMobileCategorySidebar() {
     final tree = _catTree;
     final total = _isSeries
         ? widget.controller.totalSeriesCount
         : widget.controller.totalMoviesCount;
-    final totalItems = tree.length + 2;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.folder_rounded,
-                color: AppColors.primary,
-                size: 22,
-              ),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Categorias',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-              Text(
-                '${tree.length} cat. · $total itens',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 4),
-        Expanded(
-          child: GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 1.6,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-            ),
-            itemCount: totalItems,
-            itemBuilder: (context, i) {
-              if (i == 0) {
-                return _mobileCategoryCard(
-                  name: 'TODOS',
-                  count: total,
-                  icon: Icons.apps_rounded,
-                  colors: [
-                    AppColors.primary.withValues(alpha: 0.35),
-                    AppColors.primary.withValues(alpha: 0.12),
-                  ],
-                  onTap: () => _selectParent('TODOS'),
-                );
-              }
-              if (i == 1) {
-                return _mobileCategoryCard(
-                  name: 'FAVORITOS',
-                  count: widget.controller.totalFavoritesCount,
-                  icon: Icons.star_rounded,
-                  colors: [
-                    AppColors.accentOrange.withValues(alpha: 0.35),
-                    AppColors.accentOrange.withValues(alpha: 0.12),
-                  ],
-                  onTap: _toggleFavorites,
-                );
-              }
-              final node = tree[i - 2];
-              final gi = (i - 2) % _categoryGradients.length;
-              return _mobileCategoryCard(
-                name: node.name,
-                count: node.count,
-                icon: Icons.folder_rounded,
-                colors: [
-                  _categoryGradients[gi][0].withValues(alpha: 0.55),
-                  _categoryGradients[gi][1].withValues(alpha: 0.25),
-                ],
-                onTap: () => _selectParent(node.name),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
 
-  Widget _buildMobileSubcategoriesView(_CatNode node) {
+    final items = <_MobileCategoryEntry>[
+      _MobileCategoryEntry(
+        id: 'TODOS',
+        name: 'TODOS',
+        count: total,
+        isSelected: !_showOnlyFavorites &&
+            (_selectedParent == 'TODOS' || _selectedParent.isEmpty),
+        onTap: () => _selectParent('TODOS'),
+      ),
+      _MobileCategoryEntry(
+        id: 'FAVORITOS',
+        name: 'FAVORITOS',
+        count: widget.controller.totalFavoritesCount,
+        isSelected: _showOnlyFavorites,
+        accent: AppColors.accentOrange,
+        onTap: () {
+          _toggleFavorites();
+        },
+      ),
+    ];
+
+    for (final node in tree) {
+      final isParentSelected =
+          !_showOnlyFavorites && _selectedParent == node.name;
+      items.add(
+        _MobileCategoryEntry(
+          id: node.name,
+          name: node.name,
+          count: node.count,
+          isSelected: isParentSelected &&
+              (_selectedSub == null || _selectedSub == _kAllSubs),
+          hasSubs: node.hasSubs,
+          isExpanded: isParentSelected && node.hasSubs,
+          onTap: () {
+            if (node.hasSubs) {
+              _selectParent(node.name);
+              _selectSub(_kAllSubs);
+            } else {
+              _selectParent(node.name);
+            }
+          },
+        ),
+      );
+
+      // Subcategorias inline para o pai selecionado
+      if (isParentSelected && node.hasSubs) {
+        items.add(
+          _MobileCategoryEntry(
+            id: '${node.name}__all',
+            name: 'TODAS',
+            count: node.count,
+            isSub: true,
+            isSelected: _selectedSub == null || _selectedSub == _kAllSubs,
+            onTap: () => _selectSub(_kAllSubs),
+          ),
+        );
+        for (final leaf in node.leaves) {
+          items.add(
+            _MobileCategoryEntry(
+              id: leaf.name,
+              name: _categorySubLabel(leaf.name),
+              count: leaf.count,
+              isSub: true,
+              isSelected: _selectedSub == leaf.name,
+              onTap: () => _selectSub(leaf.name),
+            ),
+          );
+        }
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
           child: Row(
             children: [
               const Icon(
-                Icons.subdirectory_arrow_right_rounded,
-                color: AppColors.accentGreen,
-                size: 22,
+                Icons.category_rounded,
+                size: 13,
+                color: AppColors.primary,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 5),
               Expanded(
                 child: Text(
-                  node.name,
+                  'Categorias',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontWeight: FontWeight.w800,
-                    fontSize: 18,
+                    fontSize: 12,
+                    letterSpacing: 0.4,
                   ),
-                ),
-              ),
-              Text(
-                '${node.leaves.length} subcategorias',
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 4),
+        const Divider(height: 1, thickness: 1, color: AppColors.cardBorder),
         Expanded(
-          child: GridView.builder(
-            padding: const EdgeInsets.all(12),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 1.6,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-            ),
-            itemCount: node.leaves.length + 1,
+          child: ListView.builder(
+            itemCount: items.length,
+            padding: const EdgeInsets.symmetric(vertical: 4),
             itemBuilder: (context, i) {
-              if (i == 0) {
-                return _mobileCategoryCard(
-                  name: 'TODAS',
-                  count: node.count,
-                  icon: Icons.select_all_rounded,
-                  colors: [
-                    AppColors.accentGreen.withValues(alpha: 0.35),
-                    AppColors.accentGreen.withValues(alpha: 0.12),
-                  ],
-                  onTap: () => _selectSub(_kAllSubs),
-                );
-              }
-              final leaf = node.leaves[i - 1];
-              final gi = (i - 1) % _categoryGradients.length;
-              return _mobileCategoryCard(
-                name: _categorySubLabel(leaf.name),
-                count: leaf.count,
-                icon: Icons.label_rounded,
-                colors: [
-                  _categoryGradients[gi][0].withValues(alpha: 0.55),
-                  _categoryGradients[gi][1].withValues(alpha: 0.25),
-                ],
-                onTap: () => _selectSub(leaf.name),
-              );
+              final entry = items[i];
+              return _buildMobileCategoryItem(entry);
             },
           ),
         ),
@@ -1235,59 +1149,92 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
     );
   }
 
-  Widget _mobileCategoryCard({
-    required String name,
-    required int count,
-    required IconData icon,
-    required List<Color> colors,
-    required VoidCallback onTap,
-  }) {
-    return TvFocusable(
-      borderRadius: BorderRadius.circular(14),
-      onPressed: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: colors,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+  Widget _buildMobileCategoryItem(_MobileCategoryEntry entry) {
+    final activeColor = entry.accent ?? AppColors.primary;
+    final selected = entry.isSelected;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: entry.onTap,
+        child: Container(
+          margin: EdgeInsets.only(
+            left: entry.isSub ? 10 : 4,
+            right: 4,
+            top: 2,
+            bottom: 2,
           ),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.cardBorder),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Icon(icon, color: Colors.white.withValues(alpha: 0.85), size: 22),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  name,
+          padding: EdgeInsets.symmetric(
+            horizontal: entry.isSub ? 6 : 8,
+            vertical: entry.isSub ? 6 : 7,
+          ),
+          decoration: BoxDecoration(
+            color: selected
+                ? activeColor.withValues(alpha: 0.18)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: selected
+                ? Border.all(
+                    color: activeColor.withValues(alpha: 0.55),
+                    width: 1,
+                  )
+                : null,
+          ),
+          child: Row(
+            children: [
+              if (entry.isSub) ...[
+                Icon(
+                  Icons.subdirectory_arrow_right_rounded,
+                  size: 11,
+                  color: selected ? activeColor : AppColors.textMuted,
+                ),
+                const SizedBox(width: 4),
+              ],
+              Expanded(
+                child: Text(
+                  entry.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
+                  style: TextStyle(
+                    color: selected
+                        ? (entry.accent ?? Colors.white)
+                        : (entry.isSub ? Colors.white60 : Colors.white70),
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: entry.isSub ? 11 : 12,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '$count itens',
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.65),
-                    fontSize: 11,
-                  ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '${entry.count}',
+                style: TextStyle(
+                  color: selected ? activeColor : AppColors.textMuted,
+                  fontSize: 10,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              if (entry.hasSubs) ...[
+                const SizedBox(width: 2),
+                Icon(
+                  entry.isExpanded
+                      ? Icons.keyboard_arrow_down_rounded
+                      : Icons.keyboard_arrow_right_rounded,
+                  size: 13,
+                  color: selected ? activeColor : AppColors.textMuted,
                 ),
               ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  /// Coluna direita (Mobile): Pôsteres da categoria selecionada.
+  Widget _buildMobileGridPanel() {
+    return Container(
+      color: Colors.black.withValues(alpha: 0.20),
+      child: _buildGrid(),
     );
   }
 
@@ -1314,10 +1261,12 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
           Expanded(
             child: Text(
               _title,
-              style: const TextStyle(
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 24,
+                fontSize: _isTv ? 24 : 18,
               ),
             ),
           ),
@@ -1352,13 +1301,29 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
               onTap: () => Navigator.of(context).pop(),
             ),
           ] else ...[
-            TvFocusable(
-              borderRadius: BorderRadius.circular(8),
-              onPressed: () => setState(() => _isSearching = true),
-              child: const Padding(
-                padding: EdgeInsets.all(8),
-                child: Icon(Icons.search, color: Colors.white, size: 24),
+            IconButton(
+              tooltip: 'Organizar$_sortSuffix',
+              icon: Icon(
+                _sortMode == 0 ? Icons.sort_rounded : Icons.filter_list_rounded,
+                color: _sortMode != 0 ? AppColors.primary : Colors.white70,
+                size: 22,
               ),
+              onPressed: _toggleSort,
+            ),
+            IconButton(
+              tooltip: _isSearching ? 'Fechar busca' : 'Pesquisar',
+              icon: Icon(
+                _isSearching ? Icons.close_rounded : Icons.search_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+              onPressed: () {
+                if (_isSearching) {
+                  _cancelSearch();
+                } else {
+                  setState(() => _isSearching = true);
+                }
+              },
             ),
           ],
         ],
@@ -1610,7 +1575,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   }
 
   Widget _buildMoviesGrid(List<StreamItem> items) {
-    // Calcula colunas baseado na largura
+    // Calcula colunas baseado na largura e dispositivo
     int crossAxisCount;
     if (_isTv) {
       final width = MediaQuery.of(context).size.width;
@@ -1622,7 +1587,16 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
         crossAxisCount = 4;
       }
     } else {
-      crossAxisCount = 3;
+      final isPortrait =
+          MediaQuery.of(context).orientation == Orientation.portrait;
+      if (!isPortrait) {
+        // Paisagem mobile: 4 colunas compactas
+        crossAxisCount = 4;
+      } else {
+        // Retrato mobile: 2 colunas compactas (3 se tablet/tela larga)
+        final width = MediaQuery.of(context).size.width;
+        crossAxisCount = width >= 500 ? 3 : 2;
+      }
     }
 
     return Focus(
@@ -1632,29 +1606,26 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
           _handleGridKey(node, event, crossAxisCount, items.length),
       child: GridView.builder(
         controller: _gridScroll,
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        padding: _isTv
+            ? const EdgeInsets.fromLTRB(20, 16, 20, 24)
+            : const EdgeInsets.fromLTRB(8, 8, 8, 16),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
-          childAspectRatio: 0.68, // pôster 2:3
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
+          childAspectRatio: _isTv ? 0.68 : 0.66,
+          crossAxisSpacing: _isTv ? 12 : 8,
+          mainAxisSpacing: _isTv ? 12 : 8,
         ),
         itemCount: items.length,
         itemBuilder: (context, i) {
           final item = items[i];
-          // StreamCard já é um TvFocusable: um único clique pressiona OK,
-          // abre o player e desenha o foco. O wrapper externo duplicava os
-          // eventos e exigia um segundo toque em alguns controles.
           return Builder(
             builder: (cardContext) => StreamCard(
               item: item,
+              compact: !_isTv,
               focusNode: i == 0 ? _firstCardNode : null,
               onTap: () => _openPlayer(items, i),
               onToggleFavorite: () => widget.controller.toggleFavorite(item),
               isVod: true,
-              // Garante que a capa fique INTEIRA na tela já no primeiro toque:
-              // sem isso o GridView só revela parte do card e o usuário tem de
-              // apertar de novo para ver o resto.
               onFocusChange: (focused) {
                 if (focused) {
                   _focusedCardIndex = i;
@@ -1671,7 +1642,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
   }
 
   Widget _buildSeriesGrid(List<SeriesGroup> groups) {
-    // Calcula colunas baseado na largura
+    // Calcula colunas baseado na largura e dispositivo
     int crossAxisCount;
     if (_isTv) {
       final width = MediaQuery.of(context).size.width;
@@ -1683,7 +1654,16 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
         crossAxisCount = 4;
       }
     } else {
-      crossAxisCount = 3;
+      final isPortrait =
+          MediaQuery.of(context).orientation == Orientation.portrait;
+      if (!isPortrait) {
+        // Paisagem mobile: 4 colunas compactas
+        crossAxisCount = 4;
+      } else {
+        // Retrato mobile: 2 colunas compactas (3 se tablet/tela larga)
+        final width = MediaQuery.of(context).size.width;
+        crossAxisCount = width >= 500 ? 3 : 2;
+      }
     }
 
     return Focus(
@@ -1693,19 +1673,18 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
           _handleGridKey(node, event, crossAxisCount, groups.length),
       child: GridView.builder(
         controller: _gridScroll,
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        padding: _isTv
+            ? const EdgeInsets.fromLTRB(20, 16, 20, 24)
+            : const EdgeInsets.fromLTRB(8, 8, 8, 16),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
-          childAspectRatio: 0.68,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
+          childAspectRatio: _isTv ? 0.68 : 0.66,
+          crossAxisSpacing: _isTv ? 12 : 8,
+          mainAxisSpacing: _isTv ? 12 : 8,
         ),
         itemCount: groups.length,
         itemBuilder: (context, i) {
           final group = groups[i];
-          // O cartão mostra o nome da SÉRIE (group.name), não do episódio
-          // representativo: no M3U o rep é "Nome S01 E01" e sem isso a grade
-          // exibiria "Zatch Bell! EP01" em vez de "Zatch Bell".
           final displayItem = group.rep.copyWith(
             name: group.name,
             logoUrl: group.logoUrl ?? group.rep.logoUrl,
@@ -1716,6 +1695,7 @@ class _VodGridState extends State<VodGrid> with BackNavigationMixin {
           return Builder(
             builder: (cardContext) => StreamCard(
               item: displayItem,
+              compact: !_isTv,
               focusNode: i == 0 ? _firstCardNode : null,
               onTap: () => _onSeriesTap(group),
               onToggleFavorite: () =>

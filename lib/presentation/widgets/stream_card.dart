@@ -10,6 +10,7 @@ class StreamCard extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
   final bool isVod;
+  final bool compact;
 
   /// Nó externo para a grade conseguir mandar o foco para este cartão
   /// (ex.: primeiro item depois de escolher a categoria).
@@ -25,6 +26,7 @@ class StreamCard extends StatefulWidget {
     required this.onTap,
     required this.onToggleFavorite,
     this.isVod = false,
+    this.compact = false,
     this.focusNode,
     this.onFocusChange,
   });
@@ -54,16 +56,17 @@ class _StreamCardState extends State<StreamCard> {
 
   @override
   Widget build(BuildContext context) {
+    final radius = widget.compact ? 10.0 : 14.0;
     return TvFocusable(
       focusNode: widget.focusNode,
       onPressed: _onCardTap,
       onFocusChange: widget.onFocusChange,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(radius),
       child: Container(
         decoration: BoxDecoration(
           // Grade translúcida; categorias (sidebar) seguem opacas.
           color: AppColors.surfaceCard.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(radius),
           border: Border.all(color: AppColors.cardBorder, width: 1),
         ),
         clipBehavior: Clip.antiAlias,
@@ -74,6 +77,7 @@ class _StreamCardState extends State<StreamCard> {
 
   // Layout estilo Poster (Vertical) para Filmes e Séries
   Widget _buildVodLayout(BuildContext context) {
+    final isCompact = widget.compact;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -97,31 +101,38 @@ class _StreamCardState extends State<StreamCard> {
               ),
               // Botão de Favorito no topo
               Positioned(
-                top: 6,
-                right: 6,
+                top: isCompact ? 4 : 6,
+                right: isCompact ? 4 : 6,
                 child: _buildFavoriteButton(),
               ),
               // Rating Badge
               if (item.rating != null && item.rating!.isNotEmpty)
                 Positioned(
-                  bottom: 8,
-                  left: 8,
+                  bottom: isCompact ? 5 : 8,
+                  left: isCompact ? 5 : 8,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isCompact ? 4 : 6,
+                      vertical: isCompact ? 1 : 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.amber.shade900.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(isCompact ? 4 : 6),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
-                        const SizedBox(width: 3),
+                        Icon(
+                          Icons.star_rounded,
+                          color: Colors.amber,
+                          size: isCompact ? 11 : 14,
+                        ),
+                        SizedBox(width: isCompact ? 2 : 3),
                         Text(
                           item.rating!,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: Colors.white,
-                            fontSize: 11,
+                            fontSize: isCompact ? 9.5 : 11,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -133,7 +144,10 @@ class _StreamCardState extends State<StreamCard> {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: EdgeInsets.symmetric(
+            horizontal: isCompact ? 6 : 10,
+            vertical: isCompact ? 5 : 8,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -141,21 +155,21 @@ class _StreamCardState extends State<StreamCard> {
                 item.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.textPrimary,
-                  fontSize: 13,
+                  fontSize: isCompact ? 11 : 13,
                   fontWeight: FontWeight.w600,
                 ),
               ),
               if (item.category.isNotEmpty) ...[
-                const SizedBox(height: 2),
+                SizedBox(height: isCompact ? 1 : 2),
                 Text(
                   displayCategoryName(item.category),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.textMuted,
-                    fontSize: 11,
+                    fontSize: isCompact ? 9.5 : 11,
                   ),
                 ),
               ],
@@ -292,6 +306,7 @@ class _StreamCardState extends State<StreamCard> {
   }
 
   Widget _buildFavoriteButton() {
+    final isCompact = widget.compact;
     return Material(
       color: Colors.black.withValues(alpha: 0.4),
       shape: const CircleBorder(),
@@ -299,11 +314,11 @@ class _StreamCardState extends State<StreamCard> {
         customBorder: const CircleBorder(),
         onTap: _onFavTap,
         child: Padding(
-          padding: const EdgeInsets.all(4),
+          padding: EdgeInsets.all(isCompact ? 3 : 4),
           child: Icon(
             item.isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
             color: item.isFavorite ? AppColors.accentOrange : AppColors.textSecondary,
-            size: 16,
+            size: isCompact ? 14 : 16,
           ),
         ),
       ),

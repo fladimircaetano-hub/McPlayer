@@ -9,6 +9,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/adult_content.dart';
 import '../../../core/utils/back_navigation_mixin.dart';
+import '../../../core/utils/dpad_utils.dart';
 import '../../../data/models/iptv_category.dart';
 import '../../../data/models/stream_item.dart';
 import '../../../data/services/epg_service.dart';
@@ -17,6 +18,11 @@ import '../../widgets/adult_pin_dialog.dart';
 import '../../widgets/tv_focusable.dart';
 import '../player_screen.dart';
 import 'category_tree.dart';
+
+/// Área que tem o foco no layout de TV. O botão Voltar usa esse nível para
+/// decidir se volta o foco (canais -> subcategorias -> categorias) ou sai
+/// da tela.
+enum _TvFocusArea { categories, subcategories, channels, preview }
 
 /// Guia de TV ao vivo (layout 3 colunas estilo TV Box).
 /// - Categorias à esquerda (opacas)
@@ -69,6 +75,20 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   // Prévia só após escolha explícita: 1º clique abre a prévia, 2º o player.
   bool _channelChosen = false;
 
+  // TV: navegação hierárquica (Categorias -> Subcategorias -> Canais) com
+  // coluna de categorias recolhível. _tvParent é o agrupamento aberto
+  // (ex.: "CANAIS"); _tvSubsVisible mostra a coluna de subcategorias;
+  // _tvCategoriesCollapsed deixa só um trilho estreito à esquerda.
+  String? _tvParent;
+  bool _tvSubsVisible = false;
+  bool _tvCategoriesCollapsed = false;
+  final Map<String, FocusNode> _subCategoryNodes = {};
+  final FocusNode _firstSubNode = FocusNode(debugLabel: 'live-first-sub');
+  final FocusNode _expandCategoriesNode = FocusNode(
+    debugLabel: 'live-expand-categories',
+  );
+  _TvFocusArea _tvFocusArea = _TvFocusArea.categories;
+
   // Celular: navegação em níveis Categoria -> Subcategoria -> Canal.
   // _mobileParent é o pai visível (ex.: CANAIS); _mobileSub é a categoria
   // bruta do provedor usada para filtrar os canais.
@@ -92,7 +112,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   List<StreamItem>? _chCache;
   String _chCacheKey = '';
 
-  bool get _isTv => MediaQuery.of(context).size.width >= 900;
+  bool get _isTv => DpadUtils.isLargeScreen(context);
 
   @override
   void initState() {
@@ -123,7 +143,12 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     for (final node in _categoryNodes.values) {
       node.dispose();
     }
+    for (final node in _subCategoryNodes.values) {
+      node.dispose();
+    }
     _firstChannelNode.dispose();
+    _firstSubNode.dispose();
+    _expandCategoriesNode.dispose();
     _channelScroll.dispose();
     try {
       _previewPlayer?.dispose();
@@ -212,7 +237,21 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   List<IptvCategory> get _cats =>
       widget.controller.getCategories(StreamType.live);
 
-  List<CategoryNode> get _mobileTree => buildCategoryTree(_cats);
+  /// Cache da árvore: [buildCategoryTree] é chamada em vários pontos do
+  /// build (categorias, subcategorias e filtro de canais). Reaproveita
+  /// enquanto a lista de categorias do controlador não muda.
+  List<CategoryNode>? _treeCache;
+  List<IptvCategory>? _treeCacheSource;
+
+  List<CategoryNode> get _mobileTree {
+    final cats = _cats;
+    final cached = _treeCache;
+    if (cached != null && identical(cats, _treeCacheSource)) return cached;
+    final tree = buildCategoryTree(cats);
+    _treeCacheSource = cats;
+    _treeCache = tree;
+    return tree;
+  }
 
   CategoryNode? get _mobileNode {
     if (_mobileParent == null) return null;
@@ -234,9 +273,14 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       !_isTv && !_mobileAtCategories && !_mobileAtSubcategories;
 
   List<StreamItem> _channels() {
+    // Na TV, ao abrir um agrupamento com subcategorias e sem subcategoria
+    // escolhida, os canais exibidos são todos os das folhas do grupo.
+    final parentFilter = _isTv && _tvSubsVisible && _selectedCategory == null
+        ? (_tvParent ?? '')
+        : '';
     final key =
         '${_activeCategory ?? ''}|$_showOnlyFavorites|${widget.controller.searchQuery}|$_sortMode|'
-        '${widget.controller.totalLiveCount}';
+        '${widget.controller.totalLiveCount}|$parentFilter';
     final cached = _chCache;
     if (cached != null && _chCacheKey == key) return cached;
     var items = widget.controller.getFilteredItems(
@@ -244,6 +288,11 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       selectedCategory: _activeCategory,
       onlyFavorites: _showOnlyFavorites,
     );
+    if (parentFilter.isNotEmpty) {
+      final leaves =
+          _tvParentNode?.leaves.map((c) => c.name).toSet() ?? const <String>{};
+      items = items.where((item) => leaves.contains(item.category)).toList();
+    }
     items = _applySort(items);
     _chCache = items;
     _chCacheKey = key;
@@ -309,6 +358,140 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     if (focusChannels) _focusFirstChannel();
   }
 
+  // ---------- TV: categorias -> subcategorias -> canais ----------
+
+  /// Agrupamento aberto na coluna de subcategorias (ex.: "CANAIS").
+  CategoryNode? get _tvParentNode {
+    if (_tvParent == null) return null;
+    return findCategoryNode(_mobileTree, _tvParent!);
+  }
+
+  FocusNode _subCategoryNode(String name) => _subCategoryNodes.putIfAbsent(
+    name,
+    () => FocusNode(debugLabel: 'live-sub-$name'),
+  );
+
+  /// Clique/OK numa categoria da TV. Grupos com subcategorias abrem a coluna
+  /// de subcategorias e recolhem a coluna principal; categorias planas
+  /// filtram direto, como antes.
+  void _selectTvCategoryNode(CategoryNode node) {
+    if (node.hasSubs) {
+      _stopPreview();
+      syncAdultAccessWithCategory(node.name);
+      setState(() {
+        _tvParent = node.name;
+        _tvSubsVisible = true;
+        _tvCategoriesCollapsed = true;
+        _tvFocusArea = _TvFocusArea.subcategories;
+        _selectedCategory = null;
+        _selectedIndex = 0;
+        _channelChosen = false;
+        _previewLoading = false;
+        _previewError = false;
+        _epgDayOffset = 0;
+        _epg = const [];
+        _focusedChannelIndex = null;
+      });
+      _focusFirstSubCategory();
+      return;
+    }
+    // Categoria plana: seleciona a única folha e leva o foco aos canais.
+    _tvParent = null;
+    _tvSubsVisible = false;
+    _tvCategoriesCollapsed = false;
+    _selectCategory(node.leaves.first.name, focusChannels: true);
+  }
+
+  /// Clique/OK numa subcategoria: filtra os canais e leva o foco para eles.
+  void _selectSubCategory(String rawName) {
+    _selectCategory(rawName, focusChannels: true);
+    if (mounted) setState(() => _tvFocusArea = _TvFocusArea.channels);
+  }
+
+  /// Recolhe as subcategorias e devolve a coluna de categorias, mantendo o
+  /// agrupamento aberto em foco. Usado pela seta esquerda, pelo trilho
+  /// recolhido e pelo botão Voltar.
+  void _expandCategories() {
+    if (!_tvSubsVisible && !_tvCategoriesCollapsed) return;
+    final parent = _tvParent;
+    setState(() {
+      _tvSubsVisible = false;
+      _tvCategoriesCollapsed = false;
+      _tvParent = null;
+      _tvFocusArea = _TvFocusArea.categories;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focusCategoryByName(parent);
+    });
+  }
+
+  void _focusFirstSubCategory() {
+    // Se já existe uma subcategoria escolhida e a linha dela está montada,
+    // o foco volta para ela em vez de pular para a primeira.
+    final selected = _selectedCategory != null
+        ? _subCategoryNodes[_selectedCategory!]
+        : null;
+    if (selected?.context != null) {
+      selected!.requestFocus();
+      return;
+    }
+    void attempt(int tries) {
+      WidgetsBinding.instance.scheduleFrame();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_firstSubNode.context != null) {
+          _firstSubNode.requestFocus();
+        } else if (tries > 0) {
+          attempt(tries - 1);
+        }
+      });
+    }
+
+    attempt(2);
+  }
+
+  bool _focusCategoryByName(String? name) {
+    final node =
+        (name != null ? _categoryNodes[name] : null) ?? _categoryNodes['TODOS'];
+    if (node?.context != null) {
+      node!.requestFocus();
+      return true;
+    }
+    return false;
+  }
+
+  /// Níveis do botão Voltar na TV. Retorna true quando consumiu o "voltar";
+  /// false deixa o mixin fechar a tela.
+  bool _tvBackLevel() {
+    if (!_isTv) return false;
+    // 1. Prévia aberta: fecha o vídeo, mas mantém o canal selecionado.
+    if (_channelChosen) {
+      _stopPreview();
+      setState(() {
+        _channelChosen = false;
+        _epg = const [];
+      });
+      return true;
+    }
+    // 2. Foco nos canais com subcategorias à vista: volta o foco para elas.
+    if (_tvSubsVisible && _tvFocusArea == _TvFocusArea.channels) {
+      _focusFirstSubCategory();
+      return true;
+    }
+    // 3. Subcategorias (ou coluna recolhida): reabre as categorias.
+    if (_tvSubsVisible || _tvCategoriesCollapsed) {
+      _expandCategories();
+      return true;
+    }
+    // 4. Foco nos canais sem subcategorias: volta para as categorias.
+    if (_tvFocusArea == _TvFocusArea.channels) {
+      return _focusChosenCategory() || _focusCategoryByName('TODOS');
+    }
+    // 5. Nas categorias (ou fora de tudo): deixa o mixin sair da tela.
+    return false;
+  }
+
   // ---------- foco da TV ----------
 
   FocusNode _categoryNode(String name) => _categoryNodes.putIfAbsent(
@@ -339,9 +522,15 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     attempt(2);
   }
 
-  /// Volta o foco da lista de canais para a categoria escolhida.
+  /// Volta o foco da lista de canais para a categoria escolhida. Na TV a
+  /// coluna mostra agrupamentos, então o alvo é o pai da categoria bruta.
   bool _focusChosenCategory() {
-    final node = _categoryNodes[_selectedCategory] ?? _categoryNodes['TODOS'];
+    final name =
+        _tvParent ??
+        (_selectedCategory == null
+            ? 'TODOS'
+            : categoryParent(_selectedCategory!));
+    final node = _categoryNodes[name] ?? _categoryNodes['TODOS'];
     final ctx = node?.context;
     if (node == null || ctx == null || !ctx.mounted) return false;
     node.requestFocus();
@@ -386,10 +575,25 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowLeft) {
+      // Com subcategorias visíveis, a seta esquerda volta para elas.
+      if (_tvSubsVisible) {
+        _focusFirstSubCategory();
+        return KeyEventResult.handled;
+      }
       // Categoria escolhida fora da tela: deixa a travessia normal agir.
       return _focusChosenCategory()
           ? KeyEventResult.handled
           : KeyEventResult.ignored;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// Seta esquerda nas subcategorias reabre a coluna de categorias.
+  KeyEventResult _handleSubCategoryKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _expandCategories();
+      return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
   }
@@ -494,6 +698,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       _cancelSearch();
       return;
     }
+    if (_tvBackLevel()) return;
     if (_mobileBackLevel()) return;
     super.onSystemBack(didPop, result);
   }
@@ -504,6 +709,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       _cancelSearch();
       return;
     }
+    if (_tvBackLevel()) return;
     if (_mobileBackLevel()) return;
     super.handleBackButton();
   }
@@ -514,7 +720,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
   void _focusChannel(int i) {
     final list = _channels();
     if (i < 0 || i >= list.length) return;
-    if (_selectedIndex == i && !_channelChosen) return;
+    // Mesmo canal: não mexe em nada. Sem isso, voltar o foco para o canal
+    // que já está na prévia fechava o vídeo e o 2º clique reabria a prévia
+    // em vez de ir para a tela cheia.
+    if (_selectedIndex == i) return;
     _stopPreview();
     setState(() {
       _selectedIndex = i;
@@ -764,8 +973,15 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(flex: 2, child: _buildCategoryCol()),
-                    const SizedBox(width: 12),
+                    if (_tvSubsVisible) ...[
+                      _buildCollapsedCategoryRail(),
+                      const SizedBox(width: 12),
+                      Expanded(flex: 2, child: _buildSubCategoryCol()),
+                      const SizedBox(width: 12),
+                    ] else ...[
+                      Expanded(flex: 2, child: _buildCategoryCol()),
+                      const SizedBox(width: 12),
+                    ],
                     Expanded(flex: 3, child: _buildChannelCol()),
                     const SizedBox(width: 12),
                     Expanded(flex: 5, child: _buildCenter()),
@@ -883,7 +1099,12 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                   _colorAction(
                     color: AppColors.accentGreen,
                     label: 'Categoria',
-                    onTap: () => _selectCategory('TODOS'),
+                    onTap: () {
+                      _tvParent = null;
+                      _tvSubsVisible = false;
+                      _tvCategoriesCollapsed = false;
+                      _selectCategory('TODOS');
+                    },
                   ),
                   const SizedBox(width: 16),
                   _colorAction(
@@ -1056,9 +1277,10 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     );
   }
 
-  /// Coluna 1: categorias com contagem (foco seleciona e filtra).
+  /// Coluna 1: agrupamentos de categorias. Grupos com subcategorias abrem a
+  /// coluna ao lado e recolhem esta; grupos planos filtram direto.
   Widget _buildCategoryCol() {
-    final cats = _cats;
+    final tree = _mobileTree;
     return Column(
       children: [
         _navHeader(
@@ -1069,34 +1291,146 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         const SizedBox(height: 8),
         Expanded(
           child: ListView.builder(
-            itemCount: cats.length + 1,
+            itemCount: tree.length + 1,
             itemBuilder: (context, i) {
               if (i == 0) {
                 return _categoryRow(
                   name: 'TODOS',
                   count: widget.controller.totalLiveCount,
-                  selected: _selectedCategory == 'TODOS',
+                  selected: _selectedCategory == 'TODOS' && !_tvSubsVisible,
                   autofocus: true,
                   focusNode: _categoryNode('TODOS'),
-                  onFocus: (_) {},
-                  onTap: () =>
-                      _selectCategory('TODOS', focusChannels: true),
+                  onFocus: (_) => _tvFocusArea = _TvFocusArea.categories,
+                  onTap: () {
+                    _tvParent = null;
+                    _tvSubsVisible = false;
+                    _tvCategoriesCollapsed = false;
+                    _selectCategory('TODOS', focusChannels: true);
+                  },
                 );
               }
-              final cat = cats[i - 1];
+              final node = tree[i - 1];
+              final selected =
+                  !_tvSubsVisible &&
+                  ((_tvParent == node.name) ||
+                      (node.isFlat &&
+                          _selectedCategory == node.leaves.first.name));
               return _categoryRow(
-                name: cat.name,
-                count: cat.count,
-                selected: _selectedCategory == cat.name,
-                focusNode: _categoryNode(cat.name),
-                onFocus: (_) {},
-                onTap: () =>
-                    _selectCategory(cat.name, focusChannels: true),
+                name: node.name,
+                count: node.count,
+                selected: selected,
+                hasSubs: node.hasSubs,
+                focusNode: _categoryNode(node.name),
+                onFocus: (_) => _tvFocusArea = _TvFocusArea.categories,
+                onTap: () => _selectTvCategoryNode(node),
               );
             },
           ),
         ),
       ],
+    );
+  }
+
+  /// Coluna de subcategorias do agrupamento aberto. A seta esquerda (ou o
+  /// cabeçalho) reabre as categorias principais.
+  Widget _buildSubCategoryCol() {
+    final node = _tvParentNode;
+    final leaves = node?.leaves ?? const <IptvCategory>[];
+    return Column(
+      key: const Key('live-subcategory-col'),
+      children: [
+        _navHeader(
+          icon: Icons.folder_rounded,
+          title: (node?.name ?? 'SUBCATEGORIAS').toUpperCase(),
+          count: leaves.length,
+          onBack: _expandCategories,
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: leaves.isEmpty
+              ? const Center(
+                  child: Text(
+                    'Nenhuma subcategoria',
+                    style: TextStyle(color: AppColors.textMuted),
+                  ),
+                )
+              : Focus(
+                  canRequestFocus: false,
+                  skipTraversal: true,
+                  onKeyEvent: _handleSubCategoryKey,
+                  child: ListView.builder(
+                    itemCount: leaves.length,
+                    itemBuilder: (context, i) {
+                      final leaf = leaves[i];
+                      return _categoryRow(
+                        name: categorySubLabel(leaf.name),
+                        count: leaf.count,
+                        selected: _selectedCategory == leaf.name,
+                        autofocus: i == 0,
+                        focusNode: i == 0
+                            ? _firstSubNode
+                            : _subCategoryNode(leaf.name),
+                        onFocus: (_) =>
+                            _tvFocusArea = _TvFocusArea.subcategories,
+                        onTap: () => _selectSubCategory(leaf.name),
+                      );
+                    },
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// Trilho estreito exibido quando a coluna de categorias está recolhida.
+  /// Clicar (ou OK) reabre as categorias principais.
+  Widget _buildCollapsedCategoryRail() {
+    return TvFocusable(
+      key: const Key('live-collapsed-category-rail'),
+      focusNode: _expandCategoriesNode,
+      borderRadius: BorderRadius.circular(10),
+      onPressed: _expandCategories,
+      onFocusChange: (focused) {
+        if (focused) _tvFocusArea = _TvFocusArea.categories;
+      },
+      child: Container(
+        width: 52,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.cardBorder),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.primary,
+              size: 24,
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: RotatedBox(
+                quarterTurns: 1,
+                child: Center(
+                  child: Text(
+                    'CATEGORIAS',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.75),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1107,7 +1441,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
       children: [
         _navHeader(
           icon: Icons.grid_view_rounded,
-          title: (_selectedCategory ?? '').toUpperCase(),
+          title: (_selectedCategory ?? _tvParent ?? '').toUpperCase(),
           count: list.length,
         ),
         const SizedBox(height: 8),
@@ -1140,6 +1474,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                         onFocus: (focused) {
                           if (focused) {
                             _focusedChannelIndex = i;
+                            _tvFocusArea = _TvFocusArea.channels;
                             _focusChannel(i);
                           } else if (_focusedChannelIndex == i) {
                             _focusedChannelIndex = null;
@@ -1217,6 +1552,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
     required int count,
     required bool selected,
     bool autofocus = false,
+    bool hasSubs = false,
     FocusNode? focusNode,
     required ValueChanged<bool> onFocus,
     required VoidCallback onTap,
@@ -1230,7 +1566,7 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         onPressed: onTap,
         onFocusChange: onFocus,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
           decoration: BoxDecoration(
             color: selected ? Colors.white : AppColors.surface,
             borderRadius: BorderRadius.circular(10),
@@ -1240,6 +1576,16 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
           ),
           child: Row(
             children: [
+              Icon(
+                hasSubs
+                    ? Icons.folder_rounded
+                    : Icons.play_circle_outline_rounded,
+                color: selected
+                    ? Colors.black54
+                    : (hasSubs ? AppColors.primary : AppColors.accentGreen),
+                size: 18,
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   name,
@@ -1252,6 +1598,13 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                   ),
                 ),
               ),
+              if (hasSubs)
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: selected ? Colors.black54 : Colors.white54,
+                  size: 18,
+                ),
+              const SizedBox(width: 6),
               Text(
                 '$count',
                 style: TextStyle(
@@ -1377,6 +1730,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
         // Preview 16:9 interativo (clicar abre tela cheia)
         TvFocusable(
           borderRadius: BorderRadius.circular(10),
+          onFocusChange: (focused) {
+            if (focused) _tvFocusArea = _TvFocusArea.preview;
+          },
           onPressed: () {
             if (_channelChosen && list.isNotEmpty) {
               _openPlayer(list, index);
@@ -1562,7 +1918,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    _channelChosen ? 'Tela Cheia' : 'Ver prévia',
+                                    _channelChosen
+                                        ? 'Tela Cheia'
+                                        : 'Ver prévia',
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 11,
@@ -1576,7 +1934,6 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                         ),
                       ),
                     ),
-
 
                   // Overlay inferior translúcido com info do programa atual e barra de progresso EPG
                   Positioned(
@@ -2210,7 +2567,9 @@ class _LiveTvGuideState extends State<LiveTvGuide> with BackNavigationMixin {
                               _selectChannel(index);
                             }
                           },
-                          child: Text(_channelChosen ? 'Assistir' : 'Ver prévia'),
+                          child: Text(
+                            _channelChosen ? 'Assistir' : 'Ver prévia',
+                          ),
                         ),
                       ),
                     ],

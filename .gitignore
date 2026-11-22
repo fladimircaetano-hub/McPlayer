@@ -62,3 +62,4 @@ app.*.map.json
 # Backups/exportações locais do dashboard (contêm usuários/senhas de listas)
 /dashboard/backups/
 /devices.json
+/opencode.json

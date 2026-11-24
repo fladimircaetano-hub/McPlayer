@@ -29,6 +29,7 @@
     xtreamServers: [],
     xtreamClients: [],
     xtreamMissing: false,
+    appsViewApp: null,
     deleteTarget: null,
     editDevice: null,
     editPlaylist: null,
@@ -276,15 +277,28 @@
   /* ================================ RENDER ================================ */
 
   function renderAll() {
-    renderCounts();
-    renderFilterOptions();
-    renderOverview();
-    renderPlaylists();
-    renderClients();
-    renderXtream();
-    renderAccess();
-    renderAudit();
-    renderSettings();
+    // Cada bloco é renderizado isoladamente: uma falha em uma tela não pode
+    // derrubar o login nem impedir o acesso ao painel.
+    safeRender(renderCounts, 'counts');
+    safeRender(renderFilterOptions, 'filtros');
+    safeRender(renderOverview, 'visão geral');
+    safeRender(renderPlaylists, 'listas');
+    safeRender(renderClients, 'clientes');
+    safeRender(renderXtream, 'contas Xtream');
+    safeRender(renderAccess, 'acesso');
+    safeRender(renderAudit, 'auditoria');
+    safeRender(renderSettings, 'configuração');
+    if (state.tab === 'apps-dispositivos') safeRender(renderAppsDispositivos, 'apps/dispositivos');
+  }
+
+  function safeRender(fn, label) {
+    try {
+      fn();
+    } catch (err) {
+      if (window.console && console.error) {
+        console.error('[dashboard] falha ao renderizar ' + label + ':', err);
+      }
+    }
   }
 
   function renderCounts() {
@@ -534,7 +548,11 @@
       statCard('Aprovados', approved, 'com acesso liberado', 'ok', 'approved') +
       statCard('Bloqueados', blocked, 'acesso cancelado', blocked ? 'danger' : '', 'blocked');
 
-    document.getElementById('overviewApps').innerHTML = state.apps
+    // Ensure Caetano Player is always included in the overview
+    var allApps = state.apps.filter(function (a) { return a.name !== 'Caetano Player'; });
+    allApps.unshift({ name: 'Caetano Player', active: true, code_pattern: '^[0-9]{6}$', code_hint: '6 dígitos numéricos', normalize_upper: false, sort_order: 100 });
+
+    document.getElementById('overviewApps').innerHTML = allApps
       .map(function (app) {
         var list = state.devices.filter(function (d) { return d.app_name === app.name; });
         var p = list.filter(function (d) { return d.status === 'pending'; }).length;
@@ -553,6 +571,9 @@
           '<div><b>' + b + '</b><span>bloqueados</span></div>' +
           '</div>' +
           '<div class="small muted" style="margin-top:8px;">' + m + ' com MAC · ' + (list.length - m) + ' sem MAC</div>' +
+          '<div style="margin-top:8px;">' +
+          '<button type="button" class="btn-primary btn-sm" data-app-name="' + U.esc(app.name) + '">Ver</button>' +
+          '</div>' +
           '</div>'
         );
       })
@@ -561,18 +582,87 @@
     var recent = state.devices.slice(0, 6);
     document.getElementById('overviewDevices').innerHTML = recent.length
       ? recent.map(miniDevice).join('')
-      : emptyState('Nenhum aparelho', 'Digite o MAC + código em Acesso / Auditoria para abrir ou cadastrar.');
+      : emptyState('Nenhum aparelho', 'Digite o MAC + código em Acesso para abrir ou cadastrar.');
 
-    var audit = state.audit.slice(0, 5);
-    document.getElementById('overviewAudit').innerHTML = audit.length
-      ? audit.map(auditRow).join('')
-      : emptyState('Sem ações registradas', 'As alterações aparecem aqui automaticamente.');
+    var auditEl = document.getElementById('overviewAudit');
+    if (auditEl) {
+      var audit = state.audit.slice(0, 5);
+      auditEl.innerHTML = audit.length
+        ? audit.map(auditRow).join('')
+        : emptyState('Sem ações registradas', 'As alterações aparecem aqui automaticamente.');
+    }
 
     // MACs sem vínculo (rodapé informativo)
     if (withoutMac > 0) {
       document.getElementById('overviewStats').title =
         withoutMac + ' aparelho(s) sem MAC vinculado. O código continua funcionando normalmente.';
     }
+  }
+
+  function renderAppsDispositivos(appName) {
+    var el = document.getElementById('appsDispositivosContent');
+    if (!el) return;
+
+    if (!appName) appName = state.appsViewApp;
+    if (!appName) {
+      var first = (state.apps || [])[0];
+      appName = first ? first.name : 'Caetano Player';
+    }
+    state.appsViewApp = appName;
+
+    var devices = state.devices.filter(function (d) { return d.app_name === appName; });
+
+    var backBtn =
+      '<button type="button" class="btn-outline btn-sm" data-goto="overview">← Voltar</button>';
+    var title =
+      '<div class="card-head" style="padding:0 0 12px;">' +
+      backBtn +
+      '<div><h2>Dispositivos — ' + U.esc(appName) + '</h2>' +
+      '<p>' + devices.length + ' aparelho(s) cadastrado(s) neste app</p></div>' +
+      '</div>';
+
+    if (!devices.length) {
+      el.innerHTML = title + '<p class="small muted">Nenhum aparelho cadastrado para este app.</p>';
+      return;
+    }
+
+    var deviceList = devices.map(function (d) {
+      var playlist = d.playlist_id ? playlistById(d.playlist_id) : null;
+      var listData = deviceLists(d);
+      var expiry = d.expires_at ? V.formatDateBR(d.expires_at) + ' ' + expiryBadge(d.expires_at) : '—';
+      var entry = d.start_date ? V.formatDateBR(d.start_date) : '—';
+      var clientText = d.client_name ? U.esc(d.client_name) : '—';
+      var statusBadge = U.badge(d.status);
+      var listsHtml = listData.length
+        ? '<div class="list-summary"><b>Listas:</b> ' +
+          listData.slice(0, 3).map(function (l) {
+            var isXtream = String(l.type || '').toLowerCase() === 'xtream';
+            var ref = isXtream ? (l.serverUrl || l.server_url || '—') : (l.url || '—');
+            return '<span class="mono">' + (isXtream ? 'Xtream: ' : 'M3U: ') + U.esc(ref) + '</span>';
+          }).join(', ') +
+          (listData.length > 3 ? ' +' + (listData.length - 3) + ' mais' : '') +
+          '</div>'
+        : '';
+
+      return (
+        '<div class="row-card" style="padding:11px 12px;">' +
+        '<div class="device-idline">' +
+        '<span class="tag-mono">' + U.esc(d.device_id) + '</span>' +
+        statusBadge + U.appChip(d.app_name) +
+        (d.mac ? '<span class="device-mac">' + U.esc(d.mac) + '</span>' : '<span class="pill-soft">sem MAC</span>') +
+        '</div>' +
+        '<div class="small muted" style="margin-top:6px;">' +
+        'Cliente: ' + clientText +
+        '<br>Entrada: ' + entry +
+        '</div>' +
+        (playlist ? '<div class="small muted" style="margin-top:4px;">Lista: ' + U.esc(playlist.name) + '</div>' : '') +
+        listsHtml +
+        '<div class="small" style="margin-top:4px; color:var(--text-secondary);">Vence: ' + expiry + '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    el.innerHTML = title + '<div style="margin-top:8px;">' + deviceList + '</div>';
   }
 
   function statCard(label, value, foot, cls, status) {
@@ -1232,8 +1322,9 @@
   }
 
   function renderAudit() {
-    var list = filteredAudit();
     var el = document.getElementById('auditList');
+    if (!el) return; // aba de auditoria não existe mais; resumo fica na visão geral
+    var list = filteredAudit();
     if (!list.length) {
       el.innerHTML = emptyState(
         state.audit.length ? 'Nenhuma ação com esses filtros' : 'Sem ações registradas',
@@ -2195,8 +2286,16 @@
     U.qsa('.nav-btn').forEach(function (btn) {
       btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
     });
-    U.qsa('[data-goto]').forEach(function (btn) {
-      btn.addEventListener('click', function () { switchTab(btn.dataset.goto); });
+    // Delegação: cobre também botões criados dinamicamente (ex.: "Voltar" e "Ver").
+    document.addEventListener('click', function (e) {
+      var ver = e.target.closest('button[data-app-name]');
+      if (ver) {
+        renderAppsDispositivos(ver.dataset.appName);
+        switchTab('apps-dispositivos');
+        return;
+      }
+      var go = e.target.closest('[data-goto]');
+      if (go) switchTab(go.dataset.goto);
     });
     document.getElementById('overviewStats').addEventListener('click', function (e) {
       var card = e.target.closest('button[data-stat-status]');
@@ -2224,22 +2323,34 @@
       renderClients();
     });
 
+    // Auditoria (a aba foi removida; os filtros só existem se o HTML voltar)
     var auQ = document.getElementById('searchAudit');
-    auQ.addEventListener('input', function () {
-      state.filters.audit.q = auQ.value;
-      renderAudit();
-    });
-    document.getElementById('filterAuditApp').addEventListener('change', function () {
-      state.filters.audit.app = this.value;
-      renderAudit();
-    });
-    document.getElementById('filterAuditAction').addEventListener('change', function () {
-      state.filters.audit.action = this.value;
-      renderAudit();
-    });
-    document.getElementById('btnReloadAudit').addEventListener('click', function () {
-      refreshAll(false);
-    });
+    if (auQ) {
+      auQ.addEventListener('input', function () {
+        state.filters.audit.q = auQ.value;
+        renderAudit();
+      });
+    }
+    var auApp = document.getElementById('filterAuditApp');
+    if (auApp) {
+      auApp.addEventListener('change', function () {
+        state.filters.audit.app = this.value;
+        renderAudit();
+      });
+    }
+    var auAction = document.getElementById('filterAuditAction');
+    if (auAction) {
+      auAction.addEventListener('change', function () {
+        state.filters.audit.action = this.value;
+        renderAudit();
+      });
+    }
+    var auReload = document.getElementById('btnReloadAudit');
+    if (auReload) {
+      auReload.addEventListener('click', function () {
+        refreshAll(false);
+      });
+    }
 
     // Acesso por MAC + código
     document.getElementById('accessForm').addEventListener('submit', onAccessSubmit);
@@ -2401,9 +2512,11 @@
     U.qsa('.tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.id === 'tab-' + tab);
     });
-    if (tab === 'audit') {
+    if (tab === 'access') {
       renderAccess();
-      renderAudit();
+    }
+    if (tab === 'apps-dispositivos') {
+      renderAppsDispositivos();
     }
   }
 

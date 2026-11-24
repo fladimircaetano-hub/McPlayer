@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="referrer" content="no-referrer">
-<title>McPlayer / NexPlay — Painel Administrativo</title>
+<title>McPlayer / NexPlay / Caetano Player — Painel Administrativo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -18,7 +18,7 @@
     <div class="auth-brand">
       <div class="logo-badge">M</div>
       <div>
-        <h1>McPlayer / NexPlay</h1>
+        <h1>McPlayer / NexPlay / Caetano Player</h1>
         <p>Painel administrativo</p>
       </div>
     </div>
@@ -92,7 +92,7 @@
     <div class="brand">
       <div class="logo-badge">M</div>
       <div>
-        <h1>McPlayer / NexPlay</h1>
+        <h1>McPlayer / NexPlay / Caetano Player</h1>
         <p>Painel de gestão — código + MAC</p>
       </div>
     </div>
@@ -109,7 +109,8 @@
     <button type="button" class="nav-btn" data-tab="converter">🔄 Conversor M3U</button>
     <button type="button" class="nav-btn" data-tab="clients">👥 Clientes <span class="count-tag" id="countClients">0</span></button>
     <button type="button" class="nav-btn" data-tab="xtream">🔑 Contas Xtream <span class="count-tag" id="countXtream">0</span></button>
-    <button type="button" class="nav-btn" data-tab="audit">🔓 Acesso / Auditoria</button>
+    <button type="button" class="nav-btn" data-tab="access">🔓 Acesso</button>
+    <button type="button" class="nav-btn" data-tab="apps-dispositivos">📱 Apps Dispositivos</button>
     <button type="button" class="nav-btn" data-tab="settings">⚙️ Configuração</button>
   </nav>
 
@@ -127,16 +128,31 @@
         <div class="card">
           <div class="card-head">
             <div><h2>Últimos aparelhos</h2><p>Mais recentes em todos os apps</p></div>
-            <button type="button" class="btn-outline btn-sm" data-goto="audit">Abrir aparelho</button>
+            <button type="button" class="btn-outline btn-sm" data-goto="access">Abrir aparelho</button>
           </div>
           <div id="overviewDevices" class="card-list"></div>
         </div>
         <div class="card">
           <div class="card-head">
             <div><h2>Auditoria recente</h2><p>Quem fez, quando e o que mudou</p></div>
-            <button type="button" class="btn-outline btn-sm" data-goto="audit">Ver tudo</button>
+            <button type="button" class="btn-outline btn-sm" data-goto="access">Ver tudo</button>
           </div>
           <div id="overviewAudit"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- --------------------------- APPS DISPOSITIVOS ---------------------------- -->
+    <section id="tab-apps-dispositivos" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Dispositivos por App</h2>
+            <p>Seleção de aparelhos por aplicativo</p>
+          </div>
+        </div>
+        <div id="appsDispositivosContent">
+          <!-- Conteúdo será gerado pelo JavaScript -->
         </div>
       </div>
     </section>
@@ -203,8 +219,8 @@
       </div>
     </section>
 
-    <!-- ----------------------------- AUDIT / ACESSO ---------------------- -->
-    <section id="tab-audit" class="tab-panel">
+    <!-- --------------------------- ACESSO ---------------------- -->
+    <section id="tab-access" class="tab-panel">
       <div class="card access-card">
         <div class="card-head">
           <div>
@@ -227,7 +243,7 @@
           <div class="field">
             <label for="accessApp">App</label>
             <select id="accessApp" aria-label="Filtrar o acesso por app"></select>
-            <small>Deixe em “Todos os apps” para procurar nos dois.</small>
+            <small>Deixe em "Todos os apps" para procurar nos dois.</small>
           </div>
           <div class="access-submit">
             <button type="submit" class="btn-primary" id="btnAccessDevice">🔓 Abrir aparelho</button>
@@ -237,32 +253,6 @@
       </div>
 
       <div id="accessResult"></div>
-
-      <details class="card audit-history">
-        <summary>🧾 Histórico de ações (auditoria)</summary>
-        <div class="toolbar">
-          <div class="grow">
-            <input type="search" id="searchAudit" placeholder="🔍 Buscar por código, MAC ou e-mail..." autocomplete="off">
-          </div>
-          <select id="filterAuditApp" aria-label="Filtrar por app"></select>
-          <select id="filterAuditAction" aria-label="Filtrar por ação">
-            <option value="all">Todas as ações</option>
-            <option value="insert">Inserir</option>
-            <option value="update">Editar</option>
-            <option value="delete">Excluir</option>
-            <option value="approve">Aprovar</option>
-            <option value="block">Bloquear</option>
-            <option value="unblock">Liberar</option>
-            <option value="link_mac">Vincular MAC</option>
-            <option value="unlink_mac">Desvincular MAC</option>
-            <option value="change_mac">Editar MAC</option>
-            <option value="change_code">Editar código</option>
-            <option value="list_change">Trocar lista</option>
-          </select>
-          <button type="button" class="btn-outline" id="btnReloadAudit">↻ Atualizar</button>
-        </div>
-        <div id="auditList" class="audit-list"></div>
-      </details>
     </section>
 
     <!-- --------------------------- CONVERSOR M3U ------------------------ -->
@@ -397,9 +387,9 @@
         <div class="card-head">
           <div>
             <h2>Exclusão de aparelhos</h2>
-            <p>Abra o aparelho por <b>MAC + código</b> na aba <b>Acesso / Auditoria</b> e use "Excluir". Listas e clientes são preservados.</p>
+            <p>Abra o aparelho por <b>MAC + código</b> na aba <b>Acesso</b> e use "Excluir". Listas e clientes são preservados.</p>
           </div>
-          <button type="button" class="btn-outline btn-sm" data-goto="audit">Ir para Acesso</button>
+          <button type="button" class="btn-outline btn-sm" data-goto="access">Ir para Acesso</button>
         </div>
         <p class="secondary small" style="margin-bottom:10px;">
           Cada aparelho é excluído individualmente, com o código digitado de novo para confirmar.
@@ -773,11 +763,11 @@ dashboard/sql/004_rollback.sql     -> volta atrás (somente antes do 002)</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="js/config.js?v=20261103g"></script>
-<script src="js/validation.js?v=20261103g"></script>
-<script src="js/ui.js?v=20261103g"></script>
-<script src="js/api.js?v=20261108a"></script>
-<script src="js/app.js?v=20261108a"></script>
-<script src="js/converter.js?v=20261108a"></script>
+<script src="js/config.js?v=20261124b"></script>
+<script src="js/validation.js?v=20261124b"></script>
+<script src="js/ui.js?v=20261124b"></script>
+<script src="js/api.js?v=20261124b"></script>
+<script src="js/app.js?v=20261124b"></script>
+<script src="js/converter.js?v=20261124b"></script>
 </body>
 </html>

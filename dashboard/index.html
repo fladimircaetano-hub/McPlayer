@@ -344,6 +344,12 @@
         <div class="server-form">
           <input id="srvName" placeholder="Nome (ex.: Servidor 3)" autocomplete="off">
           <input id="srvUrl" placeholder="http://servidor.com:8080" autocomplete="off" spellcheck="false">
+          <select id="srvApp" title="App que usa este servidor">
+            <option value="McPlayer" selected>McPlayer</option>
+            <option value="NexPlay">NexPlay</option>
+            <option value="CaetanoPlayer">CaetanoPlayer</option>
+          </select>
+          <input id="srvOrder" type="number" min="0" step="10" value="100" title="Ordem de teste (menor = testado antes)" placeholder="Ordem">
           <button type="button" class="btn-primary" id="btnAddServer">+ Adicionar</button>
         </div>
         <div class="table-wrap">
@@ -352,6 +358,8 @@
               <tr>
                 <th>Nome</th>
                 <th>Endereço</th>
+                <th>App</th>
+                <th>Ordem</th>
                 <th>Ativo</th>
                 <th>Ações</th>
               </tr>
@@ -763,11 +771,11 @@ dashboard/sql/004_rollback.sql     -> volta atrás (somente antes do 002)</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="js/config.js?v=20261124b"></script>
-<script src="js/validation.js?v=20261124b"></script>
-<script src="js/ui.js?v=20261124b"></script>
-<script src="js/api.js?v=20261124b"></script>
-<script src="js/app.js?v=20261124b"></script>
-<script src="js/converter.js?v=20261124b"></script>
+<script src="js/config.js?v=20261124c"></script>
+<script src="js/validation.js?v=20261124c"></script>
+<script src="js/ui.js?v=20261124c"></script>
+<script src="js/api.js?v=20261124c"></script>
+<script src="js/app.js?v=20261124c"></script>
+<script src="js/converter.js?v=20261124c"></script>
 </body>
 </html>

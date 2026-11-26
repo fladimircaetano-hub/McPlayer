@@ -270,6 +270,9 @@ input::placeholder, textarea::placeholder { color: #55637a; }
 /* ------------------------- servidores Xtream ---------------------------- */
 .server-form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .server-form input { flex: 1 1 200px; min-width: 160px; }
+.server-form select { flex: 0 1 130px; min-width: 110px; }
+.server-form input[type="number"] { flex: 0 1 110px; min-width: 90px; }
+.server-order { width: 80px; padding: 6px 8px; }
 
 /* ------------------------------ buttons --------------------------------- */
 .btn-primary, .btn-outline, .btn-danger, .btn-success, .btn-ghost, .btn-wa {

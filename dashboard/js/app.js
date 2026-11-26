@@ -548,9 +548,22 @@
       statCard('Aprovados', approved, 'com acesso liberado', 'ok', 'approved') +
       statCard('Bloqueados', blocked, 'acesso cancelado', blocked ? 'danger' : '', 'blocked');
 
-    // Ensure Caetano Player is always included in the overview
-    var allApps = state.apps.filter(function (a) { return a.name !== 'Caetano Player'; });
-    allApps.unshift({ name: 'Caetano Player', active: true, code_pattern: '^[0-9]{6}$', code_hint: '6 dígitos numéricos', normalize_upper: false, sort_order: 100 });
+    // Só cria o card "Caetano Player" se o app não existir no banco.
+    // A comparação ignora espaços/maiúsculas para não duplicar "CaetanoPlayer".
+    var allApps = state.apps.slice();
+    var temCaetano = allApps.some(function (a) {
+      return String(a.name || '').toLowerCase().replace(/\s+/g, '') === 'caetanoplayer';
+    });
+    if (!temCaetano) {
+      allApps.unshift({
+        name: 'Caetano Player',
+        active: true,
+        code_pattern: '^[0-9]{6}$',
+        code_hint: '6 dígitos numéricos',
+        normalize_upper: false,
+        sort_order: 100
+      });
+    }
 
     document.getElementById('overviewApps').innerHTML = allApps
       .map(function (app) {
@@ -1142,6 +1155,18 @@
     var clients = state.xtreamClients || [];
     var servers = state.xtreamServers || [];
 
+    // Mantém o seletor de app do formulário alinhado com os apps do painel.
+    var srvAppSel = document.getElementById('srvApp');
+    if (srvAppSel && Array.isArray(state.apps) && state.apps.length) {
+      var currentApp = srvAppSel.value;
+      srvAppSel.innerHTML = state.apps
+        .map(function (a) {
+          return '<option value="' + U.esc(a.name) + '">' + U.esc(a.name) + '</option>';
+        })
+        .join('');
+      if (currentApp) srvAppSel.value = currentApp;
+    }
+
     var deviceCount = 0;
     clients.forEach(function (c) {
       if (Array.isArray(c.xtream_devices) && c.xtream_devices.length) {
@@ -1180,19 +1205,23 @@
         : '<tr><td colspan="6" class="muted">Nenhuma conta entrou ainda.</td></tr>';
 
     document.getElementById('serversTableBody').innerHTML = missing
-      ? '<tr><td colspan="4" class="muted">Rode o dashboard/sql/006_xtream_accounts.sql no Supabase para ativar.</td></tr>'
+      ? '<tr><td colspan="6" class="muted">Rode o dashboard/sql/006_xtream_accounts.sql no Supabase para ativar.</td></tr>'
       : servers.length
         ? servers.map(function (s) {
             return '<tr>' +
               '<td><b>' + U.esc(s.name) + '</b></td>' +
               '<td class="mono small">' + U.esc(s.url) + '</td>' +
+              '<td>' + U.esc(s.app_name || 'McPlayer') + '</td>' +
+              '<td><input type="number" class="server-order" min="0" step="10" value="' +
+                U.esc(String(s.sort_order == null ? 100 : s.sort_order)) +
+                '" data-server-order="' + U.esc(s.id) + '"></td>' +
               '<td>' + (s.active ? 'Sim' : 'Não') + '</td>' +
               '<td><button type="button" class="btn-outline btn-xs" data-server-toggle="' + U.esc(s.id) + '">' +
                 (s.active ? 'Desativar' : 'Ativar') + '</button> ' +
               '<button type="button" class="btn-danger btn-xs" data-server-delete="' + U.esc(s.id) + '">Excluir</button></td>' +
               '</tr>';
           }).join('')
-        : '<tr><td colspan="4" class="muted">Nenhum servidor cadastrado.</td></tr>';
+        : '<tr><td colspan="6" class="muted">Nenhum servidor cadastrado.</td></tr>';
   }
 
   function renderAccess() {
@@ -2171,22 +2200,57 @@
     if (xtreamSqlMissing()) return;
     var name = document.getElementById('srvName').value.trim();
     var url = document.getElementById('srvUrl').value.trim();
+    var app = (document.getElementById('srvApp').value || 'McPlayer').trim();
+    var orderRaw = document.getElementById('srvOrder').value.trim();
+    var order = orderRaw === '' ? 100 : Number(orderRaw);
     if (!name) return U.toast('Informe o nome do servidor.', 'err');
     if (!/^https?:\/\//i.test(url)) {
       return U.toast('Endereço inválido. Use http:// ou https://.', 'err');
     }
+    if (!isFinite(order) || order < 0) {
+      return U.toast('Ordem inválida. Use um número a partir de 0.', 'err');
+    }
 
     try {
       await Api.saveXtreamServer({
-        app_name: 'McPlayer',
+        app_name: app,
         name: name,
         url: url,
-        sort_order: 100,
+        sort_order: Math.round(order),
         active: true
       });
       document.getElementById('srvName').value = '';
       document.getElementById('srvUrl').value = '';
+      document.getElementById('srvOrder').value = '100';
       U.toast('Servidor adicionado.', 'ok');
+      await refreshAll(true);
+    } catch (err) {
+      U.toast(U.errorMessage(err), 'err', 9000);
+    }
+  }
+
+  async function updateXtreamOrder(id, value) {
+    if (xtreamSqlMissing()) return;
+    var server = (state.xtreamServers || []).find(function (s) {
+      return String(s.id) === String(id);
+    });
+    if (!server) return;
+
+    var order = Number(value);
+    if (!isFinite(order) || order < 0) {
+      return U.toast('Ordem inválida. Use um número a partir de 0.', 'err');
+    }
+
+    try {
+      await Api.saveXtreamServer({
+        id: server.id,
+        app_name: server.app_name,
+        name: server.name,
+        url: server.url,
+        sort_order: Math.round(order),
+        active: server.active
+      });
+      U.toast('Ordem atualizada.', 'ok');
       await refreshAll(true);
     } catch (err) {
       U.toast(U.errorMessage(err), 'err', 9000);
@@ -2487,6 +2551,10 @@
         }
         var del = e.target.closest('[data-server-delete]');
         if (del) deleteXtreamServer(del.dataset.serverDelete);
+      });
+      serversBody.addEventListener('change', function (e) {
+        var inp = e.target.closest('[data-server-order]');
+        if (inp) updateXtreamOrder(inp.dataset.serverOrder, inp.value);
       });
     }
 

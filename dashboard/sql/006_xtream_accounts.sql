@@ -111,10 +111,10 @@ revoke all on function public.xtream_login_register(text,text,text,text,text,tex
 grant execute on function public.xtream_login_register(text,text,text,text,text,text,timestamptz) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
--- Servidores iniciais (edite/adicionar pelo painel depois)
+-- Servidor inicial (edite/adicionar pelo painel depois)
+-- O TV Sirius foi removido pela migração 009_servidores_cinemax.sql.
 -- ---------------------------------------------------------------------------
 insert into public.xtream_servers (app_name, name, url, sort_order)
 values
-  ('McPlayer', 'Cmax Vision', 'http://cmaxvision.xyz', 10),
-  ('McPlayer', 'TV Sirius', 'http://tvsirius.xyz', 20)
+  ('McPlayer', 'Cmax Vision', 'http://cmaxvision.xyz', 10)
 on conflict (app_name, url) do nothing;

@@ -18,7 +18,10 @@ class XtreamServerInfo {
 class XtreamServerDirectory {
   static const List<XtreamServerInfo> fallback = [
     XtreamServerInfo(name: 'Cmax Vision', url: 'http://cmaxvision.xyz'),
-    XtreamServerInfo(name: 'TV Sirius', url: 'http://tvsirius.xyz'),
+    XtreamServerInfo(name: 'Cinemax Hub', url: 'http://cinemaxhub.xyz'),
+    XtreamServerInfo(name: 'CinePlus Max', url: 'http://cineplusmax.xyz'),
+    XtreamServerInfo(name: 'Cinemax Ultra', url: 'http://cinemaxultra.xyz'),
+    XtreamServerInfo(name: 'CineFlow Max', url: 'http://cineflowmax.xyz'),
   ];
 
   Future<List<XtreamServerInfo>> load() async {

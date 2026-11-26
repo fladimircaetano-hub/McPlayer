@@ -39,11 +39,13 @@ if (-not $supabaseUrl -or -not $supabaseKey) {
 }
 
 # ---------- 2. Versão do pubspec ----------
+$appSlug = ($AppName -replace '[^A-Za-z0-9]', '').ToLowerInvariant()
+if (-not $appSlug) { $appSlug = 'app' }
 $pubspec = Get-Content (Join-Path $root 'pubspec.yaml') -Raw
 $fullVersion = [regex]::Match($pubspec, '(?m)^version:\s*(\S+)').Groups[1].Value
 $versionName = ($fullVersion -split '\+')[0]
 if (-not $ReleaseTag) { $ReleaseTag = ($fullVersion -split '\+')[1] }
-if (-not $OutDir) { $OutDir = Join-Path $root ("dist\{0}_v{1}+{2}" -f (Get-Date -Format 'yyyy-MM-dd'), $versionName, $ReleaseTag) }
+if (-not $OutDir) { $OutDir = Join-Path $root ("dist\{0}_{1}_v{2}+{3}" -f (Get-Date -Format 'yyyy-MM-dd'), $appSlug, $versionName, $ReleaseTag) }
 
 Write-Host "Versao : $fullVersion (tag $ReleaseTag)" -ForegroundColor Cyan
 Write-Host "App    : $AppName" -ForegroundColor Cyan
@@ -198,7 +200,7 @@ foreach ($t in $targets) {
     $hash = (Get-FileHash $src -Algorithm SHA256).Hash
     $size = (Get-Item $src).Length
 
-    $destName = "mcplayer_v{0}_{1}_{2}.apk" -f $versionName, $ReleaseTag, $t.Label
+    $destName = "{0}_v{1}_{2}_{3}.apk" -f $appSlug, $versionName, $ReleaseTag, $t.Label
     $dest = Join-Path $OutDir $destName
     Copy-Item $src $dest -Force
 

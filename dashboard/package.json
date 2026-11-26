@@ -1,0 +1,13 @@
+{
+  "name": "mcplayer-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard administrativo McPlayer / NexPlay / Caetano Player",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'No build step needed - static HTML'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "github.com/fladimircaetano-hub/McPlayer"
+  }
+}

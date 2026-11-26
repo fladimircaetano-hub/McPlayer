@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20261108a">
+<link rel="stylesheet" href="styles.css?v=20261126b">
 </head>
 <body>
 
@@ -189,10 +189,10 @@
             <h2>Contas Xtream</h2>
             <p>Clientes que entraram no app só com usuário e senha. A senha não é armazenada aqui.</p>
           </div>
-          <div class="head-pills">
-            <span class="pill-soft"><span id="countXtreamDevices">0</span> aparelho(s)</span>
-            <span class="pill-soft">registro automático</span>
-          </div>
+        </div>
+        <div class="head-pills">
+          <span class="pill-soft"><span id="countXtreamDevices">0</span> aparelho(s)</span>
+          <span class="pill-soft">registro automático</span>
         </div>
         <div class="table-wrap">
           <table>
@@ -268,7 +268,7 @@
 
         <div class="field">
           <label for="m3uUrl">URL da Lista M3U</label>
-          <textarea id="m3uUrl" rows="3" spellcheck="false" autocomplete="off" placeholder="http://servidor.com:8080/get.php?username=usuario123&amp;password=senha123&amp;type=m3u_plus&amp;output=ts"></textarea>
+          <textarea id="m3uUrl" rows="3" spellcheck="false" autocomplete="off" placeholder="http://servidor.com:8080/get.php?username=usuario123&password=senha123&type=m3u_plus&output=ts"></textarea>
           <small>Cole aqui o link M3U completo para extrair o servidor, usuário e senha.</small>
         </div>
 
@@ -373,22 +373,22 @@
         <div class="card">
           <div class="card-head">
             <div><h2>Administradores</h2><p>Quem pode acessar este painel</p></div>
+            <div id="adminsList" class="card-list"></div>
           </div>
-          <div id="adminsList" class="card-list"></div>
+
+          <div class="card">
+            <div class="card-head">
+              <div><h2>Backup / export</h2><p>Baixe um JSON com todos os dados atuais</p></div>
+              <button type="button" class="btn-success btn-sm" id="btnExport">⬇ Baixar backup</button>
+            </div>
+            <div id="backupInfo" class="secondary small"></div>
+          </div>
         </div>
 
         <div class="card">
-          <div class="card-head">
-            <div><h2>Backup / export</h2><p>Baixe um JSON com todos os dados atuais</p></div>
-            <button type="button" class="btn-success btn-sm" id="btnExport">⬇ Baixar backup</button>
-          </div>
-          <div id="backupInfo" class="secondary small"></div>
+          <div class="card-head"><div><h2>Conexão e segurança</h2></div></div>
+          <dl id="configInfo" class="kv"></dl>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><div><h2>Conexão e segurança</h2></div></div>
-        <dl id="configInfo" class="kv"></dl>
       </div>
 
       <div class="card danger-zone">
@@ -771,11 +771,11 @@ dashboard/sql/004_rollback.sql     -> volta atrás (somente antes do 002)</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-<script src="js/config.js?v=20261124c"></script>
-<script src="js/validation.js?v=20261124c"></script>
-<script src="js/ui.js?v=20261124c"></script>
-<script src="js/api.js?v=20261124c"></script>
-<script src="js/app.js?v=20261124c"></script>
-<script src="js/converter.js?v=20261124c"></script>
+<script src="js/config.js?v=20261126b"></script>
+<script src="js/validation.js?v=20261126b"></script>
+<script src="js/ui.js?v=20261126b"></script>
+<script src="js/api.js?v=20261126b"></script>
+<script src="js/app.js?v=20261126b"></script>
+<script src="js/converter.js?v=20261126b"></script>
 </body>
 </html>
